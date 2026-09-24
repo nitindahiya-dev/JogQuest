@@ -68,8 +68,10 @@ yarn-error.log
 
 # Yarn
 .yarn/*
-!.yarn/patches
+!.yarn/patchesp
 !.yarn/plugins
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+.env
