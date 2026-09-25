@@ -1,4 +1,4 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   PermissionsAndroid,
   Platform,
@@ -14,38 +14,54 @@ import MapView, {
   Polyline,
 } from 'react-native-maps';
 
-import {useNavigation} from '@react-navigation/native';
-import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import type {RootStackParamList} from '../../navigation/types';
+import type { RootStackParamList } from '../../navigation/types';
+
 import {
   calculateDistance,
   Coordinate,
   formatTime,
 } from '../../utils/geo';
 
-type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
+type NavigationProp =
+  NativeStackNavigationProp<RootStackParamList>;
 
 type ActivityType = 'Run' | 'Walk' | 'Cycle';
 
 const ActivityScreen = () => {
   const navigation = useNavigation<NavigationProp>();
+
   const mapRef = useRef<MapView>(null);
 
   const [activityType, setActivityType] =
     useState<ActivityType>('Run');
 
-  const [isTracking, setIsTracking] = useState(false);
+  const [isTracking, setIsTracking] =
+    useState(false);
 
-  const [route, setRoute] = useState<Coordinate[]>([]);
+  const [isPaused, setIsPaused] =
+    useState(false);
 
-  const [distance, setDistance] = useState(0);
+  const [route, setRoute] =
+    useState<Coordinate[]>([]);
 
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [distance, setDistance] =
+    useState(0);
 
-  const startTimeRef = useRef<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] =
+    useState(0);
 
-  const lastLocationRef = useRef<Coordinate | null>(null);
+  const startTimeRef =
+    useRef<number | null>(null);
+
+  const lastLocationRef =
+    useRef<Coordinate | null>(null);
+
+  // --------------------------------------------------
+  // LOCATION PERMISSION
+  // --------------------------------------------------
 
   useEffect(() => {
     const requestLocationPermission = async () => {
@@ -61,26 +77,36 @@ const ActivityScreen = () => {
     requestLocationPermission();
   }, []);
 
+  // --------------------------------------------------
+  // TIMER
+  // --------------------------------------------------
+
   useEffect(() => {
-    if (!isTracking) {
+    if (!isTracking || isPaused) {
       return;
     }
 
     const timer = setInterval(() => {
-      if (startTimeRef.current) {
-        const elapsed = Math.floor(
-          (Date.now() - startTimeRef.current) / 1000,
-        );
-
-        setElapsedSeconds(elapsed);
+      if (!startTimeRef.current) {
+        return;
       }
+
+      const elapsed = Math.floor(
+        (Date.now() - startTimeRef.current) / 1000,
+      );
+
+      setElapsedSeconds(elapsed);
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isTracking]);
+  }, [isTracking, isPaused]);
+
+  // --------------------------------------------------
+  // GPS LOCATION
+  // --------------------------------------------------
 
   const handleLocationChange = (event: any) => {
-    if (!isTracking) {
+    if (!isTracking || isPaused) {
       return;
     }
 
@@ -91,55 +117,151 @@ const ActivityScreen = () => {
       return;
     }
 
-    const lastLocation = lastLocationRef.current;
+    // Ignore poor GPS readings when accuracy is available.
+    if (
+      typeof coordinate.accuracy === 'number' &&
+      coordinate.accuracy > 50
+    ) {
+      return;
+    }
 
-    if (lastLocation) {
-      const segmentDistance = calculateDistance(
+    const lastLocation =
+      lastLocationRef.current;
+
+    // First GPS point.
+    if (!lastLocation) {
+      lastLocationRef.current = coordinate;
+
+      setRoute([coordinate]);
+
+      return;
+    }
+
+    const segmentDistance =
+      calculateDistance(
         lastLocation,
         coordinate,
       );
 
-      // Ignore extremely small/noisy GPS jumps.
-      if (segmentDistance < 0.003) {
-        return;
-      }
-
-      setDistance(current => current + segmentDistance);
+    // Ignore GPS noise smaller than 3 meters.
+    if (segmentDistance < 0.003) {
+      return;
     }
 
-    lastLocationRef.current = coordinate;
+    // Ignore impossible GPS jumps larger than 500 meters
+    // between two updates.
+    if (segmentDistance > 0.5) {
+      return;
+    }
 
-    setRoute(current => [...current, coordinate]);
+    setDistance(current =>
+      current + segmentDistance,
+    );
+
+    setRoute(current => [
+      ...current,
+      coordinate,
+    ]);
+
+    lastLocationRef.current =
+      coordinate;
   };
+
+  // --------------------------------------------------
+  // START
+  // --------------------------------------------------
 
   const startActivity = () => {
     setRoute([]);
     setDistance(0);
     setElapsedSeconds(0);
+    setIsPaused(false);
 
     lastLocationRef.current = null;
 
-    startTimeRef.current = Date.now();
+    startTimeRef.current =
+      Date.now();
 
     setIsTracking(true);
   };
 
-  const stopActivity = () => {
-    setIsTracking(false);
+  // --------------------------------------------------
+  // PAUSE
+  // --------------------------------------------------
 
-    const finalTime = startTimeRef.current
-      ? Math.floor(
-          (Date.now() - startTimeRef.current) / 1000,
+  const pauseActivity = () => {
+    setIsPaused(true);
+
+    // Important:
+    // clear the last GPS point so that
+    // distance is not calculated across
+    // the paused period.
+    lastLocationRef.current = null;
+  };
+
+  // --------------------------------------------------
+  // RESUME
+  // --------------------------------------------------
+
+  const resumeActivity = () => {
+    setIsPaused(false);
+
+    // Get a fresh GPS point after resuming.
+    lastLocationRef.current = null;
+  };
+
+  // --------------------------------------------------
+  // FINISH
+  // --------------------------------------------------
+
+  const stopActivity = () => {
+    const finalTime =
+      startTimeRef.current
+        ? Math.floor(
+          (Date.now() -
+            startTimeRef.current) /
+          1000,
         )
-      : 0;
+        : 0;
 
     setElapsedSeconds(finalTime);
 
-    startTimeRef.current = null;
+    setIsTracking(false);
+    setIsPaused(false);
 
+    startTimeRef.current = null;
     lastLocationRef.current = null;
 
-    navigation.navigate('ActivityResult');
+    navigation.navigate('ActivityResult', {
+      activityType,
+      distance,
+      elapsedSeconds: finalTime,
+      pace: calculatePace(),
+      route,
+    });
+  };
+
+  // --------------------------------------------------
+  // PACE
+  // --------------------------------------------------
+
+  const calculatePace = () => {
+    if (distance <= 0.01) {
+      return '--';
+    }
+
+    const secondsPerKm =
+      elapsedSeconds / distance;
+
+    const minutes =
+      Math.floor(secondsPerKm / 60);
+
+    const seconds =
+      Math.floor(secondsPerKm % 60);
+
+    return `${minutes}:${String(
+      seconds,
+    ).padStart(2, '0')}`;
   };
 
   return (
@@ -151,8 +273,12 @@ const ActivityScreen = () => {
           style={styles.map}
           showsUserLocation
           showsMyLocationButton
-          followsUserLocation
-          onUserLocationChange={handleLocationChange}
+          userLocationPriority="high"
+          userLocationUpdateInterval={3000}
+          userLocationFastestInterval={2000}
+          onUserLocationChange={
+            handleLocationChange
+          }
           initialRegion={{
             latitude: 28.6139,
             longitude: 77.209,
@@ -167,12 +293,23 @@ const ActivityScreen = () => {
           )}
         </MapView>
 
-        <View style={styles.overlay}>
-          <Text style={styles.activityTitle}>
-            {isTracking
-              ? `${activityType} in progress`
-              : 'Start Activity'}
-          </Text>
+        <View
+          style={styles.overlay}
+          pointerEvents="box-none">
+
+          {/* TOP STATUS */}
+
+          <View style={styles.statusBadge}>
+            <Text style={styles.statusText}>
+              {isTracking
+                ? isPaused
+                  ? 'PAUSED'
+                  : `${activityType.toUpperCase()} IN PROGRESS`
+                : 'START ACTIVITY'}
+            </Text>
+          </View>
+
+          {/* STATS */}
 
           <View style={styles.statsCard}>
             <View style={styles.stat}>
@@ -180,17 +317,35 @@ const ActivityScreen = () => {
                 {distance.toFixed(2)}
               </Text>
 
-              <Text style={styles.statLabel}>KM</Text>
+              <Text style={styles.statLabel}>
+                KM
+              </Text>
             </View>
 
             <View style={styles.divider} />
 
             <View style={styles.stat}>
               <Text style={styles.statValue}>
-                {formatTime(elapsedSeconds)}
+                {formatTime(
+                  elapsedSeconds,
+                )}
               </Text>
 
-              <Text style={styles.statLabel}>TIME</Text>
+              <Text style={styles.statLabel}>
+                TIME
+              </Text>
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.stat}>
+              <Text style={styles.statValue}>
+                {calculatePace()}
+              </Text>
+
+              <Text style={styles.statLabel}>
+                PACE / KM
+              </Text>
             </View>
 
             <View style={styles.divider} />
@@ -200,50 +355,103 @@ const ActivityScreen = () => {
                 {route.length}
               </Text>
 
-              <Text style={styles.statLabel}>GPS POINTS</Text>
+              <Text style={styles.statLabel}>
+                GPS
+              </Text>
             </View>
           </View>
 
+          {/* ACTIVITY TYPE */}
+
           {!isTracking && (
-            <View style={styles.typeContainer}>
-              {(['Run', 'Walk', 'Cycle'] as ActivityType[]).map(
-                type => (
-                  <TouchableOpacity
-                    key={type}
+            <View
+              style={styles.typeContainer}>
+
+              {(
+                ['Run', 'Walk', 'Cycle'] as ActivityType[]
+              ).map(type => (
+                <TouchableOpacity
+                  key={type}
+                  style={[
+                    styles.typeButton,
+                    activityType === type &&
+                    styles.typeButtonActive,
+                  ]}
+                  onPress={() =>
+                    setActivityType(type)
+                  }>
+                  <Text
                     style={[
-                      styles.typeButton,
+                      styles.typeText,
                       activityType === type &&
-                        styles.typeButtonActive,
-                    ]}
-                    onPress={() => setActivityType(type)}>
-                    <Text
-                      style={[
-                        styles.typeText,
-                        activityType === type &&
-                          styles.typeTextActive,
-                      ]}>
-                      {type}
-                    </Text>
-                  </TouchableOpacity>
-                ),
-              )}
+                      styles.typeTextActive,
+                    ]}>
+                    {type}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           )}
 
-          <TouchableOpacity
-            style={[
-              styles.startButton,
-              isTracking && styles.stopButton,
-            ]}
-            onPress={
-              isTracking ? stopActivity : startActivity
-            }>
-            <Text style={styles.startButtonText}>
-              {isTracking
-                ? 'FINISH ACTIVITY'
-                : `START ${activityType.toUpperCase()}`}
-            </Text>
-          </TouchableOpacity>
+          {/* CONTROLS */}
+
+          <View style={styles.controls}>
+            {!isTracking && (
+              <TouchableOpacity
+                style={styles.startButton}
+                onPress={startActivity}>
+                <Text
+                  style={styles.buttonText}>
+                  START{' '}
+                  {activityType.toUpperCase()}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {isTracking && !isPaused && (
+              <View style={styles.buttonRow}>
+                <TouchableOpacity
+                  style={styles.pauseButton}
+                  onPress={pauseActivity}>
+                  <Text
+                    style={styles.buttonText}>
+                    PAUSE
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.finishButton}
+                  onPress={stopActivity}>
+                  <Text
+                    style={styles.buttonText}>
+                    FINISH
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {isTracking && isPaused && (
+              <View style={styles.buttonRow}>
+                <TouchableOpacity
+                  style={styles.resumeButton}
+                  onPress={resumeActivity}>
+                  <Text
+                    style={styles.buttonText}>
+                    RESUME
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.finishButton}
+                  onPress={stopActivity}>
+                  <Text
+                    style={styles.buttonText}>
+                    FINISH
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
         </View>
       </View>
     </SafeAreaView>
@@ -273,17 +481,19 @@ const styles = StyleSheet.create({
     top: 15,
     bottom: 15,
     justifyContent: 'space-between',
-    pointerEvents: 'box-none',
   },
 
-  activityTitle: {
-    color: '#fff',
-    backgroundColor: '#000',
+  statusBadge: {
     alignSelf: 'center',
+    backgroundColor: '#000',
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: 18,
-    overflow: 'hidden',
+  },
+
+  statusText: {
+    color: '#fff',
+    fontSize: 12,
     fontWeight: '800',
   },
 
@@ -302,13 +512,13 @@ const styles = StyleSheet.create({
 
   statValue: {
     color: '#fff',
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '800',
   },
 
   statLabel: {
     color: '#777',
-    fontSize: 9,
+    fontSize: 8,
     marginTop: 4,
     fontWeight: '700',
   },
@@ -347,6 +557,15 @@ const styles = StyleSheet.create({
     color: '#000',
   },
 
+  controls: {
+    marginBottom: 5,
+  },
+
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+
   startButton: {
     backgroundColor: '#fff',
     paddingVertical: 18,
@@ -354,11 +573,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 
-  stopButton: {
+  pauseButton: {
+    flex: 1,
     backgroundColor: '#fff',
+    paddingVertical: 18,
+    borderRadius: 18,
+    alignItems: 'center',
   },
 
-  startButtonText: {
+  resumeButton: {
+    flex: 1,
+    backgroundColor: '#fff',
+    paddingVertical: 18,
+    borderRadius: 18,
+    alignItems: 'center',
+  },
+
+  finishButton: {
+    flex: 1,
+    backgroundColor: '#fff',
+    paddingVertical: 18,
+    borderRadius: 18,
+    alignItems: 'center',
+  },
+
+  buttonText: {
     color: '#000',
     fontWeight: '900',
   },

@@ -5,62 +5,102 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {useNavigation} from '@react-navigation/native';
-import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+
+import {RouteProp, useRoute} from '@react-navigation/native';
 
 import type {RootStackParamList} from '../../navigation/types';
 
-type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
+type ActivityResultRouteProp = RouteProp<
+  RootStackParamList,
+  'ActivityResult'
+>;
 
 const ActivityResultScreen = () => {
-  const navigation = useNavigation<NavigationProp>();
+  const route = useRoute<ActivityResultRouteProp>();
+
+  const {
+    activityType,
+    distance,
+    elapsedSeconds,
+    pace,
+    route: gpsRoute,
+  } = route.params;
+
+  const minutes = Math.floor(elapsedSeconds / 60);
+
+  const seconds = elapsedSeconds % 60;
+
+  const formattedTime = `${String(minutes).padStart(
+    2,
+    '0',
+  )}:${String(seconds).padStart(2, '0')}`;
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Quest Complete</Text>
+
       <Text style={styles.subtitle}>
-        Your activity has been recorded.
+        Your {activityType.toLowerCase()} has been recorded.
       </Text>
 
       <View style={styles.heroCard}>
-        <Text style={styles.heroValue}>8.42</Text>
-        <Text style={styles.heroLabel}>KM COMPLETED</Text>
+        <Text style={styles.heroValue}>
+          {distance.toFixed(2)}
+        </Text>
+
+        <Text style={styles.heroLabel}>
+          KM COMPLETED
+        </Text>
       </View>
 
       <View style={styles.statsGrid}>
         <View style={styles.card}>
-          <Text style={styles.value}>48:21</Text>
+          <Text style={styles.value}>
+            {formattedTime}
+          </Text>
+
           <Text style={styles.label}>TIME</Text>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.value}>5:44</Text>
-          <Text style={styles.label}>PACE</Text>
+          <Text style={styles.value}>
+            {pace}
+          </Text>
+
+          <Text style={styles.label}>PACE / KM</Text>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.value}>2.84</Text>
-          <Text style={styles.label}>KM² CAPTURED</Text>
+          <Text style={styles.value}>
+            {gpsRoute.length}
+          </Text>
+
+          <Text style={styles.label}>GPS POINTS</Text>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.value}>+420</Text>
-          <Text style={styles.label}>XP</Text>
+          <Text style={styles.value}>
+            {activityType}
+          </Text>
+
+          <Text style={styles.label}>ACTIVITY</Text>
         </View>
       </View>
 
       <View style={styles.captureCard}>
-        <Text style={styles.captureTitle}>Territory captured</Text>
+        <Text style={styles.captureTitle}>
+          Route recorded
+        </Text>
 
         <Text style={styles.captureText}>
-          Your route created a new territory worth 2.84 km².
+          JogQuest recorded {gpsRoute.length} GPS points
+          across {distance.toFixed(2)} km.
         </Text>
 
         <TouchableOpacity
-          style={styles.captureButton}
-          onPress={() => navigation.navigate('TerritoryDetails')}>
+          style={styles.captureButton}>
           <Text style={styles.captureButtonText}>
-            VIEW TERRITORY
+            CONTINUE
           </Text>
         </TouchableOpacity>
       </View>
@@ -126,7 +166,7 @@ const styles = StyleSheet.create({
 
   value: {
     color: '#fff',
-    fontSize: 21,
+    fontSize: 20,
     fontWeight: '800',
   },
 
