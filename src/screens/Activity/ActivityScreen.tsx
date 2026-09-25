@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {createTerritory} from '../../utils/territory';
 
 import MapView, {
   PROVIDER_GOOGLE,
@@ -214,32 +215,32 @@ const ActivityScreen = () => {
   // FINISH
   // --------------------------------------------------
 
-  const stopActivity = () => {
-    const finalTime =
-      startTimeRef.current
-        ? Math.floor(
-          (Date.now() -
-            startTimeRef.current) /
-          1000,
-        )
-        : 0;
+const stopActivity = () => {
+  const finalTime = startTimeRef.current
+    ? Math.floor(
+        (Date.now() - startTimeRef.current) / 1000,
+      )
+    : 0;
 
-    setElapsedSeconds(finalTime);
+  const territory = createTerritory(route);
 
-    setIsTracking(false);
-    setIsPaused(false);
+  setElapsedSeconds(finalTime);
 
-    startTimeRef.current = null;
-    lastLocationRef.current = null;
+  setIsTracking(false);
+  setIsPaused(false);
 
-    navigation.navigate('ActivityResult', {
-      activityType,
-      distance,
-      elapsedSeconds: finalTime,
-      pace: calculatePace(),
-      route,
-    });
-  };
+  startTimeRef.current = null;
+  lastLocationRef.current = null;
+
+  navigation.navigate('ActivityResult', {
+    activityType,
+    distance,
+    elapsedSeconds: finalTime,
+    pace: calculatePace(),
+    route,
+    territory,
+  });
+};
 
   // --------------------------------------------------
   // PACE

@@ -2,9 +2,14 @@ import React from 'react';
 import {
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
+
+import MapView, {
+  PROVIDER_GOOGLE,
+  Polygon,
+  Polyline,
+} from 'react-native-maps';
 
 import {RouteProp, useRoute} from '@react-navigation/native';
 
@@ -24,10 +29,10 @@ const ActivityResultScreen = () => {
     elapsedSeconds,
     pace,
     route: gpsRoute,
+    territory,
   } = route.params;
 
   const minutes = Math.floor(elapsedSeconds / 60);
-
   const seconds = elapsedSeconds % 60;
 
   const formattedTime = `${String(minutes).padStart(
@@ -35,74 +40,99 @@ const ActivityResultScreen = () => {
     '0',
   )}:${String(seconds).padStart(2, '0')}`;
 
+  const center =
+    gpsRoute.length > 0
+      ? gpsRoute[Math.floor(gpsRoute.length / 2)]
+      : {
+          latitude: 28.6139,
+          longitude: 77.209,
+        };
+
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Quest Complete</Text>
+      <MapView
+        provider={PROVIDER_GOOGLE}
+        style={styles.map}
+        initialRegion={{
+          latitude: center.latitude,
+          longitude: center.longitude,
+          latitudeDelta: 0.03,
+          longitudeDelta: 0.03,
+        }}>
+        {gpsRoute.length > 1 && (
+          <Polyline
+            coordinates={gpsRoute}
+            strokeWidth={4}
+          />
+        )}
 
-      <Text style={styles.subtitle}>
-        Your {activityType.toLowerCase()} has been recorded.
-      </Text>
+        {territory.captured &&
+          territory.polygon.length > 2 && (
+            <Polygon
+              coordinates={territory.polygon}
+              strokeWidth={3}
+              fillColor="rgba(255,255,255,0.25)"
+            />
+          )}
+      </MapView>
 
-      <View style={styles.heroCard}>
-        <Text style={styles.heroValue}>
-          {distance.toFixed(2)}
+      <View style={styles.sheet}>
+        <Text style={styles.title}>
+          Quest Complete
         </Text>
 
-        <Text style={styles.heroLabel}>
-          KM COMPLETED
-        </Text>
-      </View>
-
-      <View style={styles.statsGrid}>
-        <View style={styles.card}>
-          <Text style={styles.value}>
-            {formattedTime}
-          </Text>
-
-          <Text style={styles.label}>TIME</Text>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.value}>
-            {pace}
-          </Text>
-
-          <Text style={styles.label}>PACE / KM</Text>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.value}>
-            {gpsRoute.length}
-          </Text>
-
-          <Text style={styles.label}>GPS POINTS</Text>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.value}>
-            {activityType}
-          </Text>
-
-          <Text style={styles.label}>ACTIVITY</Text>
-        </View>
-      </View>
-
-      <View style={styles.captureCard}>
-        <Text style={styles.captureTitle}>
-          Route recorded
+        <Text style={styles.subtitle}>
+          {activityType} completed
         </Text>
 
-        <Text style={styles.captureText}>
-          JogQuest recorded {gpsRoute.length} GPS points
-          across {distance.toFixed(2)} km.
-        </Text>
+        <View style={styles.stats}>
+          <View style={styles.stat}>
+            <Text style={styles.value}>
+              {distance.toFixed(2)}
+            </Text>
+            <Text style={styles.label}>KM</Text>
+          </View>
 
-        <TouchableOpacity
-          style={styles.captureButton}>
-          <Text style={styles.captureButtonText}>
-            CONTINUE
-          </Text>
-        </TouchableOpacity>
+          <View style={styles.stat}>
+            <Text style={styles.value}>
+              {formattedTime}
+            </Text>
+            <Text style={styles.label}>TIME</Text>
+          </View>
+
+          <View style={styles.stat}>
+            <Text style={styles.value}>
+              {pace}
+            </Text>
+            <Text style={styles.label}>PACE</Text>
+          </View>
+        </View>
+
+        {territory.captured ? (
+          <View style={styles.territoryCard}>
+            <Text style={styles.territoryTitle}>
+              🏆 Territory Captured
+            </Text>
+
+            <Text style={styles.territoryArea}>
+              {territory.areaKm2.toFixed(3)} km²
+            </Text>
+
+            <Text style={styles.territoryText}>
+              Your route formed a closed loop.
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.territoryCard}>
+            <Text style={styles.territoryTitle}>
+              No Territory Captured
+            </Text>
+
+            <Text style={styles.territoryText}>
+              Complete a closed loop to capture territory.
+            </Text>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -114,53 +144,40 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+  },
+
+  map: {
+    flex: 1,
+  },
+
+  sheet: {
+    position: 'absolute',
+    left: 15,
+    right: 15,
+    bottom: 15,
+    backgroundColor: '#000',
+    borderRadius: 24,
     padding: 20,
   },
 
   title: {
     color: '#fff',
-    fontSize: 31,
+    fontSize: 28,
     fontWeight: '900',
-    marginTop: 15,
   },
 
   subtitle: {
     color: '#777',
-    marginTop: 5,
+    marginTop: 4,
   },
 
-  heroCard: {
-    backgroundColor: '#fff',
-    borderRadius: 24,
-    alignItems: 'center',
-    paddingVertical: 30,
-    marginTop: 25,
-  },
-
-  heroValue: {
-    color: '#000',
-    fontSize: 50,
-    fontWeight: '900',
-  },
-
-  heroLabel: {
-    color: '#777',
-    fontWeight: '800',
-    fontSize: 11,
-  },
-
-  statsGrid: {
+  stats: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginTop: 15,
+    marginTop: 20,
   },
 
-  card: {
-    width: '48%',
-    backgroundColor: '#111',
-    borderRadius: 18,
-    paddingVertical: 20,
+  stat: {
+    flex: 1,
     alignItems: 'center',
   },
 
@@ -173,39 +190,31 @@ const styles = StyleSheet.create({
   label: {
     color: '#666',
     fontSize: 9,
-    fontWeight: '800',
-    marginTop: 6,
+    marginTop: 4,
   },
 
-  captureCard: {
+  territoryCard: {
     backgroundColor: '#111',
-    borderRadius: 20,
-    padding: 20,
-    marginTop: 15,
-  },
-
-  captureTitle: {
-    color: '#fff',
-    fontSize: 19,
-    fontWeight: '800',
-  },
-
-  captureText: {
-    color: '#777',
-    marginTop: 8,
-    lineHeight: 21,
-  },
-
-  captureButton: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
+    borderRadius: 18,
+    padding: 16,
     marginTop: 18,
   },
 
-  captureButtonText: {
-    color: '#000',
+  territoryTitle: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '800',
+  },
+
+  territoryArea: {
+    color: '#fff',
+    fontSize: 28,
     fontWeight: '900',
+    marginTop: 8,
+  },
+
+  territoryText: {
+    color: '#777',
+    marginTop: 5,
   },
 });

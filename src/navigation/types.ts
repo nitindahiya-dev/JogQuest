@@ -9,6 +9,12 @@ export type ActivityResultParams = {
   elapsedSeconds: number;
   pace: string;
   route: Coordinate[];
+  territory: {
+    captured: boolean;
+    areaM2: number;
+    areaKm2: number;
+    polygon: Coordinate[];
+  };
 };
 
 export type RootStackParamList = {
