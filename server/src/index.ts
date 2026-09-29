@@ -246,8 +246,421 @@ app.get('/api/activities/:userId', async (req, res) => {
 });
 
 // --------------------------------------------------
+// GET LEADERBOARD
+// --------------------------------------------------
+
+app.get('/api/leaderboard', async (_req, res) => {
+  try {
+    const result = await query(
+      `
+      WITH activity_stats AS (
+        SELECT
+          user_id,
+          COUNT(*)::int AS activities_count,
+          COALESCE(
+            SUM(distance_km),
+            0
+          )::double precision AS total_distance_km
+        FROM activities
+        GROUP BY user_id
+      ),
+      territory_stats AS (
+        SELECT
+          user_id,
+          COUNT(*)::int AS territories_captured,
+          COALESCE(
+            SUM(area_km2),
+            0
+          )::double precision AS territory_km2
+        FROM territories
+        GROUP BY user_id
+      )
+      SELECT
+        ROW_NUMBER() OVER (
+          ORDER BY
+            COALESCE(t.territory_km2, 0) DESC,
+            COALESCE(a.total_distance_km, 0) DESC,
+            u.created_at ASC
+        )::int AS rank,
+
+        u.id,
+        u.username,
+        u.display_name,
+        u.avatar_url,
+
+        COALESCE(
+          t.territory_km2,
+          0
+        )::double precision AS territory_km2,
+
+        COALESCE(
+          t.territories_captured,
+          0
+        )::int AS territories_captured,
+
+        COALESCE(
+          a.activities_count,
+          0
+        )::int AS activities_count,
+
+        COALESCE(
+          a.total_distance_km,
+          0
+        )::double precision AS total_distance_km
+
+      FROM users u
+
+      LEFT JOIN activity_stats a
+        ON a.user_id = u.id
+
+      LEFT JOIN territory_stats t
+        ON t.user_id = u.id
+
+      ORDER BY
+        rank ASC
+      `,
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: 'Failed to fetch leaderboard',
+    });
+  }
+});
+
+// --------------------------------------------------
+// CHECK TERRITORY OVERLAP
+// --------------------------------------------------
+
+app.post('/api/territories/check-overlap', async (req, res) => {
+  try {
+    const { polygon } = req.body;
+
+    if (!Array.isArray(polygon) || polygon.length < 4) {
+      return res.status(400).json({
+        error: 'Polygon must contain at least 4 points',
+      });
+    }
+
+    const coordinates = polygon.map(
+      (point: Coordinate) =>
+        `${point.longitude} ${point.latitude}`,
+    );
+
+    const first = polygon[0];
+    const last = polygon[polygon.length - 1];
+
+    if (
+      first.latitude !== last.latitude ||
+      first.longitude !== last.longitude
+    ) {
+      return res.status(400).json({
+        error: 'Polygon must be closed',
+      });
+    }
+
+    const polygonWkt =
+      `SRID=4326;POLYGON((${coordinates.join(',')}))`;
+
+    const result = await query(
+      `
+      WITH claim AS (
+        SELECT
+          ST_GeogFromText($1) AS polygon
+      )
+      SELECT
+        t.id,
+        t.user_id,
+        u.username,
+        u.display_name,
+        t.area_m2,
+        t.area_km2,
+        ST_Area(
+          ST_Intersection(
+            t.polygon,
+            claim.polygon
+          )
+        ) AS intersection_area_m2
+      FROM territories t
+      JOIN users u
+        ON u.id = t.user_id
+      CROSS JOIN claim
+      WHERE ST_Intersects(
+        t.polygon,
+        claim.polygon
+      )
+      ORDER BY intersection_area_m2 DESC
+      `,
+      [polygonWkt],
+    );
+
+    res.json({
+      hasOverlap: result.rows.length > 0,
+      conflicts: result.rows,
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: 'Failed to check territory overlap',
+    });
+  }
+});
+
+// --------------------------------------------------
+// CLAIM TERRITORY
+// --------------------------------------------------
+
+app.post('/api/territories/claim', async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const {
+      userId,
+      activityId,
+      activityType,
+      polygon,
+    } = req.body;
+
+    if (
+      !userId ||
+      !activityId ||
+      !activityType ||
+      !Array.isArray(polygon) ||
+      polygon.length < 4
+    ) {
+      return res.status(400).json({
+        error: 'userId, activityId, activityType and polygon are required',
+      });
+    }
+
+    if (
+      !['Run', 'Walk', 'Cycle'].includes(activityType)
+    ) {
+      return res.status(400).json({
+        error: 'Invalid activity type',
+      });
+    }
+
+    const first = polygon[0];
+    const last = polygon[polygon.length - 1];
+
+    if (
+      first.latitude !== last.latitude ||
+      first.longitude !== last.longitude
+    ) {
+      return res.status(400).json({
+        error: 'Polygon must be closed',
+      });
+    }
+
+    const coordinates = polygon.map(
+      (point: Coordinate) =>
+        `${point.longitude} ${point.latitude}`,
+    );
+
+    const polygonWkt =
+      `SRID=4326;POLYGON((${coordinates.join(',')}))`;
+
+    await client.query('BEGIN');
+
+    // Make sure the user exists.
+    const userResult = await client.query(
+      `
+      SELECT id
+      FROM users
+      WHERE id = $1
+      `,
+      [userId],
+    );
+
+    if (userResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+
+      return res.status(404).json({
+        error: 'User not found',
+      });
+    }
+
+    // Make sure the activity exists and belongs to the user.
+    const activityResult = await client.query(
+      `
+      SELECT id
+      FROM activities
+      WHERE id = $1
+        AND user_id = $2
+      `,
+      [activityId, userId],
+    );
+
+    if (activityResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+
+      return res.status(404).json({
+        error: 'Activity not found for this user',
+      });
+    }
+
+    // Calculate the actual polygon area with PostGIS.
+    const areaResult = await client.query<{
+      area_m2: number;
+    }>(
+      `
+      SELECT
+        ST_Area(
+          ST_GeogFromText($1)
+        ) AS area_m2
+      `,
+      [polygonWkt],
+    );
+
+    const areaM2 =
+      Number(areaResult.rows[0].area_m2);
+
+    const areaKm2 =
+      areaM2 / 1_000_000;
+
+    if (areaM2 < 1000) {
+      await client.query('ROLLBACK');
+
+      return res.status(400).json({
+        error: 'Territory is too small',
+        areaM2,
+        areaKm2,
+      });
+    }
+
+    // Find existing territories that intersect the claim.
+    const conflictsResult = await client.query(
+      `
+      WITH claim AS (
+        SELECT
+          ST_GeogFromText($1) AS polygon
+      )
+      SELECT
+        t.id,
+        t.user_id,
+        u.username,
+        u.display_name,
+        t.area_m2,
+        t.area_km2,
+        ST_Area(
+          ST_Intersection(
+            t.polygon,
+            claim.polygon
+          )
+        ) AS intersection_area_m2
+      FROM territories t
+      JOIN users u
+        ON u.id = t.user_id
+      CROSS JOIN claim
+      WHERE ST_Intersects(
+        t.polygon,
+        claim.polygon
+      )
+      ORDER BY intersection_area_m2 DESC
+      `,
+      [polygonWkt],
+    );
+
+    if (conflictsResult.rows.length > 0) {
+      await client.query('ROLLBACK');
+
+      return res.status(409).json({
+        error: 'Territory overlaps existing territory',
+        areaM2,
+        areaKm2,
+        conflicts: conflictsResult.rows,
+      });
+    }
+
+    // Create the new territory.
+    const territoryResult = await client.query(
+      `
+      INSERT INTO territories (
+        user_id,
+        activity_id,
+        activity_type,
+        area_m2,
+        area_km2,
+        polygon
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        ST_GeogFromText($6)
+      )
+      RETURNING
+        id,
+        user_id,
+        activity_id,
+        activity_type,
+        area_m2,
+        area_km2,
+        captured_at
+      `,
+      [
+        userId,
+        activityId,
+        activityType,
+        areaM2,
+        areaKm2,
+        polygonWkt,
+      ],
+    );
+
+    const territory =
+      territoryResult.rows[0];
+
+    await client.query(
+      `
+      INSERT INTO territory_history (
+        territory_id,
+        previous_owner_id,
+        new_owner_id,
+        action
+      )
+      VALUES (
+        $1,
+        NULL,
+        $2,
+        'CAPTURED'
+      )
+      `,
+      [territory.id, userId],
+    );
+
+    await client.query('COMMIT');
+
+    res.status(201).json({
+      ok: true,
+      territory,
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+
+    console.error(error);
+
+    res.status(500).json({
+      error: 'Failed to claim territory',
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// --------------------------------------------------
 // GET TERRITORIES
 // --------------------------------------------------
+
+
+
 
 app.get('/api/territories', async (_req, res) => {
   try {
@@ -338,7 +751,6 @@ app.post('/api/activities', async (req, res) => {
 
     const activity = activityResult.rows[0];
 
-    // Save every GPS point.
     for (
       let index = 0;
       index < body.route.length;
@@ -371,93 +783,11 @@ app.post('/api/activities', async (req, res) => {
       );
     }
 
-    let territory = null;
-
-    // Save territory when one was captured.
-    if (
-      body.territory &&
-      Array.isArray(body.territory.polygon) &&
-      body.territory.polygon.length >= 4
-    ) {
-      const polygonCoordinates =
-        body.territory.polygon
-          .map(
-            point =>
-              `${point.longitude} ${point.latitude}`,
-          )
-          .join(',');
-
-      const polygonWkt =
-        `POLYGON((${polygonCoordinates}))`;
-
-      const territoryResult =
-        await client.query(
-          `
-          INSERT INTO territories (
-            user_id,
-            activity_id,
-            activity_type,
-            area_m2,
-            area_km2,
-            polygon
-          )
-          VALUES (
-            $1,
-            $2,
-            $3,
-            $4,
-            $5,
-            ST_GeomFromText(
-              $6,
-              4326
-            )::geography
-          )
-          RETURNING
-            id,
-            area_m2,
-            area_km2,
-            captured_at
-          `,
-          [
-            body.userId,
-            activity.id,
-            body.activityType,
-            body.territory.areaM2,
-            body.territory.areaKm2,
-            polygonWkt,
-          ],
-        );
-
-      territory = territoryResult.rows[0];
-
-      await client.query(
-        `
-        INSERT INTO territory_history (
-          territory_id,
-          previous_owner_id,
-          new_owner_id,
-          action
-        )
-        VALUES (
-          $1,
-          NULL,
-          $2,
-          'CAPTURED'
-        )
-        `,
-        [
-          territory.id,
-          body.userId,
-        ],
-      );
-    }
-
     await client.query('COMMIT');
 
     res.status(201).json({
       ok: true,
       activity,
-      territory,
     });
   } catch (error) {
     await client.query('ROLLBACK');

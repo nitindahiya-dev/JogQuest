@@ -31,7 +31,7 @@ type Activity = {
   territory_area_km2: number | null;
 };
 
-const API_BASE_URL = 'http://10.0.2.2:4000';
+const API_BASE_URL = 'http://127.0.0.1:4000';
 
 const DEV_USER_ID =
   '7445aab6-039b-4e64-8559-1ec9ae702ffe';

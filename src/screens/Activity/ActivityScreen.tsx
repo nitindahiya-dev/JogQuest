@@ -33,10 +33,18 @@ type NavigationProp =
 
 type ActivityType = 'Run' | 'Walk' | 'Cycle';
 
-const API_BASE_URL = 'http://10.0.2.2:4000';
+const API_BASE_URL = 'http://127.0.0.1:4000';
 
 const DEV_USER_ID =
   '7445aab6-039b-4e64-8559-1ec9ae702ffe';
+
+type CreateActivityResponse = {
+  ok: boolean;
+  activity: {
+    id: string;
+    created_at: string;
+  };
+};
 
 const ActivityScreen = () => {
   const navigation = useNavigation<NavigationProp>();
@@ -262,7 +270,7 @@ const ActivityScreen = () => {
     finalTime: number,
     pace: string,
     territory: ReturnType<typeof createTerritory>,
-  ) => {
+  ): Promise<CreateActivityResponse> => {
     const finishedAt =
       new Date().toISOString();
 
@@ -300,6 +308,41 @@ const ActivityScreen = () => {
 
       throw new Error(
         `Backend returned ${response.status}: ${errorText}`,
+      );
+    }
+
+    return (await response.json()) as CreateActivityResponse;
+  };
+
+  const claimTerritoryOnBackend = async (
+    activityId: string,
+    territory: ReturnType<typeof createTerritory>,
+  ) => {
+    if (!territory.captured) {
+      return null;
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/api/territories/claim`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: DEV_USER_ID,
+          activityId,
+          activityType,
+          polygon: territory.polygon,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+
+      throw new Error(
+        `Territory claim failed (${response.status}): ${errorText}`,
       );
     }
 
@@ -343,12 +386,25 @@ const ActivityScreen = () => {
         });
       }
 
-      // Save remotely.
-      await saveActivityToBackend(
-        finalTime,
-        finalPace,
-        territory,
-      );
+      // Save activity and GPS points remotely.
+      const activityResponse =
+        await saveActivityToBackend(
+          finalTime,
+          finalPace,
+          territory,
+        );
+
+      // Territory creation is handled separately by
+      // the server-authoritative PostGIS claim endpoint.
+      if (
+        territory.captured &&
+        activityResponse?.activity?.id
+      ) {
+        await claimTerritoryOnBackend(
+          activityResponse.activity.id,
+          territory,
+        );
+      }
 
       setElapsedSeconds(finalTime);
       setIsTracking(false);
