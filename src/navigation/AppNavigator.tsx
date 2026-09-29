@@ -1,4 +1,5 @@
 import React from 'react';
+
 import {
   NavigationContainer,
 } from '@react-navigation/native';
@@ -18,13 +19,15 @@ import LeaderboardScreen from '../screens/Leaderboard/LeaderboardScreen';
 import ProfileScreen from '../screens/Profile/ProfileScreen';
 import TerritoryDetailsScreen from '../screens/Territory/TerritoryDetailsScreen';
 import ActivityHistoryScreen from '../screens/History/ActivityHistoryScreen';
+import NotificationsScreen from '../screens/Notifications/NotificationsScreen.tsx';
 
 import type {
   RootStackParamList,
+  MainTabParamList,
 } from './types';
 
 const Tab =
-  createBottomTabNavigator();
+  createBottomTabNavigator<MainTabParamList>();
 
 const Stack =
   createNativeStackNavigator<RootStackParamList>();
@@ -34,13 +37,16 @@ const MainTabs = () => {
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
+
         tabBarStyle: {
           backgroundColor: '#000',
           borderTopColor: '#222',
         },
+
         tabBarActiveTintColor: '#fff',
         tabBarInactiveTintColor: '#666',
       }}>
+
       <Tab.Screen
         name="Map"
         component={MapScreen}
@@ -65,6 +71,12 @@ const MainTabs = () => {
         name="Profile"
         component={ProfileScreen}
       />
+
+      <Tab.Screen
+        name="Notifications"
+        component={NotificationsScreen}
+      />
+
     </Tab.Navigator>
   );
 };
@@ -72,15 +84,19 @@ const MainTabs = () => {
 const AppNavigator = () => {
   return (
     <NavigationContainer>
+
       <Stack.Navigator
         screenOptions={{
           headerStyle: {
             backgroundColor: '#000',
           },
+
           headerTintColor: '#fff',
+
           headerTitleStyle: {
             fontWeight: '700',
           },
+
           contentStyle: {
             backgroundColor: '#000',
           },
@@ -111,6 +127,7 @@ const AppNavigator = () => {
         />
 
       </Stack.Navigator>
+
     </NavigationContainer>
   );
 };

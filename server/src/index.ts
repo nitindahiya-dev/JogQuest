@@ -1522,6 +1522,145 @@ app.post('/api/activities', async (req, res) => {
 });
 
 // --------------------------------------------------
+// GET USER NOTIFICATIONS
+// --------------------------------------------------
+
+app.get('/api/users/:userId/notifications', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const parsedLimit = Number.parseInt(
+      String(req.query.limit ?? '50'),
+      10,
+    );
+
+    const limit = Number.isFinite(parsedLimit)
+      ? Math.min(Math.max(parsedLimit, 1), 100)
+      : 50;
+
+    const result = await query(
+      `
+      SELECT
+        id,
+        type,
+        title,
+        message,
+        territory_id,
+        challenge_id,
+        activity_id,
+        created_at,
+        read_at
+      FROM notifications
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT $2
+      `,
+      [userId, limit],
+    );
+
+    const unreadResult = await query(
+      `
+      SELECT
+        COUNT(*)::int AS unread_count
+      FROM notifications
+      WHERE user_id = $1
+        AND read_at IS NULL
+      `,
+      [userId],
+    );
+
+    res.json({
+      unreadCount: Number(
+        unreadResult.rows[0]?.unread_count ?? 0,
+      ),
+      notifications: result.rows,
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: 'Failed to fetch notifications',
+    });
+  }
+});
+
+
+// --------------------------------------------------
+// MARK NOTIFICATION AS READ
+// --------------------------------------------------
+
+app.patch('/api/notifications/:id/read', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await query(
+      `
+      UPDATE notifications
+      SET read_at = COALESCE(read_at, NOW())
+      WHERE id = $1
+      RETURNING
+        id,
+        read_at
+      `,
+      [id],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Notification not found',
+      });
+    }
+
+    res.json({
+      ok: true,
+      notification: result.rows[0],
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: 'Failed to mark notification as read',
+    });
+  }
+});
+
+
+// --------------------------------------------------
+// MARK ALL NOTIFICATIONS AS READ
+// --------------------------------------------------
+
+app.patch(
+  '/api/users/:userId/notifications/read-all',
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      const result = await query(
+        `
+        UPDATE notifications
+        SET read_at = NOW()
+        WHERE user_id = $1
+          AND read_at IS NULL
+        `,
+        [userId],
+      );
+
+      res.json({
+        ok: true,
+        updated: result.rowCount ?? 0,
+      });
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error: 'Failed to mark notifications as read',
+      });
+    }
+  },
+);
+
+
+// --------------------------------------------------
 // START SERVER
 // --------------------------------------------------
 

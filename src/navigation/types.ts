@@ -41,4 +41,5 @@ export type MainTabParamList = {
   History: undefined;
   Leaderboard: undefined;
   Profile: undefined;
+  Notifications: undefined;
 };
