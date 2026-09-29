@@ -713,7 +713,11 @@ app.get('/api/territories/:id', async (req, res) => {
     res.json({
       ...territory,
       status:
-        territory.latest_action === 'CAPTURED'
+        [
+          'CAPTURED',
+          'TRANSFERRED',
+          'CHALLENGE_REJECTED',
+        ].includes(territory.latest_action)
           ? 'Protected'
           : territory.latest_action ?? 'Unknown',
     });
@@ -727,8 +731,595 @@ app.get('/api/territories/:id', async (req, res) => {
 });
 
 // --------------------------------------------------
+// GET TERRITORY HISTORY
+// --------------------------------------------------
+
+app.get('/api/territories/:id/history', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await query(
+      `
+      SELECT
+        th.id,
+        th.territory_id,
+        th.action,
+
+        th.previous_owner_id,
+        previous_owner.username AS previous_owner_username,
+        previous_owner.display_name AS previous_owner_display_name,
+
+        th.new_owner_id,
+        new_owner.username AS new_owner_username,
+        new_owner.display_name AS new_owner_display_name,
+
+        th.created_at
+
+      FROM territory_history th
+
+      LEFT JOIN users previous_owner
+        ON previous_owner.id = th.previous_owner_id
+
+      LEFT JOIN users new_owner
+        ON new_owner.id = th.new_owner_id
+
+      WHERE th.territory_id = $1
+
+      ORDER BY th.created_at ASC
+      `,
+      [id],
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: 'Failed to fetch territory history',
+    });
+  }
+});
+
+// --------------------------------------------------
+// CREATE TERRITORY CHALLENGE
+// --------------------------------------------------
+
+app.post('/api/territories/:id/challenges', async (req, res) => {
+  try {
+    const { id: territoryId } = req.params;
+    const {
+      challengerId,
+      activityId,
+      polygon,
+    } = req.body;
+
+    if (
+      !challengerId ||
+      !activityId ||
+      !Array.isArray(polygon) ||
+      polygon.length < 4
+    ) {
+      return res.status(400).json({
+        error: 'challengerId, activityId and polygon are required',
+      });
+    }
+
+    const first = polygon[0];
+    const last = polygon[polygon.length - 1];
+
+    if (
+      first.latitude !== last.latitude ||
+      first.longitude !== last.longitude
+    ) {
+      return res.status(400).json({
+        error: 'Polygon must be closed',
+      });
+    }
+
+    const coordinates = polygon.map(
+      (point: Coordinate) =>
+        `${point.longitude} ${point.latitude}`,
+    );
+
+    const polygonWkt =
+      `SRID=4326;POLYGON((${coordinates.join(',')}))`;
+
+    const result = await query(
+      `
+      WITH target AS (
+        SELECT
+          t.id,
+          t.user_id,
+          t.area_m2,
+          t.area_km2,
+          t.polygon
+        FROM territories t
+        WHERE t.id = $1
+      ),
+      claim AS (
+        SELECT
+          ST_GeogFromText($2) AS polygon
+      )
+      SELECT
+        target.id,
+        target.user_id,
+        target.area_m2,
+        target.area_km2,
+        ST_Intersects(
+          target.polygon,
+          claim.polygon
+        ) AS intersects,
+        ST_Area(
+          ST_Intersection(
+            target.polygon,
+            claim.polygon
+          )
+        ) AS overlap_area_m2
+      FROM target
+      CROSS JOIN claim
+      `,
+      [territoryId, polygonWkt],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Territory not found',
+      });
+    }
+
+    const territory = result.rows[0];
+
+    if (!territory.intersects) {
+      return res.status(409).json({
+        error: 'Challenge polygon does not overlap territory',
+      });
+    }
+
+    const ownerId = territory.user_id;
+
+    if (ownerId === challengerId) {
+      return res.status(409).json({
+        error: 'You already own this territory',
+      });
+    }
+
+    const activityResult = await query(
+      `
+      SELECT id
+      FROM activities
+      WHERE id = $1
+        AND user_id = $2
+      `,
+      [activityId, challengerId],
+    );
+
+    if (activityResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Activity not found for challenger',
+      });
+    }
+
+    const challengerResult = await query(
+      `
+      SELECT
+        id,
+        username,
+        display_name
+      FROM users
+      WHERE id = $1
+      `,
+      [challengerId],
+    );
+
+    if (challengerResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Challenger not found',
+      });
+    }
+
+    const overlapAreaM2 =
+      Number(territory.overlap_area_m2);
+
+    const overlapRatio =
+      territory.area_m2 > 0
+        ? overlapAreaM2 /
+          Number(territory.area_m2)
+        : 0;
+
+    const insertResult = await query(
+      `
+      INSERT INTO territory_challenges (
+        territory_id,
+        activity_id,
+        challenger_id,
+        overlap_area_m2,
+        overlap_ratio,
+        status
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        'PENDING'
+      )
+      RETURNING
+        id,
+        territory_id,
+        activity_id,
+        challenger_id,
+        overlap_area_m2,
+        overlap_ratio,
+        status,
+        created_at
+      `,
+      [
+        territoryId,
+        activityId,
+        challengerId,
+        overlapAreaM2,
+        overlapRatio,
+      ],
+    );
+
+    res.status(201).json({
+      ok: true,
+      challenge: insertResult.rows[0],
+      owner: {
+        id: ownerId,
+      },
+      challenger: challengerResult.rows[0],
+    });
+  } catch (error: any) {
+    console.error(error);
+
+    if (error?.code === '23505') {
+      return res.status(409).json({
+        error: 'A challenge already exists for this activity and territory',
+      });
+    }
+
+    res.status(500).json({
+      error: 'Failed to create territory challenge',
+    });
+  }
+});
+
+// --------------------------------------------------
+// RESOLVE TERRITORY CHALLENGE
+// --------------------------------------------------
+
+app.post(
+  '/api/territories/:id/challenges/:challengeId/resolve',
+  async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+      const {
+        id: territoryId,
+        challengeId,
+      } = req.params;
+
+      const {
+        resolverId,
+        decision,
+      } = req.body;
+
+      if (
+        !resolverId ||
+        !['ACCEPT', 'REJECT'].includes(decision)
+      ) {
+        return res.status(400).json({
+          error: 'resolverId and decision are required',
+        });
+      }
+
+      await client.query('BEGIN');
+
+      // Lock the territory so two resolutions cannot
+      // modify ownership at the same time.
+      const territoryResult =
+        await client.query(
+          `
+          SELECT
+            id,
+            user_id
+          FROM territories
+          WHERE id = $1
+          FOR UPDATE
+          `,
+          [territoryId],
+        );
+
+      if (
+        territoryResult.rows.length === 0
+      ) {
+        await client.query('ROLLBACK');
+
+        return res.status(404).json({
+          error: 'Territory not found',
+        });
+      }
+
+      const territory =
+        territoryResult.rows[0];
+
+      // Only the current owner can resolve
+      // the challenge.
+      if (
+        territory.user_id !== resolverId
+      ) {
+        await client.query('ROLLBACK');
+
+        return res.status(403).json({
+          error:
+            'Only the current territory owner can resolve this challenge',
+        });
+      }
+
+      const challengeResult =
+        await client.query(
+          `
+          SELECT
+            tc.id,
+            tc.territory_id,
+            tc.challenger_id,
+            tc.status,
+
+            u.username AS challenger_username,
+            u.display_name AS challenger_display_name
+
+          FROM territory_challenges tc
+
+          JOIN users u
+            ON u.id = tc.challenger_id
+
+          WHERE tc.id = $1
+            AND tc.territory_id = $2
+          FOR UPDATE
+          `,
+          [challengeId, territoryId],
+        );
+
+      if (
+        challengeResult.rows.length === 0
+      ) {
+        await client.query('ROLLBACK');
+
+        return res.status(404).json({
+          error: 'Challenge not found',
+        });
+      }
+
+      const challenge =
+        challengeResult.rows[0];
+
+      if (
+        challenge.status !== 'PENDING'
+      ) {
+        await client.query('ROLLBACK');
+
+        return res.status(409).json({
+          error: `Challenge is already ${challenge.status}`,
+        });
+      }
+
+      const now = new Date();
+
+      if (decision === 'REJECT') {
+        const rejectedResult =
+          await client.query(
+            `
+            UPDATE territory_challenges
+            SET
+              status = 'REJECTED',
+              resolved_at = $1
+            WHERE id = $2
+            RETURNING
+              id,
+              territory_id,
+              activity_id,
+              challenger_id,
+              overlap_area_m2,
+              overlap_ratio,
+              status,
+              created_at,
+              resolved_at
+            `,
+            [now, challengeId],
+          );
+
+        await client.query(
+          `
+          INSERT INTO territory_history (
+            territory_id,
+            previous_owner_id,
+            new_owner_id,
+            action
+          )
+          VALUES (
+            $1,
+            $2,
+            $2,
+            'CHALLENGE_REJECTED'
+          )
+          `,
+          [
+            territoryId,
+            resolverId,
+          ],
+        );
+
+        await client.query('COMMIT');
+
+        return res.json({
+          ok: true,
+          decision: 'REJECTED',
+          challenge:
+            rejectedResult.rows[0],
+          owner: {
+            id: resolverId,
+          },
+        });
+      }
+
+      const newOwnerId =
+        challenge.challenger_id;
+
+      // Transfer ownership.
+      const updatedTerritory =
+        await client.query(
+          `
+          UPDATE territories
+          SET user_id = $1
+          WHERE id = $2
+          RETURNING
+            id,
+            user_id,
+            activity_id,
+            activity_type,
+            area_m2,
+            area_km2,
+            captured_at
+          `,
+          [
+            newOwnerId,
+            territoryId,
+          ],
+        );
+
+      const acceptedResult =
+        await client.query(
+          `
+          UPDATE territory_challenges
+          SET
+            status = 'ACCEPTED',
+            resolved_at = $1
+          WHERE id = $2
+          RETURNING
+            id,
+            territory_id,
+            activity_id,
+            challenger_id,
+            overlap_area_m2,
+            overlap_ratio,
+            status,
+            created_at,
+            resolved_at
+          `,
+          [now, challengeId],
+        );
+
+      await client.query(
+        `
+        INSERT INTO territory_history (
+          territory_id,
+          previous_owner_id,
+          new_owner_id,
+          action
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          'TRANSFERRED'
+        )
+        `,
+        [
+          territoryId,
+          resolverId,
+          newOwnerId,
+        ],
+      );
+
+      await client.query('COMMIT');
+
+      res.json({
+        ok: true,
+        decision: 'ACCEPTED',
+        challenge:
+          acceptedResult.rows[0],
+        territory:
+          updatedTerritory.rows[0],
+        previousOwner: {
+          id: resolverId,
+        },
+        newOwner: {
+          id: newOwnerId,
+          username:
+            challenge.challenger_username,
+          displayName:
+            challenge.challenger_display_name,
+        },
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to resolve territory challenge',
+      });
+    } finally {
+      client.release();
+    }
+  },
+);
+
+// --------------------------------------------------
+// GET TERRITORY CHALLENGES
+// --------------------------------------------------
+
+
+app.get('/api/territories/:id/challenges', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await query(
+      `
+      SELECT
+        tc.id,
+        tc.territory_id,
+        tc.activity_id,
+        tc.challenger_id,
+        tc.overlap_area_m2,
+        tc.overlap_ratio,
+        tc.status,
+        tc.created_at,
+        tc.resolved_at,
+
+        u.username AS challenger_username,
+        u.display_name AS challenger_display_name
+
+      FROM territory_challenges tc
+
+      JOIN users u
+        ON u.id = tc.challenger_id
+
+      WHERE tc.territory_id = $1
+
+      ORDER BY tc.created_at DESC
+      `,
+      [id],
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: 'Failed to fetch territory challenges',
+    });
+  }
+});
+
+// --------------------------------------------------
 // GET TERRITORIES
 // --------------------------------------------------
+
+
 
 
 

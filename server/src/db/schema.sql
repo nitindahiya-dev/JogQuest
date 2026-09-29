@@ -59,3 +59,49 @@ CREATE TABLE IF NOT EXISTS territory_history (
   action VARCHAR(30) NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS territory_challenges (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  territory_id UUID NOT NULL
+    REFERENCES territories(id)
+    ON DELETE CASCADE,
+
+  activity_id UUID NOT NULL
+    REFERENCES activities(id)
+    ON DELETE CASCADE,
+
+  challenger_id UUID NOT NULL
+    REFERENCES users(id)
+    ON DELETE CASCADE,
+
+  overlap_area_m2 DOUBLE PRECISION NOT NULL,
+
+  overlap_ratio DOUBLE PRECISION NOT NULL,
+
+  status VARCHAR(20) NOT NULL
+    DEFAULT 'PENDING'
+    CHECK (
+      status IN (
+        'PENDING',
+        'ACCEPTED',
+        'REJECTED'
+      )
+    ),
+
+  created_at TIMESTAMPTZ NOT NULL
+    DEFAULT NOW(),
+
+  resolved_at TIMESTAMPTZ,
+
+  UNIQUE (territory_id, activity_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_territory_challenges_territory
+ON territory_challenges (territory_id);
+
+CREATE INDEX IF NOT EXISTS idx_territory_challenges_challenger
+ON territory_challenges (challenger_id);
+
+CREATE INDEX IF NOT EXISTS idx_territory_challenges_status
+ON territory_challenges (status);
