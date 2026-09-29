@@ -1,4 +1,9 @@
-import React, {useCallback, useRef, useState} from 'react';
+import React, {
+  useCallback,
+  useRef,
+  useState,
+} from 'react';
+
 import {
   ActivityIndicator,
   StyleSheet,
@@ -23,45 +28,150 @@ import {
   StoredTerritory,
 } from '../../utils/territoryStorage';
 
-import type {RootStackParamList} from '../../navigation/types';
+import type {
+  RootStackParamList,
+} from '../../navigation/types';
 
 type NavigationProp =
   NativeStackNavigationProp<RootStackParamList>;
 
-const MapScreen = () => {
-  const mapRef = useRef<MapView>(null);
+type ApiTerritory = {
+  id: string;
+  user_id: string;
+  activity_id: string | null;
+  activity_type: 'Run' | 'Walk' | 'Cycle';
+  area_m2: number;
+  area_km2: number;
+  polygon: {
+    type: 'Polygon';
+    coordinates: number[][][];
+  };
+  captured_at: string;
+};
 
-  const navigation = useNavigation<NavigationProp>();
+const API_BASE_URL =
+  'http://127.0.0.1:4000';
+
+const MapScreen = () => {
+  const mapRef =
+    useRef<MapView>(null);
+
+  const navigation =
+    useNavigation<NavigationProp>();
 
   const [territories, setTerritories] =
     useState<StoredTerritory[]>([]);
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] =
+    useState(true);
 
-  useFocusEffect(
-    useCallback(() => {
-      let active = true;
+  const [usingFallback, setUsingFallback] =
+    useState(false);
 
-      const load = async () => {
-        setLoading(true);
+  const convertApiTerritory = (
+    territory: ApiTerritory,
+  ): StoredTerritory => {
+    const ring =
+      territory.polygon.coordinates[0] ?? [];
 
-        const stored = await getTerritories();
+    const polygon =
+      ring.map(([longitude, latitude]) => ({
+        latitude,
+        longitude,
+      }));
 
-        if (!active) {
-          return;
+    return {
+      id: territory.id,
+      areaM2: Number(
+        territory.area_m2,
+      ),
+      areaKm2: Number(
+        territory.area_km2,
+      ),
+      polygon,
+      activityType:
+        territory.activity_type,
+      capturedAt:
+        territory.captured_at,
+    };
+  };
+
+  const loadTerritories = useCallback(
+    async () => {
+      setLoading(true);
+      setUsingFallback(false);
+
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/api/territories`,
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Server returned ${response.status}`,
+          );
         }
 
-        setTerritories(stored);
-        setLoading(false);
+        const data =
+          (await response.json()) as ApiTerritory[];
 
-        if (stored.length > 0) {
-          const latestTerritory =
-            stored[stored.length - 1];
+        const remoteTerritories =
+          data.map(convertApiTerritory);
 
-          if (latestTerritory.polygon.length > 2) {
+        setTerritories(
+          remoteTerritories,
+        );
+
+        if (
+          remoteTerritories.length > 0 &&
+          remoteTerritories[0].polygon.length > 2
+        ) {
+          setTimeout(() => {
+            mapRef.current?.fitToCoordinates(
+              remoteTerritories[0].polygon,
+              {
+                edgePadding: {
+                  top: 100,
+                  right: 60,
+                  bottom: 100,
+                  left: 60,
+                },
+                animated: true,
+              },
+            );
+          }, 300);
+        }
+      } catch (error) {
+        console.error(
+          'Failed to load territories from API:',
+          error,
+        );
+
+        // Keep local data available if the API
+        // is temporarily unreachable.
+        const localTerritories =
+          await getTerritories();
+
+        setTerritories(
+          localTerritories,
+        );
+
+        setUsingFallback(true);
+
+        if (
+          localTerritories.length > 0
+        ) {
+          const latest =
+            localTerritories[
+              localTerritories.length - 1
+            ];
+
+          if (
+            latest.polygon.length > 2
+          ) {
             setTimeout(() => {
               mapRef.current?.fitToCoordinates(
-                latestTerritory.polygon,
+                latest.polygon,
                 {
                   edgePadding: {
                     top: 100,
@@ -75,22 +185,28 @@ const MapScreen = () => {
             }, 300);
           }
         }
-      };
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
 
-      load();
-
-      return () => {
-        active = false;
-      };
-    }, []),
+  useFocusEffect(
+    useCallback(() => {
+      loadTerritories();
+    }, [loadTerritories]),
   );
 
   const openTerritory = (
     territory: StoredTerritory,
   ) => {
-    navigation.navigate('TerritoryDetails', {
-      territory,
-    });
+    navigation.navigate(
+      'TerritoryDetails',
+      {
+        territory,
+      },
+    );
   };
 
   return (
@@ -107,48 +223,67 @@ const MapScreen = () => {
           latitudeDelta: 0.08,
           longitudeDelta: 0.08,
         }}>
-        {territories.map(territory => (
-          <Polygon
-            key={territory.id}
-            coordinates={territory.polygon}
-            strokeWidth={5}
-            strokeColor="#000000"
-            fillColor="rgba(255,255,255,0.45)"
-            tappable
-            onPress={() =>
-              openTerritory(territory)
-            }
-          />
-        ))}
+        {territories.map(
+          territory => (
+            <Polygon
+              key={territory.id}
+              coordinates={
+                territory.polygon
+              }
+              strokeWidth={5}
+              strokeColor="#000000"
+              fillColor="rgba(255,255,255,0.45)"
+              tappable
+              onPress={() =>
+                openTerritory(
+                  territory,
+                )
+              }
+            />
+          ),
+        )}
       </MapView>
 
       {territories.length > 0 && (
         <View style={styles.counter}>
           <Text style={styles.counterText}>
-            {territories.length} TERRITORY
-            {territories.length > 1 ? 'IES' : ''}
+            {territories.length}{' '}
+            {territories.length === 1
+              ? 'TERRITORY'
+              : 'TERRITORIES'}
           </Text>
         </View>
       )}
 
       {loading && (
         <View style={styles.loading}>
-          <ActivityIndicator color="#fff" />
+          <ActivityIndicator
+            color="#fff"
+          />
         </View>
       )}
 
-      {territories.length === 0 && !loading && (
-        <View style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>
-            No Territory Yet
-          </Text>
-
-          <Text style={styles.emptyText}>
-            Complete a closed route to capture your
-            first territory.
+      {usingFallback && (
+        <View style={styles.fallbackBadge}>
+          <Text style={styles.fallbackText}>
+            OFFLINE DATA
           </Text>
         </View>
       )}
+
+      {territories.length === 0 &&
+        !loading && (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>
+              No Territory Yet
+            </Text>
+
+            <Text style={styles.emptyText}>
+              Complete a closed route to
+              capture your first territory.
+            </Text>
+          </View>
+        )}
     </View>
   );
 };
@@ -188,6 +323,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     padding: 10,
     borderRadius: 20,
+  },
+
+  fallbackBadge: {
+    position: 'absolute',
+    top: 65,
+    alignSelf: 'center',
+    backgroundColor: '#111',
+    borderWidth: 1,
+    borderColor: '#333',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 15,
+  },
+
+  fallbackText: {
+    color: '#777',
+    fontSize: 9,
+    fontWeight: '900',
   },
 
   emptyCard: {
