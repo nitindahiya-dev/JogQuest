@@ -5,48 +5,98 @@ import {
   View,
 } from 'react-native';
 
+import {
+  RouteProp,
+  useRoute,
+} from '@react-navigation/native';
+
+import type {RootStackParamList} from '../../navigation/types';
+
+type TerritoryDetailsRouteProp = RouteProp<
+  RootStackParamList,
+  'TerritoryDetails'
+>;
+
 const TerritoryDetailsScreen = () => {
+  const route =
+    useRoute<TerritoryDetailsRouteProp>();
+
+  const {territory} = route.params;
+
+  const capturedDate = new Date(
+    territory.capturedAt,
+  );
+
   return (
     <View style={styles.container}>
-      <View style={styles.mapPlaceholder}>
-        <Text style={styles.mapText}>TERRITORY MAP</Text>
+      <View style={styles.header}>
+        <Text style={styles.title}>
+          Territory
+        </Text>
+
+        <Text style={styles.subtitle}>
+          {territory.activityType} capture
+        </Text>
       </View>
 
-      <View style={styles.content}>
-        <Text style={styles.title}>Delhi Territory</Text>
-        <Text style={styles.subtitle}>Captured today</Text>
+      <View style={styles.areaCard}>
+        <Text style={styles.areaValue}>
+          {territory.areaKm2.toFixed(3)} km²
+        </Text>
 
-        <View style={styles.areaCard}>
-          <Text style={styles.areaValue}>2.84 km²</Text>
-          <Text style={styles.areaLabel}>TERRITORY AREA</Text>
-        </View>
+        <Text style={styles.areaLabel}>
+          TERRITORY AREA
+        </Text>
+      </View>
 
-        <View style={styles.info}>
-          <View>
-            <Text style={styles.label}>OWNER</Text>
-            <Text style={styles.value}>Nitin</Text>
-          </View>
-
-          <View>
-            <Text style={styles.label}>STATUS</Text>
-            <Text style={styles.value}>Protected</Text>
-          </View>
-
-          <View>
-            <Text style={styles.label}>RANK</Text>
-            <Text style={styles.value}>#31</Text>
-          </View>
-        </View>
-
-        <View style={styles.historyCard}>
-          <Text style={styles.historyTitle}>Territory history</Text>
-
-          <Text style={styles.historyText}>
-            Captured by Nitin
+      <View style={styles.infoCard}>
+        <View style={styles.row}>
+          <Text style={styles.label}>
+            OWNER
           </Text>
 
-          <Text style={styles.historyDate}>
-            Today • 10:42 AM
+          <Text style={styles.value}>
+            You
+          </Text>
+        </View>
+
+        <View style={styles.row}>
+          <Text style={styles.label}>
+            ACTIVITY
+          </Text>
+
+          <Text style={styles.value}>
+            {territory.activityType}
+          </Text>
+        </View>
+
+        <View style={styles.row}>
+          <Text style={styles.label}>
+            STATUS
+          </Text>
+
+          <Text style={styles.value}>
+            Protected
+          </Text>
+        </View>
+
+        <View style={styles.row}>
+          <Text style={styles.label}>
+            CAPTURED
+          </Text>
+
+          <Text style={styles.value}>
+            {capturedDate.toLocaleString()}
+          </Text>
+        </View>
+
+        <View style={styles.row}>
+          <Text style={styles.label}>
+            TERRITORY ID
+          </Text>
+
+          <Text style={styles.value}>
+            {territory.id}
           </Text>
         </View>
       </View>
@@ -60,28 +110,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
-  },
-
-  mapPlaceholder: {
-    height: 260,
-    backgroundColor: '#161616',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  mapText: {
-    color: '#444',
-    fontSize: 18,
-    fontWeight: '900',
-  },
-
-  content: {
     padding: 20,
+  },
+
+  header: {
+    marginTop: 15,
   },
 
   title: {
     color: '#fff',
-    fontSize: 28,
+    fontSize: 30,
     fontWeight: '900',
   },
 
@@ -92,15 +130,15 @@ const styles = StyleSheet.create({
 
   areaCard: {
     backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 22,
+    borderRadius: 22,
+    paddingVertical: 30,
     alignItems: 'center',
-    marginTop: 22,
+    marginTop: 25,
   },
 
   areaValue: {
     color: '#000',
-    fontSize: 30,
+    fontSize: 36,
     fontWeight: '900',
   },
 
@@ -111,45 +149,33 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
 
-  info: {
+  infoCard: {
+    backgroundColor: '#111',
+    borderRadius: 20,
+    padding: 18,
+    marginTop: 20,
+  },
+
+  row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 22,
+    gap: 15,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#222',
   },
 
   label: {
     color: '#666',
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: '800',
   },
 
   value: {
     color: '#fff',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
-    marginTop: 5,
-  },
-
-  historyCard: {
-    backgroundColor: '#111',
-    borderRadius: 18,
-    padding: 18,
-    marginTop: 22,
-  },
-
-  historyTitle: {
-    color: '#fff',
-    fontSize: 17,
-    fontWeight: '800',
-  },
-
-  historyText: {
-    color: '#aaa',
-    marginTop: 12,
-  },
-
-  historyDate: {
-    color: '#555',
-    marginTop: 5,
+    flexShrink: 1,
+    textAlign: 'right',
   },
 });

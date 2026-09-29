@@ -8,7 +8,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {createTerritory} from '../../utils/territory';
+import { createTerritory } from '../../utils/territory';
+import { saveTerritory } from '../../utils/territoryStorage';
 
 import MapView, {
   PROVIDER_GOOGLE,
@@ -215,32 +216,42 @@ const ActivityScreen = () => {
   // FINISH
   // --------------------------------------------------
 
-const stopActivity = () => {
-  const finalTime = startTimeRef.current
-    ? Math.floor(
+  const stopActivity = async () => {
+    const finalTime = startTimeRef.current
+      ? Math.floor(
         (Date.now() - startTimeRef.current) / 1000,
       )
-    : 0;
+      : 0;
 
-  const territory = createTerritory(route);
+    const territory = createTerritory(route);
 
-  setElapsedSeconds(finalTime);
+    if (territory.captured) {
+      await saveTerritory({
+        id: `territory-${Date.now()}`,
+        areaM2: territory.areaM2,
+        areaKm2: territory.areaKm2,
+        polygon: territory.polygon,
+        activityType,
+        capturedAt: new Date().toISOString(),
+      });
+    }
 
-  setIsTracking(false);
-  setIsPaused(false);
+    setElapsedSeconds(finalTime);
+    setIsTracking(false);
+    setIsPaused(false);
 
-  startTimeRef.current = null;
-  lastLocationRef.current = null;
+    startTimeRef.current = null;
+    lastLocationRef.current = null;
 
-  navigation.navigate('ActivityResult', {
-    activityType,
-    distance,
-    elapsedSeconds: finalTime,
-    pace: calculatePace(),
-    route,
-    territory,
-  });
-};
+    navigation.navigate('ActivityResult', {
+      activityType,
+      distance,
+      elapsedSeconds: finalTime,
+      pace: calculatePace(),
+      route,
+      territory,
+    });
+  };
 
   // --------------------------------------------------
   // PACE

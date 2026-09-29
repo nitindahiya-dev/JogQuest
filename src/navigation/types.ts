@@ -3,6 +3,15 @@ export type Coordinate = {
   longitude: number;
 };
 
+export type StoredTerritory = {
+  id: string;
+  areaM2: number;
+  areaKm2: number;
+  polygon: Coordinate[];
+  activityType: 'Run' | 'Walk' | 'Cycle';
+  capturedAt: string;
+};
+
 export type ActivityResultParams = {
   activityType: 'Run' | 'Walk' | 'Cycle';
   distance: number;
@@ -20,5 +29,7 @@ export type ActivityResultParams = {
 export type RootStackParamList = {
   MainTabs: undefined;
   ActivityResult: ActivityResultParams;
-  TerritoryDetails: undefined;
+  TerritoryDetails: {
+    territory: StoredTerritory;
+  };
 };
