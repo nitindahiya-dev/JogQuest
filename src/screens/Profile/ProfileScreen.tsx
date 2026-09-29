@@ -1,80 +1,242 @@
-import React from 'react';
+import React, {
+  useCallback,
+  useState,
+} from 'react';
+
 import {
+  ActivityIndicator,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import {useNavigation} from '@react-navigation/native';
-import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 
-import type {RootStackParamList} from '../../navigation/types';
+import {
+  useFocusEffect,
+  useNavigation,
+} from '@react-navigation/native';
 
-type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
+import type {BottomTabNavigationProp} from '@react-navigation/bottom-tabs';
+
+import type {MainTabParamList} from '../../navigation/types';
+
+type NavigationProp =
+  BottomTabNavigationProp<MainTabParamList>;
+
+type Profile = {
+  id: string;
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+  activities_count: number;
+  total_distance_km: number;
+  territories_captured: number;
+  territory_km2: number;
+  territories_defended: number;
+  rank: number;
+  level: number;
+};
+
+const API_BASE_URL =
+  'http://127.0.0.1:4000';
+
+const DEV_USER_ID =
+  '7445aab6-039b-4e64-8559-1ec9ae702ffe';
 
 const ProfileScreen = () => {
-  const navigation = useNavigation<NavigationProp>();
+  const navigation =
+    useNavigation<NavigationProp>();
+
+  const [profile, setProfile] =
+    useState<Profile | null>(null);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState<string | null>(null);
+
+  const loadProfile = useCallback(
+    async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const response = await fetch(
+          `${API_BASE_URL}/api/users/${DEV_USER_ID}/profile`,
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Server returned ${response.status}`,
+          );
+        }
+
+        const data =
+          (await response.json()) as Profile;
+
+        setProfile(data);
+      } catch (err) {
+        console.error(
+          'Failed to load profile:',
+          err,
+        );
+
+        setError(
+          'Could not load profile data.',
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      loadProfile();
+    }, [loadProfile]),
+  );
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" />
+        <Text style={styles.loadingText}>
+          Loading profile...
+        </Text>
+      </View>
+    );
+  }
+
+  if (error || !profile) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.errorText}>
+          {error ?? 'Profile unavailable.'}
+        </Text>
+
+        <TouchableOpacity
+          style={styles.retryButton}
+          onPress={loadProfile}>
+          <Text style={styles.retryText}>
+            RETRY
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
       <View style={styles.profileHeader}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>N</Text>
+          <Text style={styles.avatarText}>
+            {profile.display_name
+              .charAt(0)
+              .toUpperCase()}
+          </Text>
         </View>
 
-        <Text style={styles.name}>Nitin</Text>
-        <Text style={styles.username}>@nitin</Text>
+        <Text style={styles.name}>
+          {profile.display_name}
+        </Text>
+
+        <Text style={styles.username}>
+          @{profile.username}
+        </Text>
 
         <View style={styles.levelBadge}>
-          <Text style={styles.levelText}>LEVEL 12</Text>
+          <Text style={styles.levelText}>
+            LEVEL {profile.level}
+          </Text>
         </View>
       </View>
 
       <View style={styles.statsCard}>
         <View style={styles.stat}>
-          <Text style={styles.value}>24.8</Text>
-          <Text style={styles.label}>TERRITORY KM²</Text>
+          <Text style={styles.value}>
+            {Number(
+              profile.territory_km2,
+            ).toFixed(3)}
+          </Text>
+
+          <Text style={styles.label}>
+            TERRITORY KM²
+          </Text>
         </View>
 
         <View style={styles.divider} />
 
         <View style={styles.stat}>
-          <Text style={styles.value}>127</Text>
-          <Text style={styles.label}>ACTIVITIES</Text>
+          <Text style={styles.value}>
+            {profile.activities_count}
+          </Text>
+
+          <Text style={styles.label}>
+            ACTIVITIES
+          </Text>
         </View>
 
         <View style={styles.divider} />
 
         <View style={styles.stat}>
-          <Text style={styles.value}>31</Text>
-          <Text style={styles.label}>RANK</Text>
+          <Text style={styles.value}>
+            {profile.rank}
+          </Text>
+
+          <Text style={styles.label}>
+            RANK
+          </Text>
         </View>
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Quest Stats</Text>
+        <Text style={styles.sectionTitle}>
+          Quest Stats
+        </Text>
 
         <View style={styles.row}>
-          <Text style={styles.rowLabel}>Distance</Text>
-          <Text style={styles.rowValue}>842.6 km</Text>
+          <Text style={styles.rowLabel}>
+            Distance
+          </Text>
+
+          <Text style={styles.rowValue}>
+            {Number(
+              profile.total_distance_km,
+            ).toFixed(2)}{' '}
+            km
+          </Text>
         </View>
 
         <View style={styles.row}>
-          <Text style={styles.rowLabel}>Territories Captured</Text>
-          <Text style={styles.rowValue}>86</Text>
+          <Text style={styles.rowLabel}>
+            Territories Captured
+          </Text>
+
+          <Text style={styles.rowValue}>
+            {profile.territories_captured}
+          </Text>
         </View>
 
         <View style={styles.row}>
-          <Text style={styles.rowLabel}>Territories Defended</Text>
-          <Text style={styles.rowValue}>41</Text>
+          <Text style={styles.rowLabel}>
+            Territories Defended
+          </Text>
+
+          <Text style={styles.rowValue}>
+            {profile.territories_defended}
+          </Text>
         </View>
       </View>
 
       <TouchableOpacity
         style={styles.activityButton}
-        onPress={() => navigation.navigate('ActivityResult')}>
+        onPress={() =>
+          navigation.navigate('History')
+        }>
         <Text style={styles.activityButtonText}>
-          VIEW LATEST ACTIVITY
+          VIEW ACTIVITY HISTORY
         </Text>
       </TouchableOpacity>
     </View>
@@ -88,6 +250,37 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
     padding: 20,
+  },
+
+  center: {
+    flex: 1,
+    backgroundColor: '#000',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+
+  loadingText: {
+    color: '#888',
+    marginTop: 12,
+  },
+
+  errorText: {
+    color: '#aaa',
+    textAlign: 'center',
+  },
+
+  retryButton: {
+    marginTop: 18,
+    backgroundColor: '#fff',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 14,
+  },
+
+  retryText: {
+    color: '#000',
+    fontWeight: '900',
   },
 
   profileHeader: {

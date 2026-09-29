@@ -1,6 +1,7 @@
 export type Coordinate = {
   latitude: number;
   longitude: number;
+  accuracy?: number;
 };
 
 const toRadians = (value: number) => (value * Math.PI) / 180;

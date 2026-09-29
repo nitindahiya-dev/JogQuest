@@ -90,7 +90,8 @@ export const createTerritory = (
     };
   }
 
-  const ring = polygonFeature.geometry.coordinates[0];
+  const ring =
+    polygonFeature.geometry.coordinates[0] as [number, number][];
 
   const polygon: Coordinate[] = ring.map(
     ([longitude, latitude]) => ({

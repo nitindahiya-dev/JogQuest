@@ -1,7 +1,15 @@
 import React from 'react';
-import {NavigationContainer} from '@react-navigation/native';
-import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
-import {createNativeStackNavigator} from '@react-navigation/native-stack';
+import {
+  NavigationContainer,
+} from '@react-navigation/native';
+
+import {
+  createBottomTabNavigator,
+} from '@react-navigation/bottom-tabs';
+
+import {
+  createNativeStackNavigator,
+} from '@react-navigation/native-stack';
 
 import MapScreen from '../screens/Map/MapScreen';
 import ActivityScreen from '../screens/Activity/ActivityScreen';
@@ -9,11 +17,17 @@ import ActivityResultScreen from '../screens/Activity/ActivityResultScreen';
 import LeaderboardScreen from '../screens/Leaderboard/LeaderboardScreen';
 import ProfileScreen from '../screens/Profile/ProfileScreen';
 import TerritoryDetailsScreen from '../screens/Territory/TerritoryDetailsScreen';
+import ActivityHistoryScreen from '../screens/History/ActivityHistoryScreen';
 
-import type {RootStackParamList} from './types';
+import type {
+  RootStackParamList,
+} from './types';
 
-const Tab = createBottomTabNavigator();
-const Stack = createNativeStackNavigator<RootStackParamList>();
+const Tab =
+  createBottomTabNavigator();
+
+const Stack =
+  createNativeStackNavigator<RootStackParamList>();
 
 const MainTabs = () => {
   return (
@@ -27,10 +41,30 @@ const MainTabs = () => {
         tabBarActiveTintColor: '#fff',
         tabBarInactiveTintColor: '#666',
       }}>
-      <Tab.Screen name="Map" component={MapScreen} />
-      <Tab.Screen name="Activity" component={ActivityScreen} />
-      <Tab.Screen name="Leaderboard" component={LeaderboardScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen
+        name="Map"
+        component={MapScreen}
+      />
+
+      <Tab.Screen
+        name="Activity"
+        component={ActivityScreen}
+      />
+
+      <Tab.Screen
+        name="History"
+        component={ActivityHistoryScreen}
+      />
+
+      <Tab.Screen
+        name="Leaderboard"
+        component={LeaderboardScreen}
+      />
+
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+      />
     </Tab.Navigator>
   );
 };
@@ -51,10 +85,13 @@ const AppNavigator = () => {
             backgroundColor: '#000',
           },
         }}>
+
         <Stack.Screen
           name="MainTabs"
           component={MainTabs}
-          options={{headerShown: false}}
+          options={{
+            headerShown: false,
+          }}
         />
 
         <Stack.Screen
@@ -72,6 +109,7 @@ const AppNavigator = () => {
             title: 'Territory',
           }}
         />
+
       </Stack.Navigator>
     </NavigationContainer>
   );

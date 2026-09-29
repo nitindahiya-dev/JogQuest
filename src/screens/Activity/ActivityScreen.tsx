@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   PermissionsAndroid,
   Platform,
   SafeAreaView,
@@ -32,6 +33,11 @@ type NavigationProp =
 
 type ActivityType = 'Run' | 'Walk' | 'Cycle';
 
+const API_BASE_URL = 'http://10.0.2.2:4000';
+
+const DEV_USER_ID =
+  '7445aab6-039b-4e64-8559-1ec9ae702ffe';
+
 const ActivityScreen = () => {
   const navigation = useNavigation<NavigationProp>();
 
@@ -46,6 +52,9 @@ const ActivityScreen = () => {
   const [isPaused, setIsPaused] =
     useState(false);
 
+  const [isSaving, setIsSaving] =
+    useState(false);
+
   const [route, setRoute] =
     useState<Coordinate[]>([]);
 
@@ -57,6 +66,9 @@ const ActivityScreen = () => {
 
   const startTimeRef =
     useRef<number | null>(null);
+
+  const startedAtRef =
+    useRef<string | null>(null);
 
   const lastLocationRef =
     useRef<Coordinate | null>(null);
@@ -178,11 +190,15 @@ const ActivityScreen = () => {
     setDistance(0);
     setElapsedSeconds(0);
     setIsPaused(false);
+    setIsSaving(false);
 
     lastLocationRef.current = null;
 
     startTimeRef.current =
       Date.now();
+
+    startedAtRef.current =
+      new Date().toISOString();
 
     setIsTracking(true);
   };
@@ -213,67 +229,157 @@ const ActivityScreen = () => {
   };
 
   // --------------------------------------------------
-  // FINISH
-  // --------------------------------------------------
-
-  const stopActivity = async () => {
-    const finalTime = startTimeRef.current
-      ? Math.floor(
-        (Date.now() - startTimeRef.current) / 1000,
-      )
-      : 0;
-
-    const territory = createTerritory(route);
-
-    if (territory.captured) {
-      await saveTerritory({
-        id: `territory-${Date.now()}`,
-        areaM2: territory.areaM2,
-        areaKm2: territory.areaKm2,
-        polygon: territory.polygon,
-        activityType,
-        capturedAt: new Date().toISOString(),
-      });
-    }
-
-    setElapsedSeconds(finalTime);
-    setIsTracking(false);
-    setIsPaused(false);
-
-    startTimeRef.current = null;
-    lastLocationRef.current = null;
-
-    navigation.navigate('ActivityResult', {
-      activityType,
-      distance,
-      elapsedSeconds: finalTime,
-      pace: calculatePace(),
-      route,
-      territory,
-    });
-  };
-
-  // --------------------------------------------------
   // PACE
   // --------------------------------------------------
 
-  const calculatePace = () => {
-    if (distance <= 0.01) {
+  const calculatePace = (
+    distanceKm = distance,
+    seconds = elapsedSeconds,
+  ) => {
+    if (distanceKm <= 0.01) {
       return '--';
     }
 
     const secondsPerKm =
-      elapsedSeconds / distance;
+      seconds / distanceKm;
 
     const minutes =
       Math.floor(secondsPerKm / 60);
 
-    const seconds =
+    const remainingSeconds =
       Math.floor(secondsPerKm % 60);
 
     return `${minutes}:${String(
-      seconds,
+      remainingSeconds,
     ).padStart(2, '0')}`;
+  };
+
+  // --------------------------------------------------
+  // SAVE ACTIVITY TO BACKEND
+  // --------------------------------------------------
+
+  const saveActivityToBackend = async (
+    finalTime: number,
+    pace: string,
+    territory: ReturnType<typeof createTerritory>,
+  ) => {
+    const finishedAt =
+      new Date().toISOString();
+
+    const response = await fetch(
+      `${API_BASE_URL}/api/activities`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: DEV_USER_ID,
+          activityType,
+          distanceKm: distance,
+          elapsedSeconds: finalTime,
+          pace,
+          startedAt:
+            startedAtRef.current ?? undefined,
+          finishedAt,
+          route,
+          territory: territory.captured
+            ? {
+                areaM2: territory.areaM2,
+                areaKm2: territory.areaKm2,
+                polygon: territory.polygon,
+              }
+            : undefined,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const errorText =
+        await response.text();
+
+      throw new Error(
+        `Backend returned ${response.status}: ${errorText}`,
+      );
+    }
+
+    return response.json();
+  };
+
+  // --------------------------------------------------
+  // FINISH
+  // --------------------------------------------------
+
+  const stopActivity = async () => {
+    if (isSaving) {
+      return;
+    }
+
+    setIsSaving(true);
+
+    const finalTime = startTimeRef.current
+      ? Math.floor(
+          (Date.now() - startTimeRef.current) / 1000,
+        )
+      : 0;
+
+    const finalPace =
+      calculatePace(distance, finalTime);
+
+    const territory =
+      createTerritory(route);
+
+    try {
+      // Keep local persistence.
+      if (territory.captured) {
+        await saveTerritory({
+          id: `territory-${Date.now()}`,
+          areaM2: territory.areaM2,
+          areaKm2: territory.areaKm2,
+          polygon: territory.polygon,
+          activityType,
+          capturedAt:
+            new Date().toISOString(),
+        });
+      }
+
+      // Save remotely.
+      await saveActivityToBackend(
+        finalTime,
+        finalPace,
+        territory,
+      );
+
+      setElapsedSeconds(finalTime);
+      setIsTracking(false);
+      setIsPaused(false);
+      setIsSaving(false);
+
+      startTimeRef.current = null;
+      startedAtRef.current = null;
+      lastLocationRef.current = null;
+
+      navigation.navigate('ActivityResult', {
+        activityType,
+        distance,
+        elapsedSeconds: finalTime,
+        pace: finalPace,
+        route,
+        territory,
+      });
+    } catch (error) {
+      console.error(
+        'Failed to save activity:',
+        error,
+      );
+
+      setIsSaving(false);
+
+      Alert.alert(
+        'Backend Save Failed',
+        'The activity could not be saved to the server. Your local territory data is still preserved.',
+      );
+    }
   };
 
   return (
@@ -313,7 +419,9 @@ const ActivityScreen = () => {
 
           <View style={styles.statusBadge}>
             <Text style={styles.statusText}>
-              {isTracking
+              {isSaving
+                ? 'SAVING ACTIVITY...'
+                : isTracking
                 ? isPaused
                   ? 'PAUSED'
                   : `${activityType.toUpperCase()} IN PROGRESS`
@@ -410,7 +518,12 @@ const ActivityScreen = () => {
           <View style={styles.controls}>
             {!isTracking && (
               <TouchableOpacity
-                style={styles.startButton}
+                style={[
+                  styles.startButton,
+                  isSaving &&
+                  styles.buttonDisabled,
+                ]}
+                disabled={isSaving}
                 onPress={startActivity}>
                 <Text
                   style={styles.buttonText}>
@@ -423,7 +536,12 @@ const ActivityScreen = () => {
             {isTracking && !isPaused && (
               <View style={styles.buttonRow}>
                 <TouchableOpacity
-                  style={styles.pauseButton}
+                  style={[
+                    styles.pauseButton,
+                    isSaving &&
+                    styles.buttonDisabled,
+                  ]}
+                  disabled={isSaving}
                   onPress={pauseActivity}>
                   <Text
                     style={styles.buttonText}>
@@ -432,11 +550,18 @@ const ActivityScreen = () => {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={styles.finishButton}
+                  style={[
+                    styles.finishButton,
+                    isSaving &&
+                    styles.buttonDisabled,
+                  ]}
+                  disabled={isSaving}
                   onPress={stopActivity}>
                   <Text
                     style={styles.buttonText}>
-                    FINISH
+                    {isSaving
+                      ? 'SAVING...'
+                      : 'FINISH'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -445,7 +570,12 @@ const ActivityScreen = () => {
             {isTracking && isPaused && (
               <View style={styles.buttonRow}>
                 <TouchableOpacity
-                  style={styles.resumeButton}
+                  style={[
+                    styles.resumeButton,
+                    isSaving &&
+                    styles.buttonDisabled,
+                  ]}
+                  disabled={isSaving}
                   onPress={resumeActivity}>
                   <Text
                     style={styles.buttonText}>
@@ -454,11 +584,18 @@ const ActivityScreen = () => {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={styles.finishButton}
+                  style={[
+                    styles.finishButton,
+                    isSaving &&
+                    styles.buttonDisabled,
+                  ]}
+                  disabled={isSaving}
                   onPress={stopActivity}>
                   <Text
                     style={styles.buttonText}>
-                    FINISH
+                    {isSaving
+                      ? 'SAVING...'
+                      : 'FINISH'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -607,6 +744,10 @@ const styles = StyleSheet.create({
     paddingVertical: 18,
     borderRadius: 18,
     alignItems: 'center',
+  },
+
+  buttonDisabled: {
+    opacity: 0.5,
   },
 
   buttonText: {

@@ -33,3 +33,10 @@ export type RootStackParamList = {
     territory: StoredTerritory;
   };
 };
+export type MainTabParamList = {
+  Map: undefined;
+  Activity: undefined;
+  History: undefined;
+  Leaderboard: undefined;
+  Profile: undefined;
+};
