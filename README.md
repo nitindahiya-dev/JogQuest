@@ -1,97 +1,144 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# JogQuest
 
-# Getting Started
+JogQuest is a GPS-based fitness and territory-capture app built with React Native. The app lets users start a run, walk, or cycle session, track their route in real time, and turn a completed loop into a captured territory when it meets the app's validity rules. Captured territories are displayed on a map and stored locally for later review.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+## Overview
 
-## Step 1: Start Metro
+JogQuest combines outdoor activity tracking with a lightweight gamified quest system:
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+- Start an activity session and choose Run, Walk, or Cycle
+- Track live GPS location, distance, time, and pace
+- Draw the route as the user moves
+- Complete a loop that closes near its starting point
+- Capture a territory when the route meets the required conditions
+- Review captured territories on the map
+- Compete through the leaderboard and profile screens
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+## Features
 
-```sh
-# Using npm
+- Real-time location tracking using `react-native-maps`
+- Activity modes for running, walking, and cycling
+- Live stats for distance, elapsed time, pace, and GPS samples
+- Route validation logic for completed territory loops
+- Territory persistence with AsyncStorage
+- Map view for all saved territories
+- Dark-themed fitness game interface
+- Leaderboard and profile sections for progression tracking
+
+## Tech Stack
+
+- React Native
+- TypeScript
+- React Navigation
+- `react-native-maps`
+- `@turf/turf`
+- `@react-native-async-storage/async-storage`
+- Jest
+
+## Project Structure
+
+```text
+JogQuest/
+├── App.tsx
+├── src/
+│   ├── navigation/
+│   │   ├── AppNavigator.tsx
+│   │   └── types.ts
+│   ├── screens/
+│   │   ├── Activity/
+│   │   │   ├── ActivityScreen.tsx
+│   │   │   └── ActivityResultScreen.tsx
+│   │   ├── Leaderboard/
+│   │   │   └── LeaderboardScreen.tsx
+│   │   ├── Map/
+│   │   │   └── MapScreen.tsx
+│   │   ├── Profile/
+│   │   │   └── ProfileScreen.tsx
+│   │   └── Territory/
+│   │       └── TerritoryDetailsScreen.tsx
+│   └── utils/
+│       ├── geo.ts
+│       ├── territory.ts
+│       └── territoryStorage.ts
+├── android/
+├── ios/
+├── package.json
+├── babel.config.js
+├── metro.config.js
+├── tsconfig.json
+├── jest.config.js
+└── README.md
+```
+
+## Territory Logic
+
+A route becomes a captured territory only when it meets the app's checks:
+
+- enough GPS points are collected
+- the route closes near its start point
+- the resulting area is large enough to qualify as territory
+
+This logic is handled in the territory utility layer before a territory is stored.
+
+## Getting Started
+
+### Prerequisites
+
+Make sure your React Native development environment is correctly set up for Android and/or iOS.
+
+### Install dependencies
+
+```bash
+npm install
+```
+
+### Start Metro
+
+```bash
 npm start
-
-# OR using Yarn
-yarn start
 ```
 
-## Step 2: Build and run your app
+### Run the app
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+Android:
 
-### Android
-
-```sh
-# Using npm
+```bash
 npm run android
-
-# OR using Yarn
-yarn android
 ```
 
-### iOS
+iOS:
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
-
-```sh
-bundle install
-```
-
-Then, and every time you update your native dependencies, run:
-
-```sh
-bundle exec pod install
-```
-
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
-
-```sh
-# Using npm
+```bash
 npm run ios
-
-# OR using Yarn
-yarn ios
 ```
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+## Usage Flow
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+1. Open the app and navigate to the Activity tab.
+2. Choose the activity type: Run, Walk, or Cycle.
+3. Press Start Activity and begin moving.
+4. The app records GPS data, time, and distance in real time.
+5. Finish the session to evaluate whether the route qualifies as a territory.
+6. If successful, the captured area is saved and appears on the map.
+7. Tap saved territory polygons to review details.
 
-## Step 3: Modify your app
+## Notes
 
-Now that you have successfully run the app, let's make changes!
+- Location permission is required during activity tracking.
+- The app is designed for outdoor use with a clear GPS signal.
+- Territory capture is based on route completion and area validation, not just distance alone.
+- The project currently stores captured territories locally on the device.
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+## Scripts
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+```bash
+npm start
+npm run android
+npm run ios
+npm test
+npm run lint
+```
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+## License
 
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+This project is currently intended for local development and learning purposes.
