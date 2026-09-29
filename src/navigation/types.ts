@@ -1,6 +1,7 @@
 export type Coordinate = {
   latitude: number;
   longitude: number;
+  accuracy?: number;
 };
 
 export type StoredTerritory = {
@@ -30,9 +31,10 @@ export type RootStackParamList = {
   MainTabs: undefined;
   ActivityResult: ActivityResultParams;
   TerritoryDetails: {
-    territory: StoredTerritory;
+    territoryId: string;
   };
 };
+
 export type MainTabParamList = {
   Map: undefined;
   Activity: undefined;

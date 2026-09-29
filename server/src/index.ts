@@ -656,8 +656,80 @@ app.post('/api/territories/claim', async (req, res) => {
 });
 
 // --------------------------------------------------
+// GET TERRITORY DETAILS
+// --------------------------------------------------
+
+app.get('/api/territories/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await query(
+      `
+      SELECT
+        t.id,
+        t.user_id,
+        t.activity_id,
+        t.activity_type,
+        t.area_m2,
+        t.area_km2,
+        t.captured_at,
+
+        u.username AS owner_username,
+        u.display_name AS owner_display_name,
+
+        a.distance_km,
+        a.elapsed_seconds,
+        a.pace,
+
+        (
+          SELECT th.action
+          FROM territory_history th
+          WHERE th.territory_id = t.id
+          ORDER BY th.created_at DESC
+          LIMIT 1
+        ) AS latest_action
+
+      FROM territories t
+
+      JOIN users u
+        ON u.id = t.user_id
+
+      LEFT JOIN activities a
+        ON a.id = t.activity_id
+
+      WHERE t.id = $1
+      `,
+      [id],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Territory not found',
+      });
+    }
+
+    const territory = result.rows[0];
+
+    res.json({
+      ...territory,
+      status:
+        territory.latest_action === 'CAPTURED'
+          ? 'Protected'
+          : territory.latest_action ?? 'Unknown',
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: 'Failed to fetch territory details',
+    });
+  }
+});
+
+// --------------------------------------------------
 // GET TERRITORIES
 // --------------------------------------------------
+
 
 
 

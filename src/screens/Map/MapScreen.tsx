@@ -204,7 +204,7 @@ const MapScreen = () => {
     navigation.navigate(
       'TerritoryDetails',
       {
-        territory,
+        territoryId: territory.id,
       },
     );
   };
