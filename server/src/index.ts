@@ -135,7 +135,7 @@ app.get('/api/users/:userId/profile', async (req, res) => {
           new_owner_id AS user_id,
           COUNT(*)::int AS territories_defended
         FROM territory_history
-        WHERE action = 'DEFENDED'
+        WHERE action = 'CHALLENGE_REJECTED'
         GROUP BY new_owner_id
       ),
       ranked_users AS (
@@ -1311,6 +1311,62 @@ app.get('/api/territories/:id/challenges', async (req, res) => {
 
     res.status(500).json({
       error: 'Failed to fetch territory challenges',
+    });
+  }
+});
+
+// --------------------------------------------------
+// GET ACTIVITY ROUTE
+// --------------------------------------------------
+
+app.get('/api/activities/:activityId/route', async (req, res) => {
+  try {
+    const { activityId } = req.params;
+
+    const activityResult = await query(
+      `
+      SELECT
+        id,
+        user_id,
+        activity_type,
+        distance_km,
+        elapsed_seconds,
+        pace
+      FROM activities
+      WHERE id = $1
+      `,
+      [activityId],
+    );
+
+    if (activityResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Activity not found',
+      });
+    }
+
+    const pointsResult = await query(
+      `
+      SELECT
+        sequence_number,
+        ST_Y(location::geometry) AS latitude,
+        ST_X(location::geometry) AS longitude,
+        recorded_at
+      FROM activity_points
+      WHERE activity_id = $1
+      ORDER BY sequence_number ASC
+      `,
+      [activityId],
+    );
+
+    res.json({
+      activity: activityResult.rows[0],
+      route: pointsResult.rows,
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: 'Failed to fetch activity route',
     });
   }
 });

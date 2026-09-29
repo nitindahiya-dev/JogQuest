@@ -6,6 +6,7 @@ import React, {
 
 import {
   ActivityIndicator,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -62,225 +63,498 @@ type TerritoryChallenge = {
   challenger_display_name: string;
 };
 
+type TerritoryHistoryItem = {
+  id: string;
+  territory_id: string;
+  action:
+    | 'CAPTURED'
+    | 'CHALLENGE_REJECTED'
+    | 'TRANSFERRED';
+  previous_owner_id: string | null;
+  previous_owner_username: string | null;
+  previous_owner_display_name: string | null;
+  new_owner_id: string | null;
+  new_owner_username: string | null;
+  new_owner_display_name: string | null;
+  created_at: string;
+};
+
+type Activity = {
+  id: string;
+  activity_type: 'Run' | 'Walk' | 'Cycle';
+  distance_km: number;
+  elapsed_seconds: number;
+  pace: string;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+};
+
+type ActivityRoutePoint = {
+  sequence_number: number;
+  latitude: number;
+  longitude: number;
+  recorded_at: string;
+};
+
 const API_BASE_URL =
   'http://127.0.0.1:4000';
 
 const DEV_USER_ID =
   '7445aab6-039b-4e64-8559-1ec9ae702ffe';
 
-const TerritoryDetailsScreen =
-  () => {
-    const route =
-      useRoute<TerritoryDetailsRouteProp>();
+const TerritoryDetailsScreen = () => {
+  const route =
+    useRoute<TerritoryDetailsRouteProp>();
 
-    const {
-      territoryId,
-    } = route.params;
+  const {
+    territoryId,
+  } = route.params;
 
-    const [territory, setTerritory] =
-      useState<TerritoryDetails | null>(
-        null,
-      );
+  const [territory, setTerritory] =
+    useState<TerritoryDetails | null>(
+      null,
+    );
 
-    const [challenges, setChallenges] =
-      useState<TerritoryChallenge[]>([]);
+  const [challenges, setChallenges] =
+    useState<TerritoryChallenge[]>([]);
 
-    const [loading, setLoading] =
-      useState(true);
+  const [history, setHistory] =
+    useState<TerritoryHistoryItem[]>([]);
 
-    const [challengeLoading, setChallengeLoading] =
-      useState(false);
+  const [activities, setActivities] =
+    useState<Activity[]>([]);
 
-    const [resolvingId, setResolvingId] =
-      useState<string | null>(null);
+  const [loading, setLoading] =
+    useState(true);
 
-    const [error, setError] =
-      useState<string | null>(null);
+  const [challengeLoading, setChallengeLoading] =
+    useState(false);
 
-    const loadTerritory =
-      useCallback(async () => {
-        try {
-          setLoading(true);
-          setError(null);
+  const [activityLoading, setActivityLoading] =
+    useState(false);
 
-          const response =
-            await fetch(
-              `${API_BASE_URL}/api/territories/${territoryId}`,
-            );
+  const [submittingChallenge, setSubmittingChallenge] =
+    useState(false);
 
-          if (!response.ok) {
-            throw new Error(
-              `Server returned ${response.status}`,
-            );
-          }
+  const [selectedActivityId, setSelectedActivityId] =
+    useState<string | null>(null);
 
-          const data =
-            (await response.json()) as TerritoryDetails;
+  const [challengeModalVisible, setChallengeModalVisible] =
+    useState(false);
 
-          setTerritory(data);
-        } catch (err) {
-          console.error(
-            'Failed to load territory:',
-            err,
+  const [resolvingId, setResolvingId] =
+    useState<string | null>(null);
+
+  const [error, setError] =
+    useState<string | null>(null);
+
+  // --------------------------------------------------
+  // Load territory
+  // --------------------------------------------------
+
+  const loadTerritory =
+    useCallback(async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const response =
+          await fetch(
+            `${API_BASE_URL}/api/territories/${territoryId}`,
           );
 
-          setError(
-            'Could not load territory details.',
+        if (!response.ok) {
+          throw new Error(
+            `Server returned ${response.status}`,
           );
-        } finally {
-          setLoading(false);
         }
-      }, [territoryId]);
 
-    const loadChallenges =
-      useCallback(async () => {
-        try {
-          setChallengeLoading(true);
+        const data =
+          (await response.json()) as TerritoryDetails;
 
-          const response =
-            await fetch(
-              `${API_BASE_URL}/api/territories/${territoryId}/challenges`,
-            );
+        setTerritory(data);
+      } catch (err) {
+        console.error(
+          'Failed to load territory:',
+          err,
+        );
 
-          if (!response.ok) {
-            throw new Error(
-              `Server returned ${response.status}`,
-            );
-          }
+        setError(
+          'Could not load territory details.',
+        );
+      } finally {
+        setLoading(false);
+      }
+    }, [territoryId]);
 
-          const data =
-            (await response.json()) as TerritoryChallenge[];
+  // --------------------------------------------------
+  // Load challenges
+  // --------------------------------------------------
 
-          setChallenges(data);
-        } catch (err) {
-          console.error(
-            'Failed to load challenges:',
-            err,
+  const loadChallenges =
+    useCallback(async () => {
+      try {
+        setChallengeLoading(true);
+
+        const response =
+          await fetch(
+            `${API_BASE_URL}/api/territories/${territoryId}/challenges`,
           );
-        } finally {
-          setChallengeLoading(false);
+
+        if (!response.ok) {
+          throw new Error(
+            `Server returned ${response.status}`,
+          );
         }
-      }, [territoryId]);
 
-    useEffect(() => {
-      loadTerritory();
-      loadChallenges();
-    }, [
-      loadTerritory,
-      loadChallenges,
-    ]);
+        const data =
+          (await response.json()) as TerritoryChallenge[];
 
-    const resolveChallenge =
-      async (
-        challengeId: string,
-        decision:
-          | 'ACCEPT'
-          | 'REJECT',
-      ) => {
-        try {
-          setResolvingId(
-            challengeId,
+        setChallenges(data);
+      } catch (err) {
+        console.error(
+          'Failed to load challenges:',
+          err,
+        );
+      } finally {
+        setChallengeLoading(false);
+      }
+    }, [territoryId]);
+
+  // --------------------------------------------------
+  // Load territory history
+  // --------------------------------------------------
+
+  const loadHistory =
+    useCallback(async () => {
+      try {
+        const response =
+          await fetch(
+            `${API_BASE_URL}/api/territories/${territoryId}/history`,
           );
 
-          const response =
-            await fetch(
-              `${API_BASE_URL}/api/territories/${territoryId}/challenges/${challengeId}/resolve`,
-              {
-                method: 'POST',
-                headers: {
-                  'Content-Type':
-                    'application/json',
-                },
-                body: JSON.stringify({
-                  resolverId:
-                    DEV_USER_ID,
-                  decision,
-                }),
+        if (!response.ok) {
+          throw new Error(
+            `Server returned ${response.status}`,
+          );
+        }
+
+        const data =
+          (await response.json()) as TerritoryHistoryItem[];
+
+        setHistory(data);
+      } catch (err) {
+        console.error(
+          'Failed to load territory history:',
+          err,
+        );
+      }
+    }, [territoryId]);
+
+  // --------------------------------------------------
+  // Load user's activities
+  // --------------------------------------------------
+
+  const loadActivities =
+    useCallback(async () => {
+      try {
+        setActivityLoading(true);
+
+        const response =
+          await fetch(
+            `${API_BASE_URL}/api/activities/${DEV_USER_ID}`,
+          );
+
+        if (!response.ok) {
+          throw new Error(
+            `Server returned ${response.status}`,
+          );
+        }
+
+        const data =
+          (await response.json()) as Activity[];
+
+        setActivities(data);
+      } catch (err) {
+        console.error(
+          'Failed to load activities:',
+          err,
+        );
+      } finally {
+        setActivityLoading(false);
+      }
+    }, []);
+
+  // --------------------------------------------------
+  // Initial loading
+  // --------------------------------------------------
+
+  useEffect(() => {
+    loadTerritory();
+    loadChallenges();
+    loadHistory();
+  }, [
+    loadTerritory,
+    loadChallenges,
+    loadHistory,
+  ]);
+
+  // --------------------------------------------------
+  // Open challenge modal
+  // --------------------------------------------------
+
+  const openChallengeModal =
+    async () => {
+      await loadActivities();
+
+      setSelectedActivityId(null);
+      setChallengeModalVisible(true);
+    };
+
+  // --------------------------------------------------
+  // Close challenge modal
+  // --------------------------------------------------
+
+  const closeChallengeModal =
+    () => {
+      if (!submittingChallenge) {
+        setChallengeModalVisible(false);
+      }
+    };
+
+  // --------------------------------------------------
+  // Submit challenge
+  // --------------------------------------------------
+
+  const submitChallenge =
+    async () => {
+      if (
+        !selectedActivityId ||
+        submittingChallenge
+      ) {
+        return;
+      }
+
+      try {
+        setSubmittingChallenge(true);
+
+        // Get the selected activity's
+        // stored GPS route.
+        const routeResponse =
+          await fetch(
+            `${API_BASE_URL}/api/activities/${selectedActivityId}/route`,
+          );
+
+        const routeData =
+          (await routeResponse.json()) as {
+            activity?: Activity;
+            route?: ActivityRoutePoint[];
+            error?: string;
+          };
+
+        if (!routeResponse.ok) {
+          throw new Error(
+            routeData.error ??
+              `Server returned ${routeResponse.status}`,
+          );
+        }
+
+        const polygon =
+          routeData.route?.map(
+            point => ({
+              latitude: Number(
+                point.latitude,
+              ),
+              longitude: Number(
+                point.longitude,
+              ),
+            }),
+          ) ?? [];
+
+        if (polygon.length < 4) {
+          throw new Error(
+            'Selected activity does not contain enough GPS points.',
+          );
+        }
+
+        // Send the route polygon to the
+        // authoritative server.
+        const response =
+          await fetch(
+            `${API_BASE_URL}/api/territories/${territoryId}/challenges`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type':
+                  'application/json',
               },
-            );
-
-          const data =
-            (await response.json()) as {
-              error?: string;
-            };
-
-          if (!response.ok) {
-            throw new Error(
-              data.error ??
-                `Server returned ${response.status}`,
-            );
-          }
-
-          await Promise.all([
-            loadTerritory(),
-            loadChallenges(),
-          ]);
-        } catch (err) {
-          console.error(
-            'Failed to resolve challenge:',
-            err,
+              body: JSON.stringify({
+                challengerId:
+                  DEV_USER_ID,
+                activityId:
+                  selectedActivityId,
+                polygon,
+              }),
+            },
           );
-        } finally {
-          setResolvingId(null);
+
+        const data =
+          (await response.json()) as {
+            error?: string;
+          };
+
+        if (!response.ok) {
+          throw new Error(
+            data.error ??
+              `Server returned ${response.status}`,
+          );
         }
-      };
 
-    if (loading) {
-      return (
-        <View style={styles.center}>
-          <ActivityIndicator
-            size="large"
-            color="#fff"
-          />
+        setChallengeModalVisible(false);
+        setSelectedActivityId(null);
 
-          <Text style={styles.loadingText}>
-            Loading territory...
-          </Text>
-        </View>
-      );
-    }
+        await loadChallenges();
+        await loadHistory();
+      } catch (err) {
+        console.error(
+          'Failed to submit challenge:',
+          err,
+        );
+      } finally {
+        setSubmittingChallenge(false);
+      }
+    };
 
-    if (error || !territory) {
-      return (
-        <View style={styles.center}>
-          <Text style={styles.errorText}>
-            {error ??
-              'Territory unavailable.'}
-          </Text>
+  // --------------------------------------------------
+  // Resolve challenge
+  // --------------------------------------------------
 
-          <TouchableOpacity
-            style={styles.retryButton}
-            onPress={loadTerritory}>
-            <Text style={styles.retryText}>
-              RETRY
-            </Text>
-          </TouchableOpacity>
-        </View>
-      );
-    }
+  const resolveChallenge =
+    async (
+      challengeId: string,
+      decision:
+        | 'ACCEPT'
+        | 'REJECT',
+    ) => {
+      try {
+        setResolvingId(challengeId);
 
-    const capturedDate =
-      new Date(
-        territory.captured_at,
-      );
+        const response =
+          await fetch(
+            `${API_BASE_URL}/api/territories/${territoryId}/challenges/${challengeId}/resolve`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type':
+                  'application/json',
+              },
+              body: JSON.stringify({
+                resolverId:
+                  DEV_USER_ID,
+                decision,
+              }),
+            },
+          );
 
-    const isOwner =
-      territory.user_id ===
-      DEV_USER_ID;
+        const data =
+          (await response.json()) as {
+            error?: string;
+          };
 
-    const pendingChallenges =
-      challenges.filter(
-        challenge =>
-          challenge.status ===
-          'PENDING',
-      );
+        if (!response.ok) {
+          throw new Error(
+            data.error ??
+              `Server returned ${response.status}`,
+          );
+        }
 
+        await Promise.all([
+          loadTerritory(),
+          loadChallenges(),
+          loadHistory(),
+        ]);
+      } catch (err) {
+        console.error(
+          'Failed to resolve challenge:',
+          err,
+        );
+      } finally {
+        setResolvingId(null);
+      }
+    };
+
+  // --------------------------------------------------
+  // Loading state
+  // --------------------------------------------------
+
+  if (loading) {
     return (
+      <View style={styles.center}>
+        <ActivityIndicator
+          size="large"
+          color="#fff"
+        />
+
+        <Text style={styles.loadingText}>
+          Loading territory...
+        </Text>
+      </View>
+    );
+  }
+
+  // --------------------------------------------------
+  // Error state
+  // --------------------------------------------------
+
+  if (error || !territory) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.errorText}>
+          {error ??
+            'Territory unavailable.'}
+        </Text>
+
+        <TouchableOpacity
+          style={styles.retryButton}
+          onPress={loadTerritory}>
+          <Text style={styles.retryText}>
+            RETRY
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const capturedDate =
+    new Date(
+      territory.captured_at,
+    );
+
+  const isOwner =
+    territory.user_id ===
+    DEV_USER_ID;
+
+  const hasPendingOwnChallenge =
+    challenges.some(
+      challenge =>
+        challenge.challenger_id ===
+          DEV_USER_ID &&
+        challenge.status ===
+          'PENDING',
+    );
+
+  return (
+    <>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={
           styles.container
         }>
+        {/* ------------------------------------------ */}
+        {/* Header */}
+        {/* ------------------------------------------ */}
+
         <View style={styles.header}>
           <Text style={styles.title}>
             Territory
@@ -290,6 +564,10 @@ const TerritoryDetailsScreen =
             {territory.activity_type} capture
           </Text>
         </View>
+
+        {/* ------------------------------------------ */}
+        {/* Area */}
+        {/* ------------------------------------------ */}
 
         <View style={styles.areaCard}>
           <Text style={styles.areaValue}>
@@ -303,6 +581,10 @@ const TerritoryDetailsScreen =
             TERRITORY AREA
           </Text>
         </View>
+
+        {/* ------------------------------------------ */}
+        {/* Territory details */}
+        {/* ------------------------------------------ */}
 
         <View style={styles.infoCard}>
           <View style={styles.row}>
@@ -398,6 +680,47 @@ const TerritoryDetailsScreen =
           </View>
         </View>
 
+        {/* ------------------------------------------ */}
+        {/* Challenger action */}
+        {/* ------------------------------------------ */}
+
+        {!isOwner &&
+          !hasPendingOwnChallenge && (
+            <TouchableOpacity
+              style={
+                styles.challengeButton
+              }
+              onPress={
+                openChallengeModal
+              }>
+              <Text
+                style={
+                  styles.challengeButtonText
+                }>
+                CHALLENGE TERRITORY
+              </Text>
+            </TouchableOpacity>
+          )}
+
+        {!isOwner &&
+          hasPendingOwnChallenge && (
+            <View
+              style={
+                styles.pendingNotice
+              }>
+              <Text
+                style={
+                  styles.pendingNoticeText
+                }>
+                YOUR CHALLENGE IS PENDING
+              </Text>
+            </View>
+          )}
+
+        {/* ------------------------------------------ */}
+        {/* Challenges */}
+        {/* ------------------------------------------ */}
+
         <View style={styles.challengeSection}>
           <View style={styles.sectionHeader}>
             <View>
@@ -409,7 +732,8 @@ const TerritoryDetailsScreen =
                 {challenges.length === 0
                   ? 'No challenges'
                   : `${challenges.length} challenge${
-                      challenges.length === 1
+                      challenges.length ===
+                      1
                         ? ''
                         : 's'
                     }`}
@@ -425,9 +749,16 @@ const TerritoryDetailsScreen =
           </View>
 
           {challenges.length === 0 && (
-            <View style={styles.emptyChallenge}>
-              <Text style={styles.emptyChallengeText}>
-                No one has challenged this territory yet.
+            <View
+              style={
+                styles.emptyChallenge
+              }>
+              <Text
+                style={
+                  styles.emptyChallengeText
+                }>
+                No one has challenged this
+                territory yet.
               </Text>
             </View>
           )}
@@ -502,9 +833,12 @@ const TerritoryDetailsScreen =
                           styles.rejectedBadge,
                       ]}>
                       <Text
-                        style={
-                          styles.statusBadgeText
-                        }>
+                        style={[
+                          styles.statusBadgeText,
+                          challenge.status !==
+                            'PENDING' &&
+                            styles.darkStatusText,
+                        ]}>
                         {
                           challenge.status
                         }
@@ -552,7 +886,8 @@ const TerritoryDetailsScreen =
                         {(
                           Number(
                             challenge.overlap_area_m2,
-                          ) / 1_000_000
+                          ) /
+                          1_000_000
                         ).toFixed(3)}{' '}
                         km²
                       </Text>
@@ -623,9 +958,339 @@ const TerritoryDetailsScreen =
             },
           )}
         </View>
+
+        {/* ------------------------------------------ */}
+        {/* History */}
+        {/* ------------------------------------------ */}
+
+        <View style={styles.historySection}>
+          <View style={styles.sectionHeader}>
+            <View>
+              <Text style={styles.sectionTitle}>
+                History
+              </Text>
+
+              <Text style={styles.sectionSubtitle}>
+                {history.length === 0
+                  ? 'No history'
+                  : `${history.length} event${
+                      history.length === 1
+                        ? ''
+                        : 's'
+                    }`}
+              </Text>
+            </View>
+          </View>
+
+          {history.length === 0 ? (
+            <View
+              style={
+                styles.emptyHistory
+              }>
+              <Text
+                style={
+                  styles.emptyHistoryText
+                }>
+                No territory history yet.
+              </Text>
+            </View>
+          ) : (
+            <View
+              style={
+                styles.historyCard
+              }>
+              {history.map(
+                (item, index) => {
+                  let title = '';
+                  let description = '';
+
+                  if (
+                    item.action ===
+                    'CAPTURED'
+                  ) {
+                    title =
+                      'Territory Captured';
+
+                    description =
+                      item.new_owner_display_name
+                        ? `${item.new_owner_display_name} captured this territory.`
+                        : 'Territory was captured.';
+                  } else if (
+                    item.action ===
+                    'CHALLENGE_REJECTED'
+                  ) {
+                    title =
+                      'Challenge Rejected';
+
+                    description =
+                      item.new_owner_display_name
+                        ? `Challenge rejected. ${item.new_owner_display_name} remained the owner.`
+                        : 'Challenge rejected.';
+                  } else if (
+                    item.action ===
+                    'TRANSFERRED'
+                  ) {
+                    title =
+                      'Territory Transferred';
+
+                    description =
+                      item.previous_owner_display_name &&
+                      item.new_owner_display_name
+                        ? `${item.previous_owner_display_name} → ${item.new_owner_display_name}`
+                        : 'Ownership changed.';
+                  }
+
+                  return (
+                    <View
+                      key={item.id}
+                      style={[
+                        styles.historyItem,
+                        index ===
+                          history.length -
+                            1 &&
+                          styles.lastHistoryItem,
+                      ]}>
+                      <View
+                        style={
+                          styles.historyDot
+                        }
+                      />
+
+                      <View
+                        style={
+                          styles.historyContent
+                        }>
+                        <Text
+                          style={
+                            styles.historyTitle
+                          }>
+                          {title}
+                        </Text>
+
+                        <Text
+                          style={
+                            styles.historyDescription
+                          }>
+                          {description}
+                        </Text>
+
+                        <Text
+                          style={
+                            styles.historyDate
+                          }>
+                          {new Date(
+                            item.created_at,
+                          ).toLocaleString()}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                },
+              )}
+            </View>
+          )}
+        </View>
       </ScrollView>
-    );
-  };
+
+      {/* -------------------------------------------- */}
+      {/* Challenge activity modal */}
+      {/* -------------------------------------------- */}
+
+      <Modal
+        visible={
+          challengeModalVisible
+        }
+        transparent
+        animationType="slide"
+        onRequestClose={
+          closeChallengeModal
+        }>
+        <View
+          style={
+            styles.modalOverlay
+          }>
+          <View
+            style={
+              styles.modalCard
+            }>
+            <View
+              style={
+                styles.modalHeader
+              }>
+              <View>
+                <Text
+                  style={
+                    styles.modalTitle
+                  }>
+                  Challenge Territory
+                </Text>
+
+                <Text
+                  style={
+                    styles.modalSubtitle
+                  }>
+                  Choose an activity
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                onPress={
+                  closeChallengeModal
+                }
+                disabled={
+                  submittingChallenge
+                }>
+                <Text
+                  style={
+                    styles.closeText
+                  }>
+                  ✕
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {activityLoading ? (
+              <View
+                style={
+                  styles.activityLoading
+                }>
+                <ActivityIndicator
+                  color="#fff"
+                />
+
+                <Text
+                  style={
+                    styles.activityLoadingText
+                  }>
+                  Loading activities...
+                </Text>
+              </View>
+            ) : activities.length ===
+              0 ? (
+              <View
+                style={
+                  styles.noActivities
+                }>
+                <Text
+                  style={
+                    styles.noActivitiesText
+                  }>
+                  No activities available.
+                </Text>
+              </View>
+            ) : (
+              <ScrollView
+                style={
+                  styles.activityList
+                }>
+                {activities.map(
+                  activity => {
+                    const selected =
+                      selectedActivityId ===
+                      activity.id;
+
+                    return (
+                      <TouchableOpacity
+                        key={
+                          activity.id
+                        }
+                        style={[
+                          styles.activityCard,
+                          selected &&
+                            styles.selectedActivityCard,
+                        ]}
+                        onPress={() =>
+                          setSelectedActivityId(
+                            activity.id,
+                          )
+                        }
+                        disabled={
+                          submittingChallenge
+                        }>
+                        <View>
+                          <Text
+                            style={
+                              styles.activityTitle
+                            }>
+                            {
+                              activity.activity_type
+                            }
+                          </Text>
+
+                          <Text
+                            style={
+                              styles.activityDate
+                            }>
+                            {new Date(
+                              activity.created_at,
+                            ).toLocaleDateString(
+                              'en-IN',
+                            )}
+                          </Text>
+                        </View>
+
+                        <View
+                          style={
+                            styles.activityStats
+                          }>
+                          <Text
+                            style={
+                              styles.activityStat
+                            }>
+                            {Number(
+                              activity.distance_km,
+                            ).toFixed(2)}{' '}
+                            km
+                          </Text>
+
+                          <Text
+                            style={
+                              styles.activityStat
+                            }>
+                            {
+                              activity.pace
+                            }
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  },
+                )}
+              </ScrollView>
+            )}
+
+            <TouchableOpacity
+              style={[
+                styles.submitButton,
+                !selectedActivityId &&
+                  styles.submitButtonDisabled,
+              ]}
+              disabled={
+                !selectedActivityId ||
+                submittingChallenge
+              }
+              onPress={
+                submitChallenge
+              }>
+              {submittingChallenge ? (
+                <ActivityIndicator
+                  color="#000"
+                />
+              ) : (
+                <Text
+                  style={
+                    styles.submitButtonText
+                  }>
+                  SUBMIT CHALLENGE
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </>
+  );
+};
 
 export default TerritoryDetailsScreen;
 
@@ -637,7 +1302,7 @@ const styles = StyleSheet.create({
 
   container: {
     padding: 20,
-    paddingBottom: 40,
+    paddingBottom: 50,
   },
 
   center: {
@@ -739,6 +1404,36 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     flexShrink: 1,
     textAlign: 'right',
+  },
+
+  challengeButton: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    marginTop: 20,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+
+  challengeButtonText: {
+    color: '#000',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+
+  pendingNotice: {
+    backgroundColor: '#111',
+    borderWidth: 1,
+    borderColor: '#333',
+    borderRadius: 16,
+    marginTop: 20,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+
+  pendingNoticeText: {
+    color: '#aaa',
+    fontSize: 11,
+    fontWeight: '900',
   },
 
   challengeSection: {
@@ -850,6 +1545,10 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
 
+  darkStatusText: {
+    color: '#fff',
+  },
+
   challengeStats: {
     flexDirection: 'row',
     gap: 40,
@@ -905,5 +1604,196 @@ const styles = StyleSheet.create({
     color: '#000',
     fontWeight: '900',
     fontSize: 11,
+  },
+
+  historySection: {
+    marginTop: 22,
+  },
+
+  emptyHistory: {
+    backgroundColor: '#111',
+    borderRadius: 18,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#222',
+  },
+
+  emptyHistoryText: {
+    color: '#666',
+    lineHeight: 20,
+  },
+
+  historyCard: {
+    backgroundColor: '#111',
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    borderWidth: 1,
+    borderColor: '#222',
+  },
+
+  historyItem: {
+    flexDirection: 'row',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#222',
+  },
+
+  lastHistoryItem: {
+    borderBottomWidth: 0,
+  },
+
+  historyDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: '#fff',
+    marginTop: 6,
+    marginRight: 12,
+  },
+
+  historyContent: {
+    flex: 1,
+  },
+
+  historyTitle: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+
+  historyDescription: {
+    color: '#aaa',
+    fontSize: 12,
+    marginTop: 4,
+    lineHeight: 18,
+  },
+
+  historyDate: {
+    color: '#555',
+    fontSize: 10,
+    marginTop: 6,
+  },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    justifyContent: 'flex-end',
+  },
+
+  modalCard: {
+    backgroundColor: '#0b0b0b',
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    padding: 20,
+    maxHeight: '82%',
+    borderTopWidth: 1,
+    borderColor: '#222',
+  },
+
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 18,
+  },
+
+  modalTitle: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '900',
+  },
+
+  modalSubtitle: {
+    color: '#666',
+    fontSize: 12,
+    marginTop: 4,
+  },
+
+  closeText: {
+    color: '#aaa',
+    fontSize: 22,
+    fontWeight: '700',
+  },
+
+  activityLoading: {
+    alignItems: 'center',
+    paddingVertical: 30,
+  },
+
+  activityLoadingText: {
+    color: '#666',
+    marginTop: 10,
+  },
+
+  noActivities: {
+    paddingVertical: 30,
+    alignItems: 'center',
+  },
+
+  noActivitiesText: {
+    color: '#666',
+  },
+
+  activityList: {
+    marginBottom: 16,
+  },
+
+  activityCard: {
+    backgroundColor: '#151515',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#222',
+  },
+
+  selectedActivityCard: {
+    borderColor: '#fff',
+    backgroundColor: '#1c1c1c',
+  },
+
+  activityTitle: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+
+  activityDate: {
+    color: '#666',
+    fontSize: 11,
+    marginTop: 4,
+  },
+
+  activityStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#222',
+  },
+
+  activityStat: {
+    color: '#aaa',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  submitButton: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+
+  submitButtonDisabled: {
+    backgroundColor: '#333',
+  },
+
+  submitButtonText: {
+    color: '#000',
+    fontSize: 11,
+    fontWeight: '900',
   },
 });
