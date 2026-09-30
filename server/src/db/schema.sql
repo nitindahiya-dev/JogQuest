@@ -972,3 +972,67 @@ AFTER INSERT ON competition_participants
 FOR EACH ROW
 EXECUTE FUNCTION
 jq_notify_competition_join();
+
+-- ==================================================
+-- DEVICE INTEGRATIONS
+-- ==================================================
+
+CREATE TABLE IF NOT EXISTS device_integrations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  user_id UUID NOT NULL
+    REFERENCES users(id)
+    ON DELETE CASCADE,
+
+  provider VARCHAR(30) NOT NULL,
+
+  external_account_id VARCHAR(255),
+
+  status VARCHAR(20) NOT NULL
+    DEFAULT 'CONNECTED'
+    CHECK (
+      status IN (
+        'CONNECTED',
+        'DISCONNECTED',
+        'ERROR'
+      )
+    ),
+
+  connected_at TIMESTAMPTZ NOT NULL
+    DEFAULT NOW(),
+
+  last_sync_at TIMESTAMPTZ,
+
+  created_at TIMESTAMPTZ NOT NULL
+    DEFAULT NOW(),
+
+  updated_at TIMESTAMPTZ NOT NULL
+    DEFAULT NOW(),
+
+  UNIQUE (user_id, provider)
+);
+
+CREATE INDEX IF NOT EXISTS idx_device_integrations_user
+ON device_integrations (user_id);
+
+CREATE INDEX IF NOT EXISTS idx_device_integrations_provider
+ON device_integrations (provider);
+
+
+-- ==================================================
+-- EXTERNAL ACTIVITY SOURCE
+-- ==================================================
+
+ALTER TABLE activities
+ADD COLUMN IF NOT EXISTS source_provider VARCHAR(30);
+
+ALTER TABLE activities
+ADD COLUMN IF NOT EXISTS external_activity_id VARCHAR(255);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_activities_external_source
+ON activities (
+  source_provider,
+  external_activity_id
+)
+WHERE source_provider IS NOT NULL
+  AND external_activity_id IS NOT NULL;

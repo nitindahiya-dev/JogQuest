@@ -29,15 +29,12 @@ export type ActivityResultParams = {
 
 export type RootStackParamList = {
   MainTabs: undefined;
-
   ActivityResult: ActivityResultParams;
-
   TerritoryDetails: {
     territoryId: string;
   };
 
   ActivityHistory: undefined;
-
   Notifications: undefined;
 
   PublicProfile: {
@@ -50,7 +47,6 @@ export type RootStackParamList = {
   };
 
   Clubs: undefined;
-
   CreateClub: undefined;
 
   ClubDetails: {
@@ -58,7 +54,6 @@ export type RootStackParamList = {
   };
 
   Competitions: undefined;
-
   CreateCompetition: undefined;
 
   CompetitionDetails: {
@@ -66,6 +61,8 @@ export type RootStackParamList = {
   };
 
   RoutePlanner: undefined;
+
+  Integrations: undefined;
 };
 
 export type MainTabParamList = {

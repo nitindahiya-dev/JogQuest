@@ -40,6 +40,7 @@ import ClubDetailsScreen from '../screens/Clubs/ClubDetailsScreen';
 import CompetitionsScreen from '../screens/Competitions/CompetitionsScreen';
 import CreateCompetitionScreen from '../screens/Competitions/CreateCompetitionScreen';
 import CompetitionDetailsScreen from '../screens/Competitions/CompetitionDetailsScreen';
+import IntegrationsScreen from '../screens/Integrations/IntegrationsScreen';
 
 import type {
   RootStackParamList,
@@ -381,6 +382,14 @@ const AppNavigator = () => {
             component={NotificationsScreen}
             options={{
               title: 'Notifications',
+            }}
+          />
+
+          <Stack.Screen
+            name="Integrations"
+            component={IntegrationsScreen}
+            options={{
+              title: 'Integrations',
             }}
           />
 

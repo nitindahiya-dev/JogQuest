@@ -5,6 +5,7 @@ import React, {
 
 import {
   ActivityIndicator,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -141,7 +142,7 @@ const ProfileScreen = () => {
 
         const data =
           (await response.json()) as
-            NotificationsResponse;
+          NotificationsResponse;
 
         setUnreadCount(
           Number(
@@ -213,7 +214,12 @@ const ProfileScreen = () => {
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={
+        styles.contentContainer
+      }
+      showsVerticalScrollIndicator={false}>
 
       {/* =========================================
           PROFILE TOP BAR
@@ -471,9 +477,27 @@ const ProfileScreen = () => {
 
         </TouchableOpacity>
 
+        <TouchableOpacity
+          style={[
+            styles.activityButton,
+            styles.secondaryButton
+          ]}
+          onPress={() =>
+            navigation.navigate(
+              'Integrations',
+            )
+          }>
+          <Text
+            style={
+              styles.activityButtonText
+            }>
+            MANAGE INTEGRATIONS
+          </Text>
+        </TouchableOpacity>
+
       </View>
 
-    </View>
+    </ScrollView>
   );
 };
 
@@ -483,7 +507,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+  },
+
+  contentContainer: {
     padding: 20,
+    paddingBottom: 110,
   },
 
   center: {
@@ -705,9 +733,16 @@ const styles = StyleSheet.create({
 
   activityButton: {
     backgroundColor: '#fff',
-    paddingVertical: 17,
-    borderRadius: 18,
+    minHeight: 52,
+    borderRadius: 16,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  actionStack: {
+    marginTop: 28,
+    gap: 12,
+    paddingBottom: 10,
   },
 
   secondaryButton: {

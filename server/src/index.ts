@@ -16,6 +16,136 @@ type Coordinate = {
   longitude: number;
 };
 
+const distanceBetweenCoordinates = (
+  a: Coordinate,
+  b: Coordinate,
+) => {
+  const earthRadiusKm = 6371;
+
+  const dLat =
+    ((b.latitude - a.latitude) *
+      Math.PI) /
+    180;
+
+  const dLon =
+    ((b.longitude - a.longitude) *
+      Math.PI) /
+    180;
+
+  const lat1 =
+    (a.latitude * Math.PI) /
+    180;
+
+  const lat2 =
+    (b.latitude * Math.PI) /
+    180;
+
+  const haversine =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) *
+    Math.cos(lat2) *
+    Math.sin(dLon / 2) ** 2;
+
+  return (
+    earthRadiusKm *
+    2 *
+    Math.atan2(
+      Math.sqrt(haversine),
+      Math.sqrt(1 - haversine),
+    )
+  );
+};
+
+const calculateRouteDistance = (
+  route: Coordinate[],
+) => {
+  let total = 0;
+
+  for (
+    let index = 1;
+    index < route.length;
+    index += 1
+  ) {
+    total += distanceBetweenCoordinates(
+      route[index - 1],
+      route[index],
+    );
+  }
+
+  return total;
+};
+
+type DeviceProvider =
+  | 'garmin'
+  | 'suunto'
+  | 'polar'
+  | 'coros'
+  | 'fitbit'
+  | 'wahoo'
+  | 'hammerhead';
+
+type NormalizedExternalActivity = {
+  provider: DeviceProvider;
+  externalId: string;
+  activityType: 'Run' | 'Walk' | 'Cycle';
+  distanceKm: number;
+  elapsedSeconds: number;
+  startedAt: string;
+  finishedAt: string;
+  route: Coordinate[];
+};
+
+const getMockGarminActivity =
+  (): NormalizedExternalActivity => {
+    return {
+      provider: 'garmin',
+
+      externalId:
+        'garmin-demo-activity-001',
+
+      activityType: 'Run',
+
+      distanceKm: 2.4,
+
+      elapsedSeconds: 1320,
+
+      startedAt:
+        new Date(
+          Date.now() - 1320 * 1000,
+        ).toISOString(),
+
+      finishedAt:
+        new Date().toISOString(),
+
+      route: [
+        {
+          latitude: 28.6139,
+          longitude: 77.2090,
+        },
+        {
+          latitude: 28.6143,
+          longitude: 77.2100,
+        },
+        {
+          latitude: 28.6148,
+          longitude: 77.2105,
+        },
+        {
+          latitude: 28.6152,
+          longitude: 77.2100,
+        },
+        {
+          latitude: 28.6155,
+          longitude: 77.2095,
+        },
+        {
+          latitude: 28.6150,
+          longitude: 77.2090,
+        },
+      ],
+    };
+  };
+
 type CreateActivityBody = {
   userId: string;
   activityType: 'Run' | 'Walk' | 'Cycle';
@@ -1442,6 +1572,93 @@ app.post('/api/activities', async (req, res) => {
       });
     }
 
+    const serverDistanceKm =
+      calculateRouteDistance(
+        body.route,
+      );
+
+    if (
+      !Number.isFinite(
+        serverDistanceKm,
+      )
+    ) {
+      return res.status(400).json({
+        error:
+          'Invalid GPS route',
+      });
+    }
+
+    if (
+      body.elapsedSeconds < 0
+    ) {
+      return res.status(400).json({
+        error:
+          'Elapsed time cannot be negative',
+      });
+    }
+
+    for (
+      let index = 1;
+      index < body.route.length;
+      index += 1
+    ) {
+      const segmentDistanceKm =
+        distanceBetweenCoordinates(
+          body.route[index - 1],
+          body.route[index],
+        );
+
+      if (
+        segmentDistanceKm >
+        0.5
+      ) {
+        return res.status(422).json({
+          error:
+            'Activity contains an impossible GPS jump',
+          segmentDistanceKm,
+          segmentIndex: index,
+        });
+      }
+    }
+
+    const reportedDistanceKm =
+      Number(body.distanceKm);
+
+    if (
+      !Number.isFinite(
+        reportedDistanceKm,
+      ) ||
+      reportedDistanceKm < 0
+    ) {
+      return res.status(400).json({
+        error:
+          'Invalid activity distance',
+      });
+    }
+
+    if (
+      serverDistanceKm > 0 &&
+      reportedDistanceKm > 0
+    ) {
+      const difference =
+        Math.abs(
+          reportedDistanceKm -
+          serverDistanceKm,
+        ) /
+        serverDistanceKm;
+
+      if (
+        difference > 0.25
+      ) {
+        return res.status(422).json({
+          error:
+            'Reported distance does not match GPS route',
+          reportedDistanceKm,
+          serverDistanceKm,
+        });
+      }
+    }
+
     await client.query('BEGIN');
 
     const activityResult = await client.query(
@@ -1463,7 +1680,7 @@ app.post('/api/activities', async (req, res) => {
       [
         body.userId,
         body.activityType,
-        body.distanceKm,
+        serverDistanceKm,
         body.elapsedSeconds,
         body.pace,
         body.startedAt ?? null,
@@ -3829,15 +4046,7 @@ const fetchRouteWithRetry =
     ) {
       try {
         const response =
-          await fetch(
-            url,
-            {
-              signal:
-                AbortSignal.timeout(
-                  15000,
-                ),
-            },
-          );
+          await fetch(url);
 
         return response;
       } catch (error) {
@@ -4064,6 +4273,427 @@ app.post(
         error:
           'Failed to generate route',
       });
+    }
+  },
+);
+
+
+// --------------------------------------------------
+// GET DEVICE INTEGRATIONS
+// --------------------------------------------------
+
+app.get(
+  '/api/users/:userId/integrations',
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      const result = await query(
+        `
+        SELECT
+          id,
+          provider,
+          external_account_id,
+          status,
+          connected_at,
+          last_sync_at,
+          created_at,
+          updated_at
+        FROM device_integrations
+        WHERE user_id = $1
+        ORDER BY provider ASC
+        `,
+        [userId],
+      );
+
+      res.json(result.rows);
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to fetch device integrations',
+      });
+    }
+  },
+);
+
+// --------------------------------------------------
+// CONNECT DEVICE INTEGRATION
+// --------------------------------------------------
+
+app.post(
+  '/api/users/:userId/integrations/:provider',
+  async (req, res) => {
+    try {
+      const {
+        userId,
+        provider,
+      } = req.params;
+
+      const allowedProviders: DeviceProvider[] = [
+        'garmin',
+        'suunto',
+        'polar',
+        'coros',
+        'fitbit',
+        'wahoo',
+        'hammerhead',
+      ];
+
+      if (
+        !allowedProviders.includes(
+          provider as DeviceProvider,
+        )
+      ) {
+        return res.status(400).json({
+          error:
+            'Unsupported device provider',
+        });
+      }
+
+      const {
+        externalAccountId,
+      } = req.body as {
+        externalAccountId?: string;
+      };
+
+      const result = await query(
+        `
+        INSERT INTO device_integrations (
+          user_id,
+          provider,
+          external_account_id,
+          status,
+          connected_at,
+          last_sync_at,
+          updated_at
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          'CONNECTED',
+          NOW(),
+          NULL,
+          NOW()
+        )
+        ON CONFLICT (
+          user_id,
+          provider
+        )
+        DO UPDATE SET
+          external_account_id =
+            EXCLUDED.external_account_id,
+          status = 'CONNECTED',
+          updated_at = NOW()
+        RETURNING
+          id,
+          provider,
+          external_account_id,
+          status,
+          connected_at,
+          last_sync_at,
+          created_at,
+          updated_at
+        `,
+        [
+          userId,
+          provider,
+          externalAccountId ?? null,
+        ],
+      );
+
+      res.status(201).json(
+        result.rows[0],
+      );
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to connect device integration',
+      });
+    }
+  },
+);
+
+
+// --------------------------------------------------
+// DISCONNECT DEVICE INTEGRATION
+// --------------------------------------------------
+
+app.delete(
+  '/api/users/:userId/integrations/:provider',
+  async (req, res) => {
+    try {
+      const {
+        userId,
+        provider,
+      } = req.params;
+
+      const result = await query(
+        `
+        UPDATE device_integrations
+        SET
+          status = 'DISCONNECTED',
+          updated_at = NOW()
+        WHERE user_id = $1
+          AND provider = $2
+        RETURNING
+          id,
+          provider,
+          status,
+          updated_at
+        `,
+        [
+          userId,
+          provider,
+        ],
+      );
+
+      if (
+        result.rows.length === 0
+      ) {
+        return res.status(404).json({
+          error:
+            'Device integration not found',
+        });
+      }
+
+      res.json({
+        ok: true,
+        integration:
+          result.rows[0],
+      });
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to disconnect device integration',
+      });
+    }
+  },
+);
+
+app.post(
+  '/api/users/:userId/integrations/:provider/import-demo',
+  async (req, res) => {
+    const client =
+      await pool.connect();
+
+    try {
+      const {
+        userId,
+        provider,
+      } = req.params;
+
+      if (
+        provider !== 'garmin'
+      ) {
+        return res.status(400).json({
+          error:
+            'Demo import currently supports Garmin only',
+        });
+      }
+
+      const integrationResult =
+        await client.query(
+          `
+          SELECT
+            id,
+            status
+          FROM device_integrations
+          WHERE user_id = $1
+            AND provider = $2
+          `,
+          [
+            userId,
+            provider,
+          ],
+        );
+
+      if (
+        integrationResult.rows.length === 0
+      ) {
+        return res.status(404).json({
+          error:
+            'Device integration not found',
+        });
+      }
+
+      if (
+        integrationResult.rows[0].status !==
+        'CONNECTED'
+      ) {
+        return res.status(409).json({
+          error:
+            'Device integration is not connected',
+        });
+      }
+
+      const normalized =
+        getMockGarminActivity();
+
+      const existing =
+        await client.query(
+          `
+          SELECT
+            id,
+            created_at
+          FROM activities
+          WHERE source_provider = $1
+            AND external_activity_id = $2
+          `,
+          [
+            normalized.provider,
+            normalized.externalId,
+          ],
+        );
+
+      if (
+        existing.rows.length > 0
+      ) {
+        return res.json({
+          imported: false,
+          duplicate: true,
+          activity:
+            existing.rows[0],
+        });
+      }
+
+      const serverDistanceKm =
+        calculateRouteDistance(
+          normalized.route,
+        );
+
+      await client.query(
+        'BEGIN',
+      );
+
+      const activityResult =
+        await client.query(
+          `
+          INSERT INTO activities (
+            user_id,
+            activity_type,
+            distance_km,
+            elapsed_seconds,
+            pace,
+            started_at,
+            finished_at,
+            source_provider,
+            external_activity_id
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            $8,
+            $9
+          )
+          RETURNING
+            id,
+            created_at
+          `,
+          [
+            userId,
+            normalized.activityType,
+            serverDistanceKm,
+            normalized.elapsedSeconds,
+            '--',
+            normalized.startedAt,
+            normalized.finishedAt,
+            normalized.provider,
+            normalized.externalId,
+          ],
+        );
+
+      const activity =
+        activityResult.rows[0];
+
+      for (
+        let index = 0;
+        index <
+        normalized.route.length;
+        index += 1
+      ) {
+        const point =
+          normalized.route[index];
+
+        await client.query(
+          `
+          INSERT INTO activity_points (
+            activity_id,
+            sequence_number,
+            location
+          )
+          VALUES (
+            $1,
+            $2,
+            ST_SetSRID(
+              ST_MakePoint($3, $4),
+              4326
+            )::geography
+          )
+          `,
+          [
+            activity.id,
+            index,
+            point.longitude,
+            point.latitude,
+          ],
+        );
+      }
+
+      await client.query(
+        `
+        UPDATE device_integrations
+        SET
+          last_sync_at = NOW(),
+          updated_at = NOW()
+        WHERE user_id = $1
+          AND provider = $2
+        `,
+        [
+          userId,
+          provider,
+        ],
+      );
+
+      await client.query(
+        'COMMIT',
+      );
+
+      res.status(201).json({
+        imported: true,
+        duplicate: false,
+        provider:
+          normalized.provider,
+        externalId:
+          normalized.externalId,
+        activity,
+        distanceKm:
+          serverDistanceKm,
+      });
+    } catch (error) {
+      await client.query(
+        'ROLLBACK',
+      );
+
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to import external activity',
+      });
+    } finally {
+      client.release();
     }
   },
 );

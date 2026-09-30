@@ -137,6 +137,9 @@ const ActivityScreen = () => {
   const lastLocationRef =
     useRef<Coordinate | null>(null);
 
+  const routeProgressMaxRef =
+    useRef(0);
+
   // --------------------------------------------------
   // LOAD PLANNED ROUTE
   // --------------------------------------------------
@@ -164,7 +167,7 @@ const ActivityScreen = () => {
           !Array.isArray(parsed.route) ||
           parsed.route.length < 2 ||
           typeof parsed.distanceKm !==
-            'number'
+          'number'
         ) {
           setPlannedRoute(null);
           return;
@@ -293,7 +296,7 @@ const ActivityScreen = () => {
           Math.floor(
             (Date.now() -
               startTimeRef.current) /
-              1000,
+            1000,
           );
 
         setElapsedSeconds(
@@ -333,9 +336,9 @@ const ActivityScreen = () => {
       // Ignore poor GPS readings.
       if (
         typeof coordinate.accuracy ===
-          'number' &&
+        'number' &&
         coordinate.accuracy >
-          50
+        50
       ) {
         return;
       }
@@ -402,6 +405,7 @@ const ActivityScreen = () => {
     () => {
       setRoute([]);
       setDistance(0);
+      routeProgressMaxRef.current = 0;
       setElapsedSeconds(0);
       setIsPaused(false);
       setIsSaving(false);
@@ -464,6 +468,235 @@ const ActivityScreen = () => {
       }
     };
 
+// --------------------------------------------------
+// ROUTE PROGRESS CALCULATION
+// --------------------------------------------------
+
+const clamp01 = (value: number) =>
+  Math.max(0, Math.min(1, value));
+
+const getProjectedPointOnSegment = (
+  point: Coordinate,
+  start: Coordinate,
+  end: Coordinate,
+): Coordinate => {
+  const latRadians =
+    (start.latitude * Math.PI) /
+    180;
+
+  const metersPerLatitudeDegree =
+    111_320;
+
+  const metersPerLongitudeDegree =
+    111_320 *
+    Math.cos(latRadians);
+
+  const pointX =
+    (point.longitude -
+      start.longitude) *
+    metersPerLongitudeDegree;
+
+  const pointY =
+    (point.latitude -
+      start.latitude) *
+    metersPerLatitudeDegree;
+
+  const segmentX =
+    (end.longitude -
+      start.longitude) *
+    metersPerLongitudeDegree;
+
+  const segmentY =
+    (end.latitude -
+      start.latitude) *
+    metersPerLatitudeDegree;
+
+  const segmentLengthSquared =
+    segmentX * segmentX +
+    segmentY * segmentY;
+
+  if (segmentLengthSquared === 0) {
+    return start;
+  }
+
+  const projection = clamp01(
+    (pointX * segmentX +
+      pointY * segmentY) /
+      segmentLengthSquared,
+  );
+
+  return {
+    latitude:
+      start.latitude +
+      (end.latitude -
+        start.latitude) *
+        projection,
+
+    longitude:
+      start.longitude +
+      (end.longitude -
+        start.longitude) *
+        projection,
+  };
+};
+
+const getRouteProgress = () => {
+  if (
+    !plannedRoute ||
+    route.length === 0 ||
+    plannedRoute.route.length < 2
+  ) {
+    return {
+      progress: 0,
+      distanceFromRoute:
+        null as number | null,
+      status: 'WAITING FOR GPS',
+    };
+  }
+
+  const currentPoint =
+    route[route.length - 1];
+
+  let nearestDistance =
+    Number.POSITIVE_INFINITY;
+
+  let distanceAlongRoute = 0;
+
+  let cumulativeDistance = 0;
+
+  let nearestDistanceAlongRoute = 0;
+
+  for (
+    let index = 0;
+    index <
+    plannedRoute.route.length - 1;
+    index += 1
+  ) {
+    const segmentStart =
+      plannedRoute.route[index];
+
+    const segmentEnd =
+      plannedRoute.route[index + 1];
+
+    const segmentLength =
+      calculateDistance(
+        segmentStart,
+        segmentEnd,
+      );
+
+    const projectedPoint =
+      getProjectedPointOnSegment(
+        currentPoint,
+        segmentStart,
+        segmentEnd,
+      );
+
+    const distanceToSegment =
+      calculateDistance(
+        currentPoint,
+        projectedPoint,
+      );
+
+    if (
+      distanceToSegment <
+      nearestDistance
+    ) {
+      nearestDistance =
+        distanceToSegment;
+
+      distanceAlongRoute =
+        cumulativeDistance +
+        calculateDistance(
+          segmentStart,
+          projectedPoint,
+        );
+
+      nearestDistanceAlongRoute =
+        distanceAlongRoute;
+    }
+
+    cumulativeDistance +=
+      segmentLength;
+  }
+
+  const totalRouteDistance =
+    cumulativeDistance;
+
+  const endpoint =
+    plannedRoute.route[
+      plannedRoute.route.length - 1
+    ];
+
+  const distanceToEndpoint =
+    calculateDistance(
+      currentPoint,
+      endpoint,
+    );
+
+  // A GPS position within 50 m of the
+  // planned endpoint completes the route.
+  const completed =
+    distanceToEndpoint <= 0.05;
+
+  const isNearRoute =
+    nearestDistance <= 0.15;
+
+  const candidateProgress =
+    totalRouteDistance > 0
+      ? Math.min(
+          100,
+          (nearestDistanceAlongRoute /
+            totalRouteDistance) *
+            100,
+        )
+      : 0;
+
+  // Never let an off-route GPS fix move the
+  // runner forward along the planned route.
+  if (completed) {
+    routeProgressMaxRef.current =
+      100;
+  } else if (isNearRoute) {
+    routeProgressMaxRef.current =
+      Math.max(
+        routeProgressMaxRef.current,
+        candidateProgress,
+      );
+  }
+
+  const progress =
+    routeProgressMaxRef.current;
+
+  const status =
+    nearestDistance <= 0.05
+      ? 'ON ROUTE'
+      : nearestDistance <= 0.15
+        ? 'NEAR ROUTE'
+        : 'OFF ROUTE';
+
+  return {
+    progress,
+    distanceFromRoute:
+      nearestDistance,
+    status,
+  };
+};
+
+const routeProgressInfo =
+  getRouteProgress();
+
+const routeProgress =
+  routeProgressInfo.progress;
+
+const nearestPlannedDistance =
+  routeProgressInfo.distanceFromRoute;
+
+const routeStatus =
+  routeProgressInfo.status;
+
+const plannedDistance =
+  plannedRoute?.distanceKm ?? 0;
+
   // --------------------------------------------------
   // PACE
   // --------------------------------------------------
@@ -487,13 +720,13 @@ const ActivityScreen = () => {
       const minutes =
         Math.floor(
           secondsPerKm /
-            60,
+          60,
         );
 
       const remainingSeconds =
         Math.floor(
           secondsPerKm %
-            60,
+          60,
         );
 
       return `${minutes}:${String(
@@ -555,15 +788,15 @@ const ActivityScreen = () => {
               territory:
                 territory.captured
                   ? {
-                      areaM2:
-                        territory.areaM2,
+                    areaM2:
+                      territory.areaM2,
 
-                      areaKm2:
-                        territory.areaKm2,
+                    areaKm2:
+                      territory.areaKm2,
 
-                      polygon:
-                        territory.polygon,
-                    }
+                    polygon:
+                      territory.polygon,
+                  }
                   : undefined,
             }),
           },
@@ -640,136 +873,177 @@ const ActivityScreen = () => {
   // FINISH
   // --------------------------------------------------
 
-  const stopActivity =
-    async () => {
-      if (isSaving) {
-        return;
-      }
+const stopActivity = async () => {
+  if (isSaving) {
+    return;
+  }
 
-      setIsSaving(true);
+  setIsSaving(true);
 
-      const finalTime =
-        startTimeRef.current
-          ? Math.floor(
-              (Date.now() -
-                startTimeRef.current) /
-                1000,
-            )
-          : 0;
+  const finalTime =
+    startTimeRef.current
+      ? Math.floor(
+          (Date.now() -
+            startTimeRef.current) /
+            1000,
+        )
+      : 0;
 
-      const finalPace =
-        calculatePace(
-          distance,
-          finalTime,
-        );
+  const finalPace =
+    calculatePace(
+      distance,
+      finalTime,
+    );
 
-      const territory =
-        createTerritory(
-          route,
-        );
+  const territory =
+    createTerritory(
+      route,
+    );
 
+  let resultTerritory =
+    territory;
+
+  try {
+    // ----------------------------------------------
+    // 1. ALWAYS SAVE THE ACTIVITY FIRST
+    // ----------------------------------------------
+
+    const activityResponse =
+      await saveActivityToBackend(
+        finalTime,
+        finalPace,
+        territory,
+      );
+
+    // ----------------------------------------------
+    // 2. TRY SERVER-SIDE TERRITORY CLAIM
+    // ----------------------------------------------
+
+    if (
+      territory.captured &&
+      activityResponse?.activity?.id
+    ) {
       try {
-        // Keep local territory persistence.
-        if (
-          territory.captured
-        ) {
-          await saveTerritory({
-            id: `territory-${Date.now()}`,
-
-            areaM2:
-              territory.areaM2,
-
-            areaKm2:
-              territory.areaKm2,
-
-            polygon:
-              territory.polygon,
-
-            activityType,
-
-            capturedAt:
-              new Date().toISOString(),
-          });
-        }
-
-        // Save activity and GPS points remotely.
-        const activityResponse =
-          await saveActivityToBackend(
-            finalTime,
-            finalPace,
-            territory,
-          );
-
-        // Server-authoritative territory claim.
-        if (
-          territory.captured &&
-          activityResponse
-            ?.activity?.id
-        ) {
-          await claimTerritoryOnBackend(
-            activityResponse
-              .activity.id,
-            territory,
-          );
-        }
-
-        setElapsedSeconds(
-          finalTime,
+        await claimTerritoryOnBackend(
+          activityResponse.activity.id,
+          territory,
         );
 
-        setIsTracking(
-          false,
+        // Only persist locally after the server
+        // confirms the territory claim.
+        await saveTerritory({
+          id: `territory-${Date.now()}`,
+
+          areaM2:
+            territory.areaM2,
+
+          areaKm2:
+            territory.areaKm2,
+
+          polygon:
+            territory.polygon,
+
+          activityType,
+
+          capturedAt:
+            new Date().toISOString(),
+        });
+      } catch (territoryError) {
+        console.warn(
+          'Territory claim failed:',
+          territoryError,
         );
 
-        setIsPaused(
-          false,
-        );
+        // The activity succeeded, but the territory
+        // was not captured.
+        resultTerritory = {
+          ...territory,
+          captured: false,
+        };
 
-        setIsSaving(
-          false,
-        );
-
-        startTimeRef.current =
-          null;
-
-        startedAtRef.current =
-          null;
-
-        lastLocationRef.current =
-          null;
-
-        navigation.navigate(
-          'ActivityResult',
-          {
-            activityType,
-
-            distance,
-
-            elapsedSeconds:
-              finalTime,
-
-            pace:
-              finalPace,
-
-            route,
-
-            territory,
-          },
-        );
-      } catch (error) {
-        console.error(
-          'Failed to save activity:',
-          error,
-        );
-
-        setIsSaving(false);
+        const message =
+          territoryError instanceof
+          Error
+            ? territoryError.message
+            : 'Territory could not be captured.';
 
         Alert.alert(
-          'Backend Save Failed',
-          'The activity could not be saved to the server. Your local territory data is still preserved.',
+          'Activity Saved',
+          message.includes(
+            '409',
+          ) ||
+          message.includes(
+            'Territory overlaps',
+          )
+            ? 'Your activity was saved successfully, but this territory overlaps an existing territory and was not captured.'
+            : 'Your activity was saved successfully, but the territory could not be captured.',
         );
       }
-    };
+    }
+
+    // ----------------------------------------------
+    // 3. FINISH THE ACTIVITY REGARDLESS OF
+    //    TERRITORY CLAIM RESULT
+    // ----------------------------------------------
+
+    setElapsedSeconds(
+      finalTime,
+    );
+
+    setIsTracking(
+      false,
+    );
+
+    setIsPaused(
+      false,
+    );
+
+    setIsSaving(
+      false,
+    );
+
+    startTimeRef.current =
+      null;
+
+    startedAtRef.current =
+      null;
+
+    lastLocationRef.current =
+      null;
+
+    navigation.navigate(
+      'ActivityResult',
+      {
+        activityType,
+
+        distance,
+
+        elapsedSeconds:
+          finalTime,
+
+        pace:
+          finalPace,
+
+        route,
+
+        territory:
+          resultTerritory,
+      },
+    );
+  } catch (error) {
+    console.error(
+      'Failed to save activity:',
+      error,
+    );
+
+    setIsSaving(false);
+
+    Alert.alert(
+      'Activity Save Failed',
+      'The activity could not be saved to the server. Please try again.',
+    );
+  }
+};
 
   return (
     <SafeAreaView
@@ -863,19 +1137,19 @@ const ActivityScreen = () => {
                   latitude:
                     plannedRoute
                       .route[
-                        plannedRoute.route
-                          .length -
-                          1
-                      ]
+                      plannedRoute.route
+                        .length -
+                      1
+                    ]
                       .latitude,
 
                   longitude:
                     plannedRoute
                       .route[
-                        plannedRoute.route
-                          .length -
-                          1
-                      ]
+                      plannedRoute.route
+                        .length -
+                      1
+                    ]
                       .longitude,
                 }}
                 title="Route End"
@@ -889,13 +1163,13 @@ const ActivityScreen = () => {
 
           {route.length >
             1 && (
-            <Polyline
-              coordinates={
-                route
-              }
-              strokeWidth={5}
-            />
-          )}
+              <Polyline
+                coordinates={
+                  route
+                }
+                strokeWidth={5}
+              />
+            )}
 
         </MapView>
 
@@ -997,6 +1271,95 @@ const ActivityScreen = () => {
                     </Text>
 
                   </TouchableOpacity>
+
+                </View>
+              )}
+
+            {/* Route progress card */}
+
+            {isTracking &&
+              plannedRoute && (
+                <View
+                  style={
+                    styles.progressCard
+                  }>
+
+                  <View
+                    style={
+                      styles.progressHeader
+                    }>
+
+                    <View>
+                      <Text
+                        style={
+                          styles.progressTitle
+                        }>
+                        ROUTE PROGRESS
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.progressSubtitle
+                        }>
+                        {distance.toFixed(2)} km /{' '}
+                        {plannedDistance.toFixed(2)} km
+                      </Text>
+                    </View>
+
+                    <Text
+                      style={
+                        styles.progressPercent
+                      }>
+                      {Math.round(
+                        routeProgress,
+                      )}%
+                    </Text>
+
+                  </View>
+
+                  <View
+                    style={
+                      styles.progressTrack
+                    }>
+
+                    <View
+                      style={[
+                        styles.progressFill,
+                        {
+                          width: `${routeProgress}%`,
+                        },
+                      ]}
+                    />
+
+                  </View>
+
+                  <View
+                    style={
+                      styles.routeStatusRow
+                    }>
+
+                    <Text
+                      style={
+                        styles.routeStatusText
+                      }>
+                      {routeStatus}
+                    </Text>
+
+                    {nearestPlannedDistance !==
+                      null && (
+                        <Text
+                          style={
+                            styles.routeDistanceText
+                          }>
+                          {Math.round(
+                            nearestPlannedDistance *
+                            1000,
+                          )}{' '}
+                          m from route
+                        </Text>
+                      )}
+
+                  </View>
 
                 </View>
               )}
@@ -1142,8 +1505,8 @@ const ActivityScreen = () => {
                         styles.typeButton,
 
                         activityType ===
-                          type &&
-                          styles.typeButtonActive,
+                        type &&
+                        styles.typeButtonActive,
                       ]}
                       onPress={() =>
                         setActivityType(
@@ -1156,8 +1519,8 @@ const ActivityScreen = () => {
                           styles.typeText,
 
                           activityType ===
-                            type &&
-                            styles.typeTextActive,
+                          type &&
+                          styles.typeTextActive,
                         ]}>
                         {type}
                       </Text>
@@ -1656,5 +2019,71 @@ const styles =
       color: '#000',
       fontWeight: '900',
       fontSize: 11,
+    },
+
+    progressCard: {
+      backgroundColor: '#000',
+      borderRadius: 18,
+      padding: 15,
+      marginBottom: 10,
+    },
+
+    progressHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+
+    progressTitle: {
+      color: '#777',
+      fontSize: 8,
+      fontWeight: '900',
+      letterSpacing: 0.5,
+    },
+
+    progressSubtitle: {
+      color: '#aaa',
+      fontSize: 11,
+      fontWeight: '700',
+      marginTop: 4,
+    },
+
+    progressPercent: {
+      color: '#fff',
+      fontSize: 22,
+      fontWeight: '900',
+    },
+
+    progressTrack: {
+      height: 7,
+      backgroundColor: '#252525',
+      borderRadius: 4,
+      overflow: 'hidden',
+      marginTop: 12,
+    },
+
+    progressFill: {
+      height: '100%',
+      backgroundColor: '#fff',
+      borderRadius: 4,
+    },
+
+    routeStatusRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: 9,
+    },
+
+    routeStatusText: {
+      color: '#fff',
+      fontSize: 9,
+      fontWeight: '900',
+    },
+
+    routeDistanceText: {
+      color: '#666',
+      fontSize: 8,
+      fontWeight: '700',
     },
   });
