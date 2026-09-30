@@ -39,6 +39,15 @@ export type RootStackParamList = {
   ActivityHistory: undefined;
 
   Notifications: undefined;
+
+  PublicProfile: {
+    userId: string;
+  };
+
+  FollowList: {
+    userId: string;
+    mode: 'followers' | 'following';
+  };
 };
 
 export type MainTabParamList = {

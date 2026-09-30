@@ -28,6 +28,8 @@ import TerritoryDetailsScreen from '../screens/Territory/TerritoryDetailsScreen'
 import ActivityHistoryScreen from '../screens/History/ActivityHistoryScreen';
 import NotificationsScreen from '../screens/Notifications/NotificationsScreen';
 import SocialFeedScreen from '../screens/Social/SocialFeedScreen';
+import PublicProfileScreen from '../screens/Social/PublicProfileScreen';
+import FollowListScreen from '../screens/Social/FollowListScreen';
 
 import type {
   RootStackParamList,
@@ -91,7 +93,6 @@ const MainTabs = () => {
         },
 
         tabBarActiveTintColor: '#fff',
-
         tabBarInactiveTintColor: '#666',
 
         tabBarLabelStyle: {
@@ -100,10 +101,6 @@ const MainTabs = () => {
           marginTop: 2,
         },
 
-        /*
-         * Exactly five primary tabs.
-         * Each gets exactly 20% of the bar.
-         */
         tabBarItemStyle: {
           width: '20%',
         },
@@ -114,7 +111,6 @@ const MainTabs = () => {
         component={MapScreen}
         options={{
           tabBarLabel: 'Map',
-
           tabBarIcon: ({
             color,
             focused,
@@ -133,7 +129,6 @@ const MainTabs = () => {
         component={SocialFeedScreen}
         options={{
           tabBarLabel: 'Feed',
-
           tabBarIcon: ({
             color,
             focused,
@@ -152,7 +147,6 @@ const MainTabs = () => {
         component={ActivityScreen}
         options={{
           tabBarLabel: 'Activity',
-
           tabBarIcon: ({
             color,
             focused,
@@ -171,7 +165,6 @@ const MainTabs = () => {
         component={LeaderboardScreen}
         options={{
           tabBarLabel: 'Ranks',
-
           tabBarIcon: ({
             color,
             focused,
@@ -188,7 +181,7 @@ const MainTabs = () => {
       <Tab.Screen
         name="Profile"
         component={ProfileScreen}
-        options={({ navigation }) => ({
+        options={{
           tabBarLabel: 'Profile',
 
           tabBarIcon: ({
@@ -201,55 +194,7 @@ const MainTabs = () => {
               focused={focused}
             />
           ),
-
-          /*
-           * Notification is a secondary screen.
-           * It is opened from the Profile header.
-           */
-          headerShown: true,
-
-          headerStyle: {
-            backgroundColor: '#000',
-          },
-
-          headerTintColor: '#fff',
-
-          headerTitle: 'Profile',
-
-          headerTitleStyle: {
-            fontWeight: '800',
-          },
-
-          headerRight: () => (
-            <Pressable
-              onPress={() =>
-                navigation
-                  .getParent()
-                  ?.navigate(
-                    'Notifications',
-                  )
-              }
-              style={
-                styles.notificationButton
-              }>
-
-              <View
-                style={
-                  styles.notificationCircle
-                }>
-
-                <Text
-                  style={
-                    styles.notificationIcon
-                  }>
-                  !
-                </Text>
-
-              </View>
-
-            </Pressable>
-          ),
-        })}
+        }}
       />
 
     </Tab.Navigator>
@@ -277,7 +222,6 @@ const AppNavigator = () => {
           },
         }}>
 
-        {/* PRIMARY APP */}
         <Stack.Screen
           name="MainTabs"
           component={MainTabs}
@@ -285,8 +229,6 @@ const AppNavigator = () => {
             headerShown: false,
           }}
         />
-
-        {/* SECONDARY SCREENS */}
 
         <Stack.Screen
           name="ActivityHistory"
@@ -304,7 +246,25 @@ const AppNavigator = () => {
           }}
         />
 
-        {/* ACTIVITY FLOW */}
+        <Stack.Screen
+          name="PublicProfile"
+          component={PublicProfileScreen}
+          options={{
+            title: 'Profile',
+          }}
+        />
+
+        <Stack.Screen
+          name="FollowList"
+          component={FollowListScreen}
+          options={({ route }) => ({
+            title:
+              route.params.mode ===
+              'followers'
+                ? 'Followers'
+                : 'Following',
+          })}
+        />
 
         <Stack.Screen
           name="ActivityResult"
@@ -313,8 +273,6 @@ const AppNavigator = () => {
             title: 'Activity Result',
           }}
         />
-
-        {/* TERRITORY FLOW */}
 
         <Stack.Screen
           name="TerritoryDetails"
@@ -351,27 +309,6 @@ const styles = StyleSheet.create({
 
   icon: {
     fontSize: 11,
-    fontWeight: '900',
-  },
-
-  notificationButton: {
-    marginRight: 16,
-  },
-
-  notificationCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#141414',
-    borderWidth: 1,
-    borderColor: '#333',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  notificationIcon: {
-    color: '#fff',
-    fontSize: 15,
     fontWeight: '900',
   },
 });

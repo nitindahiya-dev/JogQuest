@@ -2273,6 +2273,279 @@ app.post(
 );
 
 
+// ==================================================
+// PUBLIC SOCIAL PROFILE
+// ==================================================
+
+app.get(
+  '/api/users/:userId/social-profile',
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      const viewerId =
+        typeof req.query.viewerId === 'string'
+          ? req.query.viewerId
+          : userId;
+
+      const result = await query(
+        `
+        WITH activity_stats AS (
+          SELECT
+            user_id,
+            COUNT(*)::int AS activities_count,
+            COALESCE(
+              SUM(distance_km),
+              0
+            )::double precision AS total_distance_km
+          FROM activities
+          GROUP BY user_id
+        ),
+
+        territory_stats AS (
+          SELECT
+            user_id,
+            COUNT(*)::int AS territories_captured,
+            COALESCE(
+              SUM(area_km2),
+              0
+            )::double precision AS territory_km2
+          FROM territories
+          GROUP BY user_id
+        ),
+
+        defense_stats AS (
+          SELECT
+            new_owner_id AS user_id,
+            COUNT(*)::int AS territories_defended
+          FROM territory_history
+          WHERE
+            action = 'CHALLENGE_REJECTED'
+          GROUP BY new_owner_id
+        ),
+
+        follower_stats AS (
+          SELECT
+            following_id AS user_id,
+            COUNT(*)::int AS followers_count
+          FROM follows
+          GROUP BY following_id
+        ),
+
+        following_stats AS (
+          SELECT
+            follower_id AS user_id,
+            COUNT(*)::int AS following_count
+          FROM follows
+          GROUP BY follower_id
+        ),
+
+        ranked_users AS (
+          SELECT
+            u.id,
+            u.username,
+            u.display_name,
+            u.avatar_url,
+
+            COALESCE(
+              a.activities_count,
+              0
+            )::int AS activities_count,
+
+            COALESCE(
+              a.total_distance_km,
+              0
+            )::double precision
+              AS total_distance_km,
+
+            COALESCE(
+              t.territories_captured,
+              0
+            )::int AS territories_captured,
+
+            COALESCE(
+              t.territory_km2,
+              0
+            )::double precision
+              AS territory_km2,
+
+            COALESCE(
+              d.territories_defended,
+              0
+            )::int AS territories_defended,
+
+            COALESCE(
+              fs.followers_count,
+              0
+            )::int AS followers_count,
+
+            COALESCE(
+              fgs.following_count,
+              0
+            )::int AS following_count,
+
+            DENSE_RANK() OVER (
+              ORDER BY
+                COALESCE(
+                  t.territory_km2,
+                  0
+                ) DESC,
+
+                COALESCE(
+                  a.total_distance_km,
+                  0
+                ) DESC
+            )::int AS rank
+
+          FROM users u
+
+          LEFT JOIN activity_stats a
+            ON a.user_id = u.id
+
+          LEFT JOIN territory_stats t
+            ON t.user_id = u.id
+
+          LEFT JOIN defense_stats d
+            ON d.user_id = u.id
+
+          LEFT JOIN follower_stats fs
+            ON fs.user_id = u.id
+
+          LEFT JOIN following_stats fgs
+            ON fgs.user_id = u.id
+        )
+
+        SELECT
+          r.*,
+
+          GREATEST(
+            1,
+            FLOOR(
+              r.total_distance_km / 10
+            ) + 1
+          )::int AS level,
+
+          EXISTS (
+            SELECT 1
+            FROM follows f
+            WHERE
+              f.follower_id = $2
+              AND f.following_id = r.id
+          ) AS followed_by_viewer
+
+        FROM ranked_users r
+
+        WHERE r.id = $1
+        `,
+        [
+          userId,
+          viewerId,
+        ],
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          error: 'User not found',
+        });
+      }
+
+      res.json(result.rows[0]);
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to fetch social profile',
+      });
+    }
+  },
+);
+
+
+// ==================================================
+// GET FOLLOWERS
+// ==================================================
+
+app.get(
+  '/api/users/:userId/followers',
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      const result = await query(
+        `
+        SELECT
+          u.id,
+          u.username,
+          u.display_name,
+          u.avatar_url,
+          f.created_at
+        FROM follows f
+        JOIN users u
+          ON u.id = f.follower_id
+        WHERE
+          f.following_id = $1
+        ORDER BY
+          f.created_at DESC
+        `,
+        [userId],
+      );
+
+      res.json(result.rows);
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to fetch followers',
+      });
+    }
+  },
+);
+
+
+// ==================================================
+// GET FOLLOWING
+// ==================================================
+
+app.get(
+  '/api/users/:userId/following',
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      const result = await query(
+        `
+        SELECT
+          u.id,
+          u.username,
+          u.display_name,
+          u.avatar_url,
+          f.created_at
+        FROM follows f
+        JOIN users u
+          ON u.id = f.following_id
+        WHERE
+          f.follower_id = $1
+        ORDER BY
+          f.created_at DESC
+        `,
+        [userId],
+      );
+
+      res.json(result.rows);
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to fetch following',
+      });
+    }
+  },
+);
+
+
 // --------------------------------------------------
 // START SERVER
 // --------------------------------------------------

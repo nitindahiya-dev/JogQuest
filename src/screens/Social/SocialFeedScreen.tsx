@@ -18,7 +18,21 @@ import {
 
 import {
   useFocusEffect,
+  useNavigation,
 } from '@react-navigation/native';
+import type {
+  CompositeNavigationProp,
+} from '@react-navigation/native';
+import type {
+  BottomTabNavigationProp,
+} from '@react-navigation/bottom-tabs';
+import type {
+  NativeStackNavigationProp,
+} from '@react-navigation/native-stack';
+import type {
+  MainTabParamList,
+  RootStackParamList,
+} from '../../navigation/types';
 
 type FeedPost = {
   id: string;
@@ -71,6 +85,17 @@ type Comment = {
   avatar_url: string | null;
 };
 
+type Navigation =
+  CompositeNavigationProp<
+    BottomTabNavigationProp<
+      MainTabParamList,
+      'Feed'
+    >,
+    NativeStackNavigationProp<
+      RootStackParamList
+    >
+  >;
+
 const API_BASE_URL =
   'http://127.0.0.1:4000';
 
@@ -78,6 +103,9 @@ const DEV_USER_ID =
   '7445aab6-039b-4e64-8559-1ec9ae702ffe';
 
 const SocialFeedScreen = () => {
+  const navigation =
+    useNavigation<Navigation>();
+
   const [
     posts,
     setPosts,
@@ -476,7 +504,17 @@ const SocialFeedScreen = () => {
     return (
       <View style={styles.postCard}>
 
-        <View style={styles.userRow}>
+        <TouchableOpacity
+          style={styles.userRow}
+          activeOpacity={0.8}
+          onPress={() =>
+            navigation.navigate(
+              'PublicProfile',
+              {
+                userId: item.user_id,
+              },
+            )
+          }>
 
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>
@@ -498,7 +536,7 @@ const SocialFeedScreen = () => {
 
           </View>
 
-        </View>
+        </TouchableOpacity>
 
         {!!item.content && (
           <Text style={styles.content}>
