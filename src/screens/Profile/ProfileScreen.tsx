@@ -258,6 +258,21 @@ const ProfileScreen = () => {
           VIEW ACTIVITY HISTORY
         </Text>
       </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[
+          styles.activityButton,
+          styles.clubsButton,
+        ]}
+        onPress={() =>
+          navigation
+            .getParent()
+            ?.navigate('Clubs')
+        }>
+        <Text style={styles.activityButtonText}>
+          EXPLORE CLUBS
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 };
@@ -419,5 +434,9 @@ const styles = StyleSheet.create({
   activityButtonText: {
     color: '#000',
     fontWeight: '900',
+  },
+
+  clubsButton: {
+    marginTop: 10,
   },
 });

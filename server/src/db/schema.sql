@@ -759,3 +759,56 @@ CREATE TRIGGER trg_notify_post_comment
 AFTER INSERT ON post_comments
 FOR EACH ROW
 EXECUTE FUNCTION jq_notify_post_comment();
+
+-- ==================================================
+-- CLUBS
+-- ==================================================
+
+CREATE TABLE IF NOT EXISTS clubs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  name VARCHAR(100) NOT NULL,
+
+  description VARCHAR(500) NOT NULL DEFAULT '',
+
+  creator_id UUID NOT NULL
+    REFERENCES users(id)
+    ON DELETE CASCADE,
+
+  is_public BOOLEAN NOT NULL DEFAULT TRUE,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  UNIQUE (name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_clubs_creator
+ON clubs (creator_id);
+
+CREATE INDEX IF NOT EXISTS idx_clubs_created
+ON clubs (created_at DESC);
+
+
+-- ==================================================
+-- CLUB MEMBERS
+-- ==================================================
+
+CREATE TABLE IF NOT EXISTS club_members (
+  club_id UUID NOT NULL
+    REFERENCES clubs(id)
+    ON DELETE CASCADE,
+
+  user_id UUID NOT NULL
+    REFERENCES users(id)
+    ON DELETE CASCADE,
+
+  joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  PRIMARY KEY (club_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_club_members_club
+ON club_members (club_id);
+
+CREATE INDEX IF NOT EXISTS idx_club_members_user
+ON club_members (user_id);

@@ -48,6 +48,14 @@ export type RootStackParamList = {
     userId: string;
     mode: 'followers' | 'following';
   };
+
+  Clubs: undefined;
+
+  CreateClub: undefined;
+
+  ClubDetails: {
+    clubId: string;
+  };
 };
 
 export type MainTabParamList = {

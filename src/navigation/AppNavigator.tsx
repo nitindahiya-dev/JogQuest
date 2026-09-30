@@ -30,11 +30,14 @@ import NotificationsScreen from '../screens/Notifications/NotificationsScreen';
 import SocialFeedScreen from '../screens/Social/SocialFeedScreen';
 import PublicProfileScreen from '../screens/Social/PublicProfileScreen';
 import FollowListScreen from '../screens/Social/FollowListScreen';
+import ClubsScreen from '../screens/Clubs/ClubsScreen';
 
 import type {
   RootStackParamList,
   MainTabParamList,
 } from './types';
+import CreateClubScreen from '../screens/Clubs/CreateClubScreen';
+import ClubDetailsScreen from '../screens/Clubs/ClubDetailsScreen';
 
 const Tab =
   createBottomTabNavigator<MainTabParamList>();
@@ -56,7 +59,7 @@ const TabIcon = ({
       style={[
         styles.iconContainer,
         focused &&
-          styles.iconContainerActive,
+        styles.iconContainerActive,
       ]}>
 
       <Text
@@ -260,10 +263,34 @@ const AppNavigator = () => {
           options={({ route }) => ({
             title:
               route.params.mode ===
-              'followers'
+                'followers'
                 ? 'Followers'
                 : 'Following',
           })}
+        />
+
+        <Stack.Screen
+          name="Clubs"
+          component={ClubsScreen}
+          options={{
+            title: 'Clubs',
+          }}
+        />
+
+        <Stack.Screen
+          name="CreateClub"
+          component={CreateClubScreen}
+          options={{
+            title: 'Create Club',
+          }}
+        />
+
+        <Stack.Screen
+          name="ClubDetails"
+          component={ClubDetailsScreen}
+          options={{
+            title: 'Club',
+          }}
         />
 
         <Stack.Screen
