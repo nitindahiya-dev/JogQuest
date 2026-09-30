@@ -293,10 +293,10 @@ const ActivityScreen = () => {
           route,
           territory: territory.captured
             ? {
-                areaM2: territory.areaM2,
-                areaKm2: territory.areaKm2,
-                polygon: territory.polygon,
-              }
+              areaM2: territory.areaM2,
+              areaKm2: territory.areaKm2,
+              polygon: territory.polygon,
+            }
             : undefined,
         }),
       },
@@ -362,8 +362,8 @@ const ActivityScreen = () => {
 
     const finalTime = startTimeRef.current
       ? Math.floor(
-          (Date.now() - startTimeRef.current) / 1000,
-        )
+        (Date.now() - startTimeRef.current) / 1000,
+      )
       : 0;
 
     const finalPace =
@@ -478,10 +478,10 @@ const ActivityScreen = () => {
               {isSaving
                 ? 'SAVING ACTIVITY...'
                 : isTracking
-                ? isPaused
-                  ? 'PAUSED'
-                  : `${activityType.toUpperCase()} IN PROGRESS`
-                : 'START ACTIVITY'}
+                  ? isPaused
+                    ? 'PAUSED'
+                    : `${activityType.toUpperCase()} IN PROGRESS`
+                  : 'START ACTIVITY'}
             </Text>
           </View>
 
@@ -571,91 +571,113 @@ const ActivityScreen = () => {
 
           {/* CONTROLS */}
 
+          {/* CONTROLS */}
+
           <View style={styles.controls}>
+
             {!isTracking && (
-              <TouchableOpacity
-                style={[
-                  styles.startButton,
-                  isSaving &&
-                  styles.buttonDisabled,
-                ]}
-                disabled={isSaving}
-                onPress={startActivity}>
-                <Text
-                  style={styles.buttonText}>
-                  START{' '}
-                  {activityType.toUpperCase()}
-                </Text>
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity
+                  style={styles.planRouteButton}
+                  onPress={() =>
+                    navigation.navigate(
+                      'RoutePlanner',
+                    )
+                  }>
+
+                  <Text
+                    style={
+                      styles.planRouteText
+                    }>
+                    PLAN ROUTE
+                  </Text>
+
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.startButton}
+                  onPress={
+                    startActivity
+                  }>
+
+                  <Text
+                    style={styles.buttonText}>
+                    START{' '}
+                    {activityType.toUpperCase()}
+                  </Text>
+
+                </TouchableOpacity>
+              </>
             )}
 
-            {isTracking && !isPaused && (
-              <View style={styles.buttonRow}>
-                <TouchableOpacity
-                  style={[
-                    styles.pauseButton,
-                    isSaving &&
-                    styles.buttonDisabled,
-                  ]}
-                  disabled={isSaving}
-                  onPress={pauseActivity}>
-                  <Text
-                    style={styles.buttonText}>
-                    PAUSE
-                  </Text>
-                </TouchableOpacity>
+            {isTracking &&
+              !isPaused && (
+                <View
+                  style={styles.buttonRow}>
 
-                <TouchableOpacity
-                  style={[
-                    styles.finishButton,
-                    isSaving &&
-                    styles.buttonDisabled,
-                  ]}
-                  disabled={isSaving}
-                  onPress={stopActivity}>
-                  <Text
-                    style={styles.buttonText}>
-                    {isSaving
-                      ? 'SAVING...'
-                      : 'FINISH'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            )}
+                  <TouchableOpacity
+                    style={styles.pauseButton}
+                    onPress={
+                      pauseActivity
+                    }>
+                    <Text
+                      style={
+                        styles.buttonText
+                      }>
+                      PAUSE
+                    </Text>
+                  </TouchableOpacity>
 
-            {isTracking && isPaused && (
-              <View style={styles.buttonRow}>
-                <TouchableOpacity
-                  style={[
-                    styles.resumeButton,
-                    isSaving &&
-                    styles.buttonDisabled,
-                  ]}
-                  disabled={isSaving}
-                  onPress={resumeActivity}>
-                  <Text
-                    style={styles.buttonText}>
-                    RESUME
-                  </Text>
-                </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.finishButton}
+                    onPress={
+                      stopActivity
+                    }>
+                    <Text
+                      style={
+                        styles.buttonText
+                      }>
+                      FINISH
+                    </Text>
+                  </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={[
-                    styles.finishButton,
-                    isSaving &&
-                    styles.buttonDisabled,
-                  ]}
-                  disabled={isSaving}
-                  onPress={stopActivity}>
-                  <Text
-                    style={styles.buttonText}>
-                    {isSaving
-                      ? 'SAVING...'
-                      : 'FINISH'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            )}
+                </View>
+              )}
+
+            {isTracking &&
+              isPaused && (
+                <View
+                  style={styles.buttonRow}>
+
+                  <TouchableOpacity
+                    style={styles.resumeButton}
+                    onPress={
+                      resumeActivity
+                    }>
+                    <Text
+                      style={
+                        styles.buttonText
+                      }>
+                      RESUME
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.finishButton}
+                    onPress={
+                      stopActivity
+                    }>
+                    <Text
+                      style={
+                        styles.buttonText
+                      }>
+                      FINISH
+                    </Text>
+                  </TouchableOpacity>
+
+                </View>
+              )}
+
           </View>
         </View>
       </View>
@@ -808,6 +830,22 @@ const styles = StyleSheet.create({
 
   buttonText: {
     color: '#000',
+    fontWeight: '900',
+  },
+
+  planRouteButton: {
+    backgroundColor: '#111',
+    borderWidth: 1,
+    borderColor: '#333',
+    paddingVertical: 15,
+    borderRadius: 18,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+
+  planRouteText: {
+    color: '#fff',
+    fontSize: 10,
     fontWeight: '900',
   },
 });

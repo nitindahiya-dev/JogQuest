@@ -64,6 +64,8 @@ export type RootStackParamList = {
   CompetitionDetails: {
     competitionId: string;
   };
+
+  RoutePlanner: undefined;
 };
 
 export type MainTabParamList = {

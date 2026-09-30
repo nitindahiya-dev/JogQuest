@@ -45,6 +45,7 @@ import type {
   RootStackParamList,
   MainTabParamList,
 } from './types';
+import RoutePlannerScreen from '../screens/RoutePlanner/RoutePlannerScreen';
 
 const Tab =
   createBottomTabNavigator<MainTabParamList>();
@@ -66,7 +67,7 @@ const TabIcon = ({
       style={[
         styles.iconContainer,
         focused &&
-          styles.iconContainerActive,
+        styles.iconContainerActive,
       ]}>
 
       <Text
@@ -277,7 +278,7 @@ const AppNavigator = () => {
             options={({ route }) => ({
               title:
                 route.params.mode ===
-                'followers'
+                  'followers'
                   ? 'Followers'
                   : 'Following',
             })}
@@ -340,6 +341,14 @@ const AppNavigator = () => {
             }
             options={{
               title: 'Competition',
+            }}
+          />
+
+          <Stack.Screen
+            name="RoutePlanner"
+            component={RoutePlannerScreen}
+            options={{
+              title: 'Route Planner',
             }}
           />
 
