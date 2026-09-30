@@ -1,5 +1,5 @@
 import React from 'react';
-
+import AuthProvider, { useAuth } from '../auth/AuthContext';
 import {
   NavigationContainer,
 } from '@react-navigation/native';
@@ -17,7 +17,8 @@ import {
 } from 'react-native-safe-area-context';
 
 import {
-  StatusBar,
+  ActivityIndicator,
+  Pressable,
   StyleSheet,
   Text,
   View,
@@ -41,6 +42,8 @@ import CompetitionsScreen from '../screens/Competitions/CompetitionsScreen';
 import CreateCompetitionScreen from '../screens/Competitions/CreateCompetitionScreen';
 import CompetitionDetailsScreen from '../screens/Competitions/CompetitionDetailsScreen';
 import IntegrationsScreen from '../screens/Integrations/IntegrationsScreen';
+import LoginScreen from '../screens/Auth/LoginScreen';
+import SignupScreen from '../screens/Auth/SignupScreen';
 
 import type {
   RootStackParamList,
@@ -223,51 +226,113 @@ const MainTabs = () => {
   );
 };
 
-const AppNavigator = () => {
-  return (
-    <>
-      <StatusBar
-        barStyle="light-content"
-      />
+const RootNavigator = () => {
+  const {
+    user,
+    loading,
+  } = useAuth();
 
-      <NavigationContainer>
+  if (loading) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: '#000',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+        <ActivityIndicator
+          size="small"
+          color="#fff"
+        />
 
-        <Stack.Navigator
-          screenOptions={{
-            headerStyle: {
-              backgroundColor: '#000',
-            },
-
-            headerTintColor: '#fff',
-
-            headerTitleStyle: {
-              fontWeight: '700',
-            },
-
-            contentStyle: {
-              backgroundColor: '#000',
-            },
+        <Text
+          style={{
+            color: '#777',
+            marginTop: 10,
+            fontSize: 11,
           }}>
+          Restoring session...
+        </Text>
+      </View>
+    );
+  }
 
-          {/* =======================================
-              MAIN APP
-              ======================================= */}
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerStyle: {
+          backgroundColor: '#000',
+        },
 
+        headerTintColor: '#fff',
+
+        headerTitleStyle: {
+          fontWeight: '700',
+        },
+
+        contentStyle: {
+          backgroundColor: '#000',
+        },
+      }}>
+
+      {!user ? (
+        <>
           <Stack.Screen
-            name="MainTabs"
-            component={MainTabs}
+            name="Login"
+            component={LoginScreen}
             options={{
               headerShown: false,
             }}
           />
 
-          {/* =======================================
-              SOCIAL
-              ======================================= */}
+          <Stack.Screen
+            name="Signup"
+            component={SignupScreen}
+            options={{
+              headerShown: false,
+            }}
+          />
+        </>
+      ) : (
+        <>
+          <Stack.Screen
+            name="MainTabs"
+            component={
+              MainTabs
+            }
+            options={{
+              headerShown: false,
+            }}
+          />
+
+          <Stack.Screen
+            name="ActivityHistory"
+            component={
+              ActivityHistoryScreen
+            }
+            options={{
+              title:
+                'Activity History',
+            }}
+          />
+
+          <Stack.Screen
+            name="Notifications"
+            component={
+              NotificationsScreen
+            }
+            options={{
+              title:
+                'Notifications',
+            }}
+          />
 
           <Stack.Screen
             name="PublicProfile"
-            component={PublicProfileScreen}
+            component={
+              PublicProfileScreen
+            }
             options={{
               title: 'Profile',
             }}
@@ -275,7 +340,9 @@ const AppNavigator = () => {
 
           <Stack.Screen
             name="FollowList"
-            component={FollowListScreen}
+            component={
+              FollowListScreen
+            }
             options={({ route }) => ({
               title:
                 route.params.mode ===
@@ -285,13 +352,11 @@ const AppNavigator = () => {
             })}
           />
 
-          {/* =======================================
-              CLUBS
-              ======================================= */}
-
           <Stack.Screen
             name="Clubs"
-            component={ClubsScreen}
+            component={
+              ClubsScreen
+            }
             options={{
               title: 'Clubs',
             }}
@@ -299,29 +364,33 @@ const AppNavigator = () => {
 
           <Stack.Screen
             name="CreateClub"
-            component={CreateClubScreen}
+            component={
+              CreateClubScreen
+            }
             options={{
-              title: 'Create Club',
+              title:
+                'Create Club',
             }}
           />
 
           <Stack.Screen
             name="ClubDetails"
-            component={ClubDetailsScreen}
+            component={
+              ClubDetailsScreen
+            }
             options={{
               title: 'Club',
             }}
           />
 
-          {/* =======================================
-              COMPETITIONS
-              ======================================= */}
-
           <Stack.Screen
             name="Competitions"
-            component={CompetitionsScreen}
+            component={
+              CompetitionsScreen
+            }
             options={{
-              title: 'Competitions',
+              title:
+                'Competitions',
             }}
           />
 
@@ -331,7 +400,8 @@ const AppNavigator = () => {
               CreateCompetitionScreen
             }
             options={{
-              title: 'Create Competition',
+              title:
+                'Create Competition',
             }}
           />
 
@@ -341,61 +411,43 @@ const AppNavigator = () => {
               CompetitionDetailsScreen
             }
             options={{
-              title: 'Competition',
+              title:
+                'Competition',
             }}
           />
 
           <Stack.Screen
             name="RoutePlanner"
-            component={RoutePlannerScreen}
+            component={
+              RoutePlannerScreen
+            }
             options={{
-              title: 'Route Planner',
-            }}
-          />
-
-          {/* =======================================
-              ACTIVITY
-              ======================================= */}
-
-          <Stack.Screen
-            name="ActivityHistory"
-            component={ActivityHistoryScreen}
-            options={{
-              title: 'Activity History',
-            }}
-          />
-
-          <Stack.Screen
-            name="ActivityResult"
-            component={ActivityResultScreen}
-            options={{
-              title: 'Activity Result',
-            }}
-          />
-
-          {/* =======================================
-              NOTIFICATIONS
-              ======================================= */}
-
-          <Stack.Screen
-            name="Notifications"
-            component={NotificationsScreen}
-            options={{
-              title: 'Notifications',
+              title:
+                'Route Planner',
             }}
           />
 
           <Stack.Screen
             name="Integrations"
-            component={IntegrationsScreen}
+            component={
+              IntegrationsScreen
+            }
             options={{
-              title: 'Integrations',
+              title:
+                'Integrations',
             }}
           />
 
-          {/* =======================================
-              TERRITORY
-              ======================================= */}
+          <Stack.Screen
+            name="ActivityResult"
+            component={
+              ActivityResultScreen
+            }
+            options={{
+              title:
+                'Activity Result',
+            }}
+          />
 
           <Stack.Screen
             name="TerritoryDetails"
@@ -406,11 +458,20 @@ const AppNavigator = () => {
               title: 'Territory',
             }}
           />
+        </>
+      )}
 
-        </Stack.Navigator>
+    </Stack.Navigator>
+  );
+};
 
+const AppNavigator = () => {
+  return (
+    <AuthProvider>
+      <NavigationContainer>
+        <RootNavigator />
       </NavigationContainer>
-    </>
+    </AuthProvider>
   );
 };
 

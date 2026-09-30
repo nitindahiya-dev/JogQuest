@@ -28,6 +28,8 @@ export type ActivityResultParams = {
 };
 
 export type RootStackParamList = {
+  Login: undefined;
+  Signup: undefined;
   MainTabs: undefined;
   ActivityResult: ActivityResultParams;
   TerritoryDetails: {

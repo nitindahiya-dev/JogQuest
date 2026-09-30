@@ -34,6 +34,8 @@ import type {
   RootStackParamList,
 } from '../../navigation/types';
 
+import { useAuth } from '../../auth/AuthContext';
+
 type NavigationProp =
   CompositeNavigationProp<
     BottomTabNavigationProp<
@@ -66,12 +68,24 @@ type NotificationsResponse = {
 const API_BASE_URL =
   'http://127.0.0.1:4000';
 
-const DEV_USER_ID =
-  '7445aab6-039b-4e64-8559-1ec9ae702ffe';
-
 const ProfileScreen = () => {
   const navigation =
     useNavigation<NavigationProp>();
+
+  const {
+    user,
+    logout,
+  } = useAuth();
+
+  if (!user) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.errorText}>
+          Authentication required.
+        </Text>
+      </View>
+    );
+  }
 
   const [
     profile,
@@ -101,7 +115,7 @@ const ProfileScreen = () => {
 
         const response =
           await fetch(
-            `${API_BASE_URL}/api/users/${DEV_USER_ID}/profile`,
+            `${API_BASE_URL}/api/users/${user.id}/profile`,
           );
 
         if (!response.ok) {
@@ -126,14 +140,14 @@ const ProfileScreen = () => {
       } finally {
         setLoading(false);
       }
-    }, []);
+    }, [user.id]);
 
   const loadUnreadCount =
     useCallback(async () => {
       try {
         const response =
           await fetch(
-            `${API_BASE_URL}/api/users/${DEV_USER_ID}/notifications`,
+            `${API_BASE_URL}/api/users/${user.id}/notifications`,
           );
 
         if (!response.ok) {
@@ -155,7 +169,7 @@ const ProfileScreen = () => {
           err,
         );
       }
-    }, []);
+    }, [user.id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -494,7 +508,15 @@ const ProfileScreen = () => {
             MANAGE INTEGRATIONS
           </Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.logoutButton}
+          onPress={logout}>
 
+          <Text style={styles.logoutButtonText}>
+            SIGN OUT
+          </Text>
+
+        </TouchableOpacity>
       </View>
 
     </ScrollView>
@@ -751,6 +773,21 @@ const styles = StyleSheet.create({
 
   activityButtonText: {
     color: '#000',
+    fontWeight: '900',
+  },
+
+  logoutButton: {
+    minHeight: 52,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#333',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+  },
+
+  logoutButtonText: {
+    color: '#fff',
     fontWeight: '900',
   },
 });
