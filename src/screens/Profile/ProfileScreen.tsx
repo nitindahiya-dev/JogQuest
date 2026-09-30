@@ -15,13 +15,30 @@ import {
   useFocusEffect,
   useNavigation,
 } from '@react-navigation/native';
-
-import type {BottomTabNavigationProp} from '@react-navigation/bottom-tabs';
-
-import type {MainTabParamList} from '../../navigation/types';
+import type {
+  BottomTabNavigationProp,
+} from '@react-navigation/bottom-tabs';
+import type {
+  CompositeNavigationProp,
+} from '@react-navigation/native';
+import type {
+  NativeStackNavigationProp,
+} from '@react-navigation/native-stack';
+import type {
+  MainTabParamList,
+  RootStackParamList,
+} from '../../navigation/types';
 
 type NavigationProp =
-  BottomTabNavigationProp<MainTabParamList>;
+  CompositeNavigationProp<
+    BottomTabNavigationProp<
+      MainTabParamList,
+      'Profile'
+    >,
+    NativeStackNavigationProp<
+      RootStackParamList
+    >
+  >;
 
 type Profile = {
   id: string;
@@ -233,7 +250,9 @@ const ProfileScreen = () => {
       <TouchableOpacity
         style={styles.activityButton}
         onPress={() =>
-          navigation.navigate('History')
+          navigation
+            .getParent()
+            ?.navigate('ActivityHistory')
         }>
         <Text style={styles.activityButtonText}>
           VIEW ACTIVITY HISTORY

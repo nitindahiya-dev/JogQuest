@@ -1,6 +1,5 @@
 import React, {
   useCallback,
-  useEffect,
   useState,
 } from 'react';
 
@@ -16,16 +15,7 @@ import {
 
 import {
   useFocusEffect,
-  useNavigation,
 } from '@react-navigation/native';
-
-import type {
-  BottomTabNavigationProp,
-} from '@react-navigation/bottom-tabs';
-
-import type {
-  MainTabParamList,
-} from '../../navigation/types';
 
 type NotificationItem = {
   id: string;
@@ -58,15 +48,8 @@ const API_BASE_URL =
 const DEV_USER_ID =
   '7445aab6-039b-4e64-8559-1ec9ae702ffe';
 
-type Navigation =
-  BottomTabNavigationProp<
-    MainTabParamList,
-    'Notifications'
-  >;
 
 const NotificationsScreen = () => {
-  const navigation =
-    useNavigation<Navigation>();
 
   const [
     notifications,
@@ -140,18 +123,6 @@ const NotificationsScreen = () => {
       loadNotifications();
     }, [loadNotifications]),
   );
-
-  useEffect(() => {
-    navigation.setOptions({
-      tabBarBadge:
-        unreadCount > 0
-          ? unreadCount
-          : undefined,
-    });
-  }, [
-    navigation,
-    unreadCount,
-  ]);
 
   const markRead = async (
     notification: NotificationItem,

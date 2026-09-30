@@ -493,3 +493,269 @@ FROM territory_history th
 WHERE th.action = 'TRANSFERRED'
   AND th.previous_owner_id IS NOT NULL
 ON CONFLICT (dedupe_key) DO NOTHING;
+
+-- ==================================================
+-- SOCIAL
+-- ==================================================
+
+CREATE TABLE IF NOT EXISTS follows (
+  follower_id UUID NOT NULL
+    REFERENCES users(id)
+    ON DELETE CASCADE,
+
+  following_id UUID NOT NULL
+    REFERENCES users(id)
+    ON DELETE CASCADE,
+
+  created_at TIMESTAMPTZ NOT NULL
+    DEFAULT NOW(),
+
+  PRIMARY KEY (follower_id, following_id),
+
+  CHECK (follower_id <> following_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_follows_follower
+ON follows (follower_id);
+
+CREATE INDEX IF NOT EXISTS idx_follows_following
+ON follows (following_id);
+
+
+-- ==================================================
+-- POSTS
+-- ==================================================
+
+CREATE TABLE IF NOT EXISTS posts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  user_id UUID NOT NULL
+    REFERENCES users(id)
+    ON DELETE CASCADE,
+
+  activity_id UUID
+    REFERENCES activities(id)
+    ON DELETE SET NULL,
+
+  content VARCHAR(500) NOT NULL
+    DEFAULT '',
+
+  created_at TIMESTAMPTZ NOT NULL
+    DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_posts_user_created
+ON posts (user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_posts_created
+ON posts (created_at DESC);
+
+
+-- ==================================================
+-- POST LIKES
+-- ==================================================
+
+CREATE TABLE IF NOT EXISTS post_likes (
+  post_id UUID NOT NULL
+    REFERENCES posts(id)
+    ON DELETE CASCADE,
+
+  user_id UUID NOT NULL
+    REFERENCES users(id)
+    ON DELETE CASCADE,
+
+  created_at TIMESTAMPTZ NOT NULL
+    DEFAULT NOW(),
+
+  PRIMARY KEY (post_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_post_likes_post
+ON post_likes (post_id);
+
+CREATE INDEX IF NOT EXISTS idx_post_likes_user
+ON post_likes (user_id);
+
+
+-- ==================================================
+-- POST COMMENTS
+-- ==================================================
+
+CREATE TABLE IF NOT EXISTS post_comments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  post_id UUID NOT NULL
+    REFERENCES posts(id)
+    ON DELETE CASCADE,
+
+  user_id UUID NOT NULL
+    REFERENCES users(id)
+    ON DELETE CASCADE,
+
+  comment VARCHAR(500) NOT NULL,
+
+  created_at TIMESTAMPTZ NOT NULL
+    DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_post_comments_post
+ON post_comments (post_id, created_at ASC);
+
+CREATE INDEX IF NOT EXISTS idx_post_comments_user
+ON post_comments (user_id);
+
+
+-- ==================================================
+-- FOLLOW NOTIFICATION
+-- ==================================================
+
+CREATE OR REPLACE FUNCTION jq_notify_follow_created()
+RETURNS TRIGGER AS $$
+DECLARE
+  follower_name TEXT;
+BEGIN
+  SELECT display_name
+  INTO follower_name
+  FROM users
+  WHERE id = NEW.follower_id;
+
+  INSERT INTO notifications (
+    user_id,
+    type,
+    title,
+    message,
+    dedupe_key
+  )
+  VALUES (
+    NEW.following_id,
+    'NEW_FOLLOWER',
+    'New Follower',
+    COALESCE(follower_name, 'A runner')
+      || ' started following you.',
+    'follow:' || NEW.follower_id::text
+      || ':' || NEW.following_id::text
+  )
+  ON CONFLICT (dedupe_key) DO NOTHING;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_notify_follow_created
+ON follows;
+
+CREATE TRIGGER trg_notify_follow_created
+AFTER INSERT ON follows
+FOR EACH ROW
+EXECUTE FUNCTION jq_notify_follow_created();
+
+
+-- ==================================================
+-- LIKE NOTIFICATION
+-- ==================================================
+
+CREATE OR REPLACE FUNCTION jq_notify_post_like()
+RETURNS TRIGGER AS $$
+DECLARE
+  post_owner UUID;
+  liker_name TEXT;
+BEGIN
+  SELECT user_id
+  INTO post_owner
+  FROM posts
+  WHERE id = NEW.post_id;
+
+  IF post_owner IS NULL
+     OR post_owner = NEW.user_id THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT display_name
+  INTO liker_name
+  FROM users
+  WHERE id = NEW.user_id;
+
+  INSERT INTO notifications (
+    user_id,
+    type,
+    title,
+    message,
+    dedupe_key
+  )
+  VALUES (
+    post_owner,
+    'POST_LIKED',
+    'Post Liked',
+    COALESCE(liker_name, 'A runner')
+      || ' liked your post.',
+    'post-like:' || NEW.post_id::text
+      || ':' || NEW.user_id::text
+  )
+  ON CONFLICT (dedupe_key) DO NOTHING;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_notify_post_like
+ON post_likes;
+
+CREATE TRIGGER trg_notify_post_like
+AFTER INSERT ON post_likes
+FOR EACH ROW
+EXECUTE FUNCTION jq_notify_post_like();
+
+
+-- ==================================================
+-- COMMENT NOTIFICATION
+-- ==================================================
+
+CREATE OR REPLACE FUNCTION jq_notify_post_comment()
+RETURNS TRIGGER AS $$
+DECLARE
+  post_owner UUID;
+  commenter_name TEXT;
+BEGIN
+  SELECT user_id
+  INTO post_owner
+  FROM posts
+  WHERE id = NEW.post_id;
+
+  IF post_owner IS NULL
+     OR post_owner = NEW.user_id THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT display_name
+  INTO commenter_name
+  FROM users
+  WHERE id = NEW.user_id;
+
+  INSERT INTO notifications (
+    user_id,
+    type,
+    title,
+    message,
+    dedupe_key
+  )
+  VALUES (
+    post_owner,
+    'POST_COMMENTED',
+    'New Comment',
+    COALESCE(commenter_name, 'A runner')
+      || ' commented on your post.',
+    'post-comment:' || NEW.id::text
+  )
+  ON CONFLICT (dedupe_key) DO NOTHING;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_notify_post_comment
+ON post_comments;
+
+CREATE TRIGGER trg_notify_post_comment
+AFTER INSERT ON post_comments
+FOR EACH ROW
+EXECUTE FUNCTION jq_notify_post_comment();

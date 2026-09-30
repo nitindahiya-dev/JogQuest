@@ -1660,6 +1660,619 @@ app.patch(
 );
 
 
+// ==================================================
+// SOCIAL FEED
+// ==================================================
+
+// --------------------------------------------------
+// GET FEED
+// --------------------------------------------------
+
+app.get('/api/feed/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const requestedScope =
+      String(req.query.scope ?? 'all');
+
+    const scope =
+      requestedScope === 'following'
+        ? 'following'
+        : 'all';
+
+    const parsedLimit = Number.parseInt(
+      String(req.query.limit ?? '50'),
+      10,
+    );
+
+    const parsedOffset = Number.parseInt(
+      String(req.query.offset ?? '0'),
+      10,
+    );
+
+    const limit = Number.isFinite(parsedLimit)
+      ? Math.min(Math.max(parsedLimit, 1), 100)
+      : 50;
+
+    const offset = Number.isFinite(parsedOffset)
+      ? Math.max(parsedOffset, 0)
+      : 0;
+
+    const result = await query(
+      `
+      SELECT
+        p.id,
+        p.user_id,
+        p.activity_id,
+        p.content,
+        p.created_at,
+
+        u.username,
+        u.display_name,
+        u.avatar_url,
+
+        a.activity_type,
+        a.distance_km,
+        a.elapsed_seconds,
+        a.pace,
+        a.started_at,
+        a.finished_at,
+
+        (
+          SELECT COUNT(*)::int
+          FROM post_likes pl
+          WHERE pl.post_id = p.id
+        ) AS likes_count,
+
+        (
+          SELECT COUNT(*)::int
+          FROM post_comments pc
+          WHERE pc.post_id = p.id
+        ) AS comments_count,
+
+        EXISTS (
+          SELECT 1
+          FROM post_likes my_like
+          WHERE my_like.post_id = p.id
+            AND my_like.user_id = $1
+        ) AS liked_by_me
+
+      FROM posts p
+
+      JOIN users u
+        ON u.id = p.user_id
+
+      LEFT JOIN activities a
+        ON a.id = p.activity_id
+
+      WHERE
+        $4 = 'all'
+        OR p.user_id = $1
+        OR EXISTS (
+          SELECT 1
+          FROM follows f
+          WHERE f.follower_id = $1
+            AND f.following_id = p.user_id
+        )
+
+      ORDER BY p.created_at DESC
+
+      LIMIT $2
+      OFFSET $3
+      `,
+      [
+        userId,
+        limit,
+        offset,
+        scope,
+      ],
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: 'Failed to fetch feed',
+    });
+  }
+});
+
+
+// --------------------------------------------------
+// CREATE POST
+// --------------------------------------------------
+
+app.post('/api/posts', async (req, res) => {
+  try {
+    const {
+      userId,
+      content,
+      activityId,
+    } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        error: 'userId is required',
+      });
+    }
+
+    const cleanContent =
+      typeof content === 'string'
+        ? content.trim()
+        : '';
+
+    if (!cleanContent && !activityId) {
+      return res.status(400).json({
+        error:
+          'content or activityId is required',
+      });
+    }
+
+    if (cleanContent.length > 500) {
+      return res.status(400).json({
+        error:
+          'Post content cannot exceed 500 characters',
+      });
+    }
+
+    const userResult = await query(
+      `
+      SELECT id
+      FROM users
+      WHERE id = $1
+      `,
+      [userId],
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'User not found',
+      });
+    }
+
+    if (activityId) {
+      const activityResult = await query(
+        `
+        SELECT id
+        FROM activities
+        WHERE id = $1
+          AND user_id = $2
+        `,
+        [activityId, userId],
+      );
+
+      if (activityResult.rows.length === 0) {
+        return res.status(400).json({
+          error:
+            'Activity does not belong to this user',
+        });
+      }
+    }
+
+    const result = await query(
+      `
+      INSERT INTO posts (
+        user_id,
+        activity_id,
+        content
+      )
+      VALUES ($1, $2, $3)
+      RETURNING
+        id,
+        user_id,
+        activity_id,
+        content,
+        created_at
+      `,
+      [
+        userId,
+        activityId ?? null,
+        cleanContent,
+      ],
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: 'Failed to create post',
+    });
+  }
+});
+
+
+// --------------------------------------------------
+// FOLLOW USER
+// --------------------------------------------------
+
+app.post('/api/users/:userId/follow/:targetUserId', async (
+  req,
+  res,
+) => {
+  try {
+    const {
+      userId,
+      targetUserId,
+    } = req.params;
+
+    if (userId === targetUserId) {
+      return res.status(400).json({
+        error: 'You cannot follow yourself',
+      });
+    }
+
+    const targetResult = await query(
+      `
+      SELECT id
+      FROM users
+      WHERE id = $1
+      `,
+      [targetUserId],
+    );
+
+    if (targetResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Target user not found',
+      });
+    }
+
+    const result = await query(
+      `
+      INSERT INTO follows (
+        follower_id,
+        following_id
+      )
+      VALUES ($1, $2)
+      ON CONFLICT DO NOTHING
+      RETURNING
+        follower_id,
+        following_id,
+        created_at
+      `,
+      [
+        userId,
+        targetUserId,
+      ],
+    );
+
+    res.status(
+      result.rows.length > 0
+        ? 201
+        : 200,
+    ).json({
+      following: true,
+      created: result.rows.length > 0,
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: 'Failed to follow user',
+    });
+  }
+});
+
+
+// --------------------------------------------------
+// UNFOLLOW USER
+// --------------------------------------------------
+
+app.delete(
+  '/api/users/:userId/follow/:targetUserId',
+  async (req, res) => {
+    try {
+      const {
+        userId,
+        targetUserId,
+      } = req.params;
+
+      const result = await query(
+        `
+        DELETE FROM follows
+        WHERE follower_id = $1
+          AND following_id = $2
+        `,
+        [
+          userId,
+          targetUserId,
+        ],
+      );
+
+      res.json({
+        following: false,
+        removed: (result.rowCount ?? 0) > 0,
+      });
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error: 'Failed to unfollow user',
+      });
+    }
+  },
+);
+
+
+// --------------------------------------------------
+// FOLLOWING STATUS
+// --------------------------------------------------
+
+app.get(
+  '/api/users/:userId/follow/:targetUserId',
+  async (req, res) => {
+    try {
+      const {
+        userId,
+        targetUserId,
+      } = req.params;
+
+      const result = await query(
+        `
+        SELECT EXISTS (
+          SELECT 1
+          FROM follows
+          WHERE follower_id = $1
+            AND following_id = $2
+        ) AS following
+        `,
+        [
+          userId,
+          targetUserId,
+        ],
+      );
+
+      res.json({
+        following:
+          result.rows[0]?.following ?? false,
+      });
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to fetch follow status',
+      });
+    }
+  },
+);
+
+
+// --------------------------------------------------
+// LIKE POST
+// --------------------------------------------------
+
+app.post(
+  '/api/posts/:postId/like/:userId',
+  async (req, res) => {
+    try {
+      const {
+        postId,
+        userId,
+      } = req.params;
+
+      const postResult = await query(
+        `
+        SELECT id
+        FROM posts
+        WHERE id = $1
+        `,
+        [postId],
+      );
+
+      if (postResult.rows.length === 0) {
+        return res.status(404).json({
+          error: 'Post not found',
+        });
+      }
+
+      const result = await query(
+        `
+        INSERT INTO post_likes (
+          post_id,
+          user_id
+        )
+        VALUES ($1, $2)
+        ON CONFLICT DO NOTHING
+        RETURNING
+          post_id,
+          user_id,
+          created_at
+        `,
+        [
+          postId,
+          userId,
+        ],
+      );
+
+      res.json({
+        liked: true,
+        created: result.rows.length > 0,
+      });
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error: 'Failed to like post',
+      });
+    }
+  },
+);
+
+
+// --------------------------------------------------
+// UNLIKE POST
+// --------------------------------------------------
+
+app.delete(
+  '/api/posts/:postId/like/:userId',
+  async (req, res) => {
+    try {
+      const {
+        postId,
+        userId,
+      } = req.params;
+
+      const result = await query(
+        `
+        DELETE FROM post_likes
+        WHERE post_id = $1
+          AND user_id = $2
+        `,
+        [
+          postId,
+          userId,
+        ],
+      );
+
+      res.json({
+        liked: false,
+        removed: (result.rowCount ?? 0) > 0,
+      });
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error: 'Failed to unlike post',
+      });
+    }
+  },
+);
+
+
+// --------------------------------------------------
+// GET COMMENTS
+// --------------------------------------------------
+
+app.get(
+  '/api/posts/:postId/comments',
+  async (req, res) => {
+    try {
+      const { postId } = req.params;
+
+      const result = await query(
+        `
+        SELECT
+          pc.id,
+          pc.post_id,
+          pc.user_id,
+          pc.comment,
+          pc.created_at,
+
+          u.username,
+          u.display_name,
+          u.avatar_url
+
+        FROM post_comments pc
+
+        JOIN users u
+          ON u.id = pc.user_id
+
+        WHERE pc.post_id = $1
+
+        ORDER BY pc.created_at ASC
+        `,
+        [postId],
+      );
+
+      res.json(result.rows);
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error: 'Failed to fetch comments',
+      });
+    }
+  },
+);
+
+
+// --------------------------------------------------
+// CREATE COMMENT
+// --------------------------------------------------
+
+app.post(
+  '/api/posts/:postId/comments',
+  async (req, res) => {
+    try {
+      const { postId } = req.params;
+
+      const {
+        userId,
+        comment,
+      } = req.body;
+
+      const cleanComment =
+        typeof comment === 'string'
+          ? comment.trim()
+          : '';
+
+      if (!userId || !cleanComment) {
+        return res.status(400).json({
+          error:
+            'userId and comment are required',
+        });
+      }
+
+      if (cleanComment.length > 500) {
+        return res.status(400).json({
+          error:
+            'Comment cannot exceed 500 characters',
+        });
+      }
+
+      const postResult = await query(
+        `
+        SELECT id
+        FROM posts
+        WHERE id = $1
+        `,
+        [postId],
+      );
+
+      if (postResult.rows.length === 0) {
+        return res.status(404).json({
+          error: 'Post not found',
+        });
+      }
+
+      const result = await query(
+        `
+        INSERT INTO post_comments (
+          post_id,
+          user_id,
+          comment
+        )
+        VALUES ($1, $2, $3)
+        RETURNING
+          id,
+          post_id,
+          user_id,
+          comment,
+          created_at
+        `,
+        [
+          postId,
+          userId,
+          cleanComment,
+        ],
+      );
+
+      res.status(201).json(
+        result.rows[0],
+      );
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error: 'Failed to create comment',
+      });
+    }
+  },
+);
+
+
 // --------------------------------------------------
 // START SERVER
 // --------------------------------------------------

@@ -29,17 +29,22 @@ export type ActivityResultParams = {
 
 export type RootStackParamList = {
   MainTabs: undefined;
+
   ActivityResult: ActivityResultParams;
+
   TerritoryDetails: {
     territoryId: string;
   };
+
+  ActivityHistory: undefined;
+
+  Notifications: undefined;
 };
 
 export type MainTabParamList = {
   Map: undefined;
+  Feed: undefined;
   Activity: undefined;
-  History: undefined;
   Leaderboard: undefined;
   Profile: undefined;
-  Notifications: undefined;
 };
