@@ -1,3 +1,6 @@
+import dns from 'node:dns';
+
+dns.setDefaultResultOrder('ipv4first');
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
@@ -923,7 +926,7 @@ app.post('/api/territories/:id/challenges', async (req, res) => {
     const overlapRatio =
       territory.area_m2 > 0
         ? overlapAreaM2 /
-          Number(territory.area_m2)
+        Number(territory.area_m2)
         : 0;
 
     const insertResult = await query(
@@ -3797,6 +3800,274 @@ app.get(
     }
   },
 );
+
+// ==================================================
+// ROUTE PLANNER
+// ==================================================
+
+type RouteMode =
+  | 'Run'
+  | 'Walk'
+  | 'Cycle';
+
+type RouteCoordinate = {
+  latitude: number;
+  longitude: number;
+};
+
+const fetchRouteWithRetry =
+  async (
+    url: string,
+    attempts = 3,
+  ): Promise<Response> => {
+    let lastError: unknown;
+
+    for (
+      let attempt = 1;
+      attempt <= attempts;
+      attempt += 1
+    ) {
+      try {
+        const response =
+          await fetch(
+            url,
+            {
+              signal:
+                AbortSignal.timeout(
+                  15000,
+                ),
+            },
+          );
+
+        return response;
+      } catch (error) {
+        lastError = error;
+
+        console.error(
+          `Routing request failed (${attempt}/${attempts}):`,
+          error,
+        );
+
+        if (
+          attempt < attempts
+        ) {
+          await new Promise(
+            resolve =>
+              setTimeout(
+                resolve,
+                attempt * 1500,
+              ),
+          );
+        }
+      }
+    }
+
+    throw lastError;
+  };
+
+app.post(
+  '/api/routes',
+  async (req, res) => {
+    try {
+      const {
+        activityType,
+        points,
+      } = req.body as {
+        activityType?: RouteMode;
+        points?: RouteCoordinate[];
+      };
+
+      // ----------------------------------------------
+      // VALIDATE ACTIVITY TYPE
+      // ----------------------------------------------
+
+      if (
+        activityType !== 'Run' &&
+        activityType !== 'Walk' &&
+        activityType !== 'Cycle'
+      ) {
+        return res.status(400).json({
+          error:
+            'activityType must be Run, Walk, or Cycle',
+        });
+      }
+
+      // ----------------------------------------------
+      // VALIDATE POINTS
+      // ----------------------------------------------
+
+      if (
+        !Array.isArray(points) ||
+        points.length < 2
+      ) {
+        return res.status(400).json({
+          error:
+            'At least two route points are required',
+        });
+      }
+
+      if (points.length > 20) {
+        return res.status(400).json({
+          error:
+            'A maximum of 20 route points is supported',
+        });
+      }
+
+      for (const point of points) {
+        if (
+          !point ||
+          typeof point.latitude !== 'number' ||
+          typeof point.longitude !== 'number' ||
+          !Number.isFinite(
+            point.latitude,
+          ) ||
+          !Number.isFinite(
+            point.longitude,
+          ) ||
+          point.latitude < -90 ||
+          point.latitude > 90 ||
+          point.longitude < -180 ||
+          point.longitude > 180
+        ) {
+          return res.status(400).json({
+            error:
+              'Invalid route coordinate',
+          });
+        }
+      }
+
+      // ----------------------------------------------
+      // SELECT ROUTING PROFILE
+      // ----------------------------------------------
+
+      const routingHost =
+        activityType === 'Cycle'
+          ? 'https://routing.openstreetmap.de/routed-bike'
+          : 'https://routing.openstreetmap.de/routed-foot';
+
+      // The FOSSGIS routing service uses the
+      // /route/v1/driving path format for these
+      // OSRM-compatible endpoints.
+      const coordinates =
+        points
+          .map(
+            point =>
+              `${point.longitude},${point.latitude}`,
+          )
+          .join(';');
+
+      const url =
+        `${routingHost}/route/v1/driving/${coordinates}` +
+        '?overview=full' +
+        '&geometries=geojson';
+
+      const response =
+        await fetchRouteWithRetry(
+          url,
+        );
+
+      if (!response.ok) {
+        const errorText =
+          await response.text();
+
+        console.error(
+          'Routing provider HTTP error:',
+          response.status,
+          errorText,
+        );
+
+        return res.status(502).json({
+          error:
+            'Routing provider request failed',
+        });
+      }
+
+      const data =
+        (await response.json()) as {
+          code?: string;
+          routes?: Array<{
+            distance?: number;
+            duration?: number;
+            geometry?: {
+              type?: string;
+              coordinates?: number[][];
+            };
+          }>;
+        };
+
+      if (
+        data.code !== 'Ok' ||
+        !data.routes?.length
+      ) {
+        return res.status(502).json({
+          error:
+            'No route could be generated',
+        });
+      }
+
+      const selectedRoute =
+        data.routes[0];
+
+      if (
+        !selectedRoute.geometry?.coordinates ||
+        selectedRoute.geometry.coordinates.length <
+        2
+      ) {
+        return res.status(502).json({
+          error:
+            'Routing provider returned an invalid route',
+        });
+      }
+
+      // ----------------------------------------------
+      // CONVERT GEOJSON
+      // ----------------------------------------------
+
+      const route =
+        selectedRoute.geometry.coordinates
+          .map(coordinate => ({
+            latitude:
+              coordinate[1],
+
+            longitude:
+              coordinate[0],
+          }));
+
+      const distanceKm =
+        Number(
+          selectedRoute.distance ?? 0,
+        ) / 1000;
+
+      const durationSeconds =
+        Number(
+          selectedRoute.duration ?? 0,
+        );
+
+      res.json({
+        activityType,
+
+        distanceKm,
+
+        durationSeconds,
+
+        points,
+
+        route,
+      });
+    } catch (error) {
+      console.error(
+        'Route planner error:',
+        error,
+      );
+
+      res.status(500).json({
+        error:
+          'Failed to generate route',
+      });
+    }
+  },
+);
+
 
 // --------------------------------------------------
 // START SERVER

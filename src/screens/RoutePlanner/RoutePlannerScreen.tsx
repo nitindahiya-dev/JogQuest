@@ -1,8 +1,11 @@
 import React, {
+  useEffect,
+  useRef,
   useState,
 } from 'react';
 
 import {
+  ActivityIndicator,
   Alert,
   SafeAreaView,
   StyleSheet,
@@ -29,13 +32,9 @@ import type {
 } from '@react-navigation/native-stack';
 
 import type {
-  RootStackParamList,
   Coordinate,
+  RootStackParamList,
 } from '../../navigation/types';
-
-import {
-  calculateDistance,
-} from '../../utils/geo';
 
 type Navigation =
   NativeStackNavigationProp<
@@ -48,12 +47,41 @@ type ActivityType =
   | 'Walk'
   | 'Cycle';
 
+type PlannedRoute = {
+  activityType: ActivityType;
+  route: Coordinate[];
+  points: Coordinate[];
+  distanceKm: number;
+  durationSeconds: number;
+  savedAt: string;
+};
+
+type RouteApiResponse = {
+  activityType: ActivityType;
+  distanceKm: number;
+  durationSeconds: number;
+  points: Coordinate[];
+  route: Coordinate[];
+  error?: string;
+};
+
+const API_BASE_URL =
+  'http://127.0.0.1:4000';
+
 const PLANNED_ROUTE_KEY =
   '@jogquest/planned_route';
 
 const RoutePlannerScreen = () => {
   const navigation =
     useNavigation<Navigation>();
+
+  const mapRef =
+    useRef<MapView>(null);
+
+  const routingTimerRef =
+    useRef<ReturnType<
+      typeof setTimeout
+    > | null>(null);
 
   const [
     activityType,
@@ -68,62 +96,326 @@ const RoutePlannerScreen = () => {
   ] = useState<Coordinate[]>([]);
 
   const [
+    routedRoute,
+    setRoutedRoute,
+  ] = useState<Coordinate[]>(
+    [],
+  );
+
+  const [
+    distanceKm,
+    setDistanceKm,
+  ] = useState(0);
+
+  const [
+    durationSeconds,
+    setDurationSeconds,
+  ] = useState(0);
+
+  const [
+    routing,
+    setRouting,
+  ] = useState(false);
+
+  const [
     saving,
     setSaving,
   ] = useState(false);
 
-  const distance = points.reduce(
-    (total, point, index) => {
-      if (index === 0) {
-        return total;
+  const [
+    error,
+    setError,
+  ] = useState<string | null>(null);
+
+  // --------------------------------------------------
+  // CLEANUP
+  // --------------------------------------------------
+
+  useEffect(() => {
+    return () => {
+      if (
+        routingTimerRef.current
+      ) {
+        clearTimeout(
+          routingTimerRef.current,
+        );
+      }
+    };
+  }, []);
+
+  // --------------------------------------------------
+  // REQUEST ROAD ROUTE
+  // --------------------------------------------------
+
+  const requestRoute = async (
+    nextPoints: Coordinate[],
+    nextActivityType: ActivityType,
+  ) => {
+    if (
+      nextPoints.length < 2
+    ) {
+      setRoutedRoute([]);
+      setDistanceKm(0);
+      setDurationSeconds(0);
+      setRouting(false);
+      return;
+    }
+
+    try {
+      setRouting(true);
+      setError(null);
+
+      const response =
+        await fetch(
+          `${API_BASE_URL}/api/routes`,
+          {
+            method: 'POST',
+
+            headers: {
+              'Content-Type':
+                'application/json',
+            },
+
+            body: JSON.stringify({
+              activityType:
+                nextActivityType,
+
+              points:
+                nextPoints,
+            }),
+          },
+        );
+
+      const data =
+        (await response.json()) as RouteApiResponse;
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ??
+            'Failed to generate route',
+        );
       }
 
-      return (
-        total +
-        calculateDistance(
-          points[index - 1],
-          point,
-        )
+      if (
+        !Array.isArray(
+          data.route,
+        ) ||
+        data.route.length < 2
+      ) {
+        throw new Error(
+          'Routing service returned an invalid route',
+        );
+      }
+
+      setRoutedRoute(
+        data.route,
       );
-    },
-    0,
-  );
+
+      setDistanceKm(
+        Number(
+          data.distanceKm,
+        ),
+      );
+
+      setDurationSeconds(
+        Number(
+          data.durationSeconds,
+        ),
+      );
+
+      // Fit the road route.
+      setTimeout(() => {
+        mapRef.current?.fitToCoordinates(
+          data.route.map(
+            point => ({
+              latitude:
+                point.latitude,
+              longitude:
+                point.longitude,
+            }),
+          ),
+          {
+            edgePadding: {
+              top: 190,
+              right: 35,
+              bottom: 320,
+              left: 35,
+            },
+            animated: true,
+          },
+        );
+      }, 100);
+    } catch (err) {
+      console.error(
+        'Route generation failed:',
+        err,
+      );
+
+      setRoutedRoute([]);
+      setDistanceKm(0);
+      setDurationSeconds(0);
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Could not generate route',
+      );
+    } finally {
+      setRouting(false);
+    }
+  };
+
+  // --------------------------------------------------
+  // DEBOUNCED ROUTING
+  // --------------------------------------------------
+
+  const scheduleRouteRequest = (
+    nextPoints: Coordinate[],
+    nextActivityType: ActivityType,
+  ) => {
+    if (
+      routingTimerRef.current
+    ) {
+      clearTimeout(
+        routingTimerRef.current,
+      );
+    }
+
+    routingTimerRef.current =
+      setTimeout(() => {
+        requestRoute(
+          nextPoints,
+          nextActivityType,
+        );
+      }, 700);
+  };
+
+  // --------------------------------------------------
+  // MAP PRESS
+  // --------------------------------------------------
 
   const handleMapPress = (
     event: MapPressEvent,
   ) => {
-    const coordinate =
+    if (routing) {
+      return;
+    }
+
+    const {
+      latitude,
+      longitude,
+    } =
       event.nativeEvent.coordinate;
 
-    setPoints(current => [
-      ...current,
-      {
-        latitude:
-          coordinate.latitude,
-        longitude:
-          coordinate.longitude,
+    const newPoint: Coordinate = {
+      latitude,
+      longitude,
+    };
+
+    setError(null);
+
+    setPoints(
+      currentPoints => {
+        const nextPoints = [
+          ...currentPoints,
+          newPoint,
+        ];
+
+        scheduleRouteRequest(
+          nextPoints,
+          activityType,
+        );
+
+        return nextPoints;
       },
-    ]);
+    );
   };
+
+  // --------------------------------------------------
+  // ACTIVITY TYPE
+  // --------------------------------------------------
+
+  const changeActivityType =
+    (
+      nextType: ActivityType,
+    ) => {
+      if (
+        routing ||
+        nextType ===
+          activityType
+      ) {
+        return;
+      }
+
+      setActivityType(
+        nextType,
+      );
+
+      if (
+        points.length >= 2
+      ) {
+        scheduleRouteRequest(
+          points,
+          nextType,
+        );
+      }
+    };
+
+  // --------------------------------------------------
+  // UNDO
+  // --------------------------------------------------
 
   const undoLastPoint =
     () => {
-      setPoints(current =>
-        current.slice(
-          0,
-          -1,
-        ),
+      if (routing) {
+        return;
+      }
+
+      setPoints(
+        currentPoints => {
+          const nextPoints =
+            currentPoints.slice(
+              0,
+              -1,
+            );
+
+          if (
+            nextPoints.length >=
+            2
+          ) {
+            scheduleRouteRequest(
+              nextPoints,
+              activityType,
+            );
+          } else {
+            setRoutedRoute(
+              [],
+            );
+
+            setDistanceKm(
+              0,
+            );
+
+            setDurationSeconds(
+              0,
+            );
+          }
+
+          return nextPoints;
+        },
       );
     };
 
-  const clearRoute =
-    () => {
-      setPoints([]);
-    };
+  // --------------------------------------------------
+  // CLOSE LOOP
+  // --------------------------------------------------
 
   const closeRoute =
     () => {
-      if (points.length < 2) {
+      if (
+        routing ||
+        points.length < 2
+      ) {
         return;
       }
 
@@ -131,34 +423,79 @@ const RoutePlannerScreen = () => {
         points[0];
 
       const last =
-        points[points.length - 1];
+        points[
+          points.length - 1
+        ];
 
-      const closingDistance =
-        calculateDistance(
-          last,
-          first,
-        );
+      const alreadyClosed =
+        first.latitude ===
+          last.latitude &&
+        first.longitude ===
+          last.longitude;
 
-      if (
-        closingDistance <= 0.05
-      ) {
+      if (alreadyClosed) {
         return;
       }
 
-      setPoints(current => [
-        ...current,
+      const nextPoints = [
+        ...points,
         {
           latitude:
             first.latitude,
           longitude:
             first.longitude,
         },
-      ]);
+      ];
+
+      setPoints(
+        nextPoints,
+      );
+
+      scheduleRouteRequest(
+        nextPoints,
+        activityType,
+      );
     };
+
+  // --------------------------------------------------
+  // CLEAR
+  // --------------------------------------------------
+
+  const clearRoute =
+    () => {
+      if (
+        routing
+      ) {
+        return;
+      }
+
+      if (
+        routingTimerRef.current
+      ) {
+        clearTimeout(
+          routingTimerRef.current,
+        );
+
+        routingTimerRef.current =
+          null;
+      }
+
+      setPoints([]);
+      setRoutedRoute([]);
+      setDistanceKm(0);
+      setDurationSeconds(0);
+      setError(null);
+    };
+
+  // --------------------------------------------------
+  // SAVE
+  // --------------------------------------------------
 
   const saveRoute =
     async () => {
-      if (points.length < 2) {
+      if (
+        points.length < 2
+      ) {
         Alert.alert(
           'Route too short',
           'Add at least two points to create a route.',
@@ -167,25 +504,50 @@ const RoutePlannerScreen = () => {
         return;
       }
 
+      if (
+        routedRoute.length < 2
+      ) {
+        Alert.alert(
+          'Route not ready',
+          'Wait for the road route to finish generating.',
+        );
+
+        return;
+      }
+
       try {
         setSaving(true);
+        setError(null);
+
+        const plannedRoute:
+          PlannedRoute = {
+            activityType,
+
+            route:
+              routedRoute,
+
+            points,
+
+            distanceKm,
+
+            durationSeconds,
+
+            savedAt:
+              new Date().toISOString(),
+          };
 
         await AsyncStorage.setItem(
           PLANNED_ROUTE_KEY,
-          JSON.stringify({
-            activityType,
-            route: points,
-            distanceKm: distance,
-            savedAt:
-              new Date().toISOString(),
-          }),
+          JSON.stringify(
+            plannedRoute,
+          ),
         );
 
         Alert.alert(
           'Route saved',
-          `${distance.toFixed(
+          `${distanceKm.toFixed(
             2,
-          )} km ${activityType.toLowerCase()} route saved.`,
+          )} km road route saved.`,
           [
             {
               text: 'OK',
@@ -194,14 +556,14 @@ const RoutePlannerScreen = () => {
             },
           ],
         );
-      } catch (error) {
+      } catch (err) {
         console.error(
           'Failed to save planned route:',
-          error,
+          err,
         );
 
         Alert.alert(
-          'Error',
+          'Save failed',
           'Could not save the planned route.',
         );
       } finally {
@@ -209,61 +571,182 @@ const RoutePlannerScreen = () => {
       }
     };
 
+  // --------------------------------------------------
+  // FORMAT DURATION
+  // --------------------------------------------------
+
+  const formatDuration =
+    (
+      seconds: number,
+    ) => {
+      const total =
+        Math.max(
+          0,
+          Math.round(
+            seconds,
+          ),
+        );
+
+      const minutes =
+        Math.floor(
+          total / 60,
+        );
+
+      const remainingSeconds =
+        total % 60;
+
+      if (
+        minutes >= 60
+      ) {
+        const hours =
+          Math.floor(
+            minutes / 60,
+          );
+
+        const remainingMinutes =
+          minutes % 60;
+
+        return `${hours}h ${String(
+          remainingMinutes,
+        ).padStart(
+          2,
+          '0',
+        )}m`;
+      }
+
+      return `${minutes}m ${String(
+        remainingSeconds,
+      ).padStart(
+        2,
+        '0',
+      )}s`;
+    };
+
+  // --------------------------------------------------
+  // DISPLAY ROUTE
+  // --------------------------------------------------
+
+  const displayRoute =
+    routedRoute.length > 1
+      ? routedRoute
+      : points;
+
   return (
     <SafeAreaView
-      style={styles.container}>
+      style={
+        styles.container
+      }>
 
-      <View style={styles.mapContainer}>
+      <View
+        style={
+          styles.mapContainer
+        }>
 
         <MapView
+          ref={mapRef}
           provider={PROVIDER_GOOGLE}
           style={styles.map}
           onPress={
             handleMapPress
           }
           initialRegion={{
-            latitude: 28.6139,
-            longitude: 77.209,
-            latitudeDelta: 0.03,
-            longitudeDelta: 0.03,
+            latitude:
+              28.6139,
+
+            longitude:
+              77.209,
+
+            latitudeDelta:
+              0.03,
+
+            longitudeDelta:
+              0.03,
           }}>
 
+          {/* =========================================
+              SELECTED WAYPOINTS
+              ========================================= */}
+
           {points.map(
-            (point, index) => (
+            (
+              point,
+              index,
+            ) => (
               <Marker
-                key={`${point.latitude}-${point.longitude}-${index}`}
+                key={`point-${index}-${point.latitude}-${point.longitude}`}
                 coordinate={{
                   latitude:
                     point.latitude,
+
                   longitude:
                     point.longitude,
                 }}
-                title={`Point ${
+                title={`Waypoint ${
                   index + 1
                 }`}
               />
             ),
           )}
 
-          {points.length > 1 && (
+          {/* =========================================
+              ROAD ROUTE
+              ========================================= */}
+
+          {displayRoute.length >
+            1 && (
             <Polyline
-              coordinates={points}
+              coordinates={
+                displayRoute
+              }
               strokeWidth={5}
             />
           )}
 
         </MapView>
 
+        {/* =========================================
+            TOP CARD
+            ========================================= */}
+
         <View
-          style={styles.topCard}>
+          style={
+            styles.topCard
+          }>
 
-          <Text style={styles.title}>
-            Plan Your Route
-          </Text>
+          <View
+            style={
+              styles.titleRow
+            }>
 
-          <Text style={styles.subtitle}>
-            Tap the map to add route points
-          </Text>
+            <View
+              style={
+                styles.titleBlock
+              }>
+
+              <Text
+                style={
+                  styles.title
+                }>
+                Plan Your Route
+              </Text>
+
+              <Text
+                style={
+                  styles.subtitle
+                }>
+                Tap the map to add waypoints
+              </Text>
+
+            </View>
+
+            {routing && (
+              <ActivityIndicator
+                size="small"
+                color="#fff"
+              />
+            )}
+
+          </View>
 
           <View
             style={
@@ -286,9 +769,12 @@ const RoutePlannerScreen = () => {
                     styles.typeButtonActive,
                 ]}
                 onPress={() =>
-                  setActivityType(
+                  changeActivityType(
                     type,
                   )
+                }
+                disabled={
+                  routing
                 }>
 
                 <Text
@@ -306,21 +792,50 @@ const RoutePlannerScreen = () => {
 
           </View>
 
+          {error && (
+            <View
+              style={
+                styles.errorBox
+              }>
+              <Text
+                style={
+                  styles.errorText
+                }>
+                {error}
+              </Text>
+            </View>
+          )}
+
         </View>
+
+        {/* =========================================
+            BOTTOM PANEL
+            ========================================= */}
 
         <View
           style={
             styles.bottomPanel
           }>
 
-          <View style={styles.statsCard}>
+          {/* ROUTE STATS */}
 
-            <View style={styles.stat}>
+          <View
+            style={
+              styles.statsCard
+            }>
+
+            <View
+              style={
+                styles.stat
+              }>
+
               <Text
                 style={
                   styles.statValue
                 }>
-                {distance.toFixed(2)}
+                {distanceKm.toFixed(
+                  2,
+                )}
               </Text>
 
               <Text
@@ -329,6 +844,7 @@ const RoutePlannerScreen = () => {
                 }>
                 KM
               </Text>
+
             </View>
 
             <View
@@ -337,7 +853,40 @@ const RoutePlannerScreen = () => {
               }
             />
 
-            <View style={styles.stat}>
+            <View
+              style={
+                styles.stat
+              }>
+
+              <Text
+                style={
+                  styles.statValue
+                }>
+                {formatDuration(
+                  durationSeconds,
+                )}
+              </Text>
+
+              <Text
+                style={
+                  styles.statLabel
+                }>
+                EXPECTED
+              </Text>
+
+            </View>
+
+            <View
+              style={
+                styles.divider
+              }
+            />
+
+            <View
+              style={
+                styles.stat
+              }>
+
               <Text
                 style={
                   styles.statValue
@@ -349,11 +898,14 @@ const RoutePlannerScreen = () => {
                 style={
                   styles.statLabel
                 }>
-                POINTS
+                WAYPOINTS
               </Text>
+
             </View>
 
           </View>
+
+          {/* ACTIONS */}
 
           <View
             style={
@@ -361,11 +913,14 @@ const RoutePlannerScreen = () => {
             }>
 
             <TouchableOpacity
-              style={styles.smallButton}
+              style={
+                styles.smallButton
+              }
               onPress={
                 undoLastPoint
               }
               disabled={
+                routing ||
                 points.length === 0
               }>
 
@@ -379,11 +934,14 @@ const RoutePlannerScreen = () => {
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.smallButton}
+              style={
+                styles.smallButton
+              }
               onPress={
                 closeRoute
               }
               disabled={
+                routing ||
                 points.length < 2
               }>
 
@@ -391,17 +949,20 @@ const RoutePlannerScreen = () => {
                 style={
                   styles.smallButtonText
                 }>
-                CLOSE
+                CLOSE LOOP
               </Text>
 
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.smallButton}
+              style={
+                styles.smallButton
+              }
               onPress={
                 clearRoute
               }
               disabled={
+                routing ||
                 points.length === 0
               }>
 
@@ -416,26 +977,41 @@ const RoutePlannerScreen = () => {
 
           </View>
 
+          {/* SAVE */}
+
           <TouchableOpacity
             style={[
               styles.saveButton,
-              points.length < 2 &&
+              (
+                points.length < 2 ||
+                routedRoute.length < 2 ||
+                routing
+              ) &&
                 styles.saveButtonDisabled,
             ]}
-            onPress={saveRoute}
+            onPress={
+              saveRoute
+            }
             disabled={
               saving ||
-              points.length < 2
+              routing ||
+              points.length < 2 ||
+              routedRoute.length < 2
             }>
 
-            <Text
-              style={
-                styles.saveButtonText
-              }>
-              {saving
-                ? 'SAVING...'
-                : 'SAVE ROUTE'}
-            </Text>
+            {saving ? (
+              <ActivityIndicator
+                size="small"
+                color="#000"
+              />
+            ) : (
+              <Text
+                style={
+                  styles.saveButtonText
+                }>
+                SAVE ROUTE
+              </Text>
+            )}
 
           </TouchableOpacity>
 
@@ -447,153 +1023,292 @@ const RoutePlannerScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
+const styles =
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor:
+        '#000',
+    },
 
-  mapContainer: {
-    flex: 1,
-  },
+    mapContainer: {
+      flex: 1,
+    },
 
-  map: {
-    flex: 1,
-  },
+    map: {
+      flex: 1,
+    },
 
-  topCard: {
-    position: 'absolute',
-    top: 12,
-    left: 14,
-    right: 14,
-    backgroundColor: '#000',
-    borderRadius: 18,
-    padding: 16,
-  },
+    topCard: {
+      position:
+        'absolute',
 
-  title: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '900',
-  },
+      top: 12,
 
-  subtitle: {
-    color: '#777',
-    fontSize: 11,
-    marginTop: 4,
-  },
+      left: 14,
 
-  typeContainer: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 14,
-  },
+      right: 14,
 
-  typeButton: {
-    flex: 1,
-    height: 38,
-    borderRadius: 10,
-    backgroundColor: '#111',
-    borderWidth: 1,
-    borderColor: '#333',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+      backgroundColor:
+        '#000',
 
-  typeButtonActive: {
-    backgroundColor: '#fff',
-    borderColor: '#fff',
-  },
+      borderRadius:
+        18,
 
-  typeText: {
-    color: '#888',
-    fontSize: 10,
-    fontWeight: '900',
-  },
+      padding: 16,
+    },
 
-  typeTextActive: {
-    color: '#000',
-  },
+    titleRow: {
+      flexDirection:
+        'row',
 
-  bottomPanel: {
-    position: 'absolute',
-    left: 14,
-    right: 14,
-    bottom: 14,
-  },
+      alignItems:
+        'center',
 
-  statsCard: {
-    flexDirection: 'row',
-    backgroundColor: '#000',
-    borderRadius: 18,
-    paddingVertical: 16,
-    marginBottom: 10,
-  },
+      justifyContent:
+        'space-between',
+    },
 
-  stat: {
-    flex: 1,
-    alignItems: 'center',
-  },
+    titleBlock: {
+      flex: 1,
+    },
 
-  statValue: {
-    color: '#fff',
-    fontSize: 19,
-    fontWeight: '900',
-  },
+    title: {
+      color: '#fff',
 
-  statLabel: {
-    color: '#666',
-    fontSize: 8,
-    fontWeight: '800',
-    marginTop: 4,
-  },
+      fontSize: 20,
 
-  divider: {
-    width: 1,
-    backgroundColor: '#292929',
-  },
+      fontWeight: '900',
+    },
 
-  actionRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 8,
-  },
+    subtitle: {
+      color: '#777',
 
-  smallButton: {
-    flex: 1,
-    height: 42,
-    borderRadius: 11,
-    backgroundColor: '#111',
-    borderWidth: 1,
-    borderColor: '#333',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+      fontSize: 11,
 
-  smallButtonText: {
-    color: '#fff',
-    fontSize: 9,
-    fontWeight: '900',
-  },
+      marginTop: 4,
+    },
 
-  saveButton: {
-    height: 52,
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+    typeContainer: {
+      flexDirection:
+        'row',
 
-  saveButtonDisabled: {
-    backgroundColor: '#333',
-  },
+      gap: 8,
 
-  saveButtonText: {
-    color: '#000',
-    fontSize: 10,
-    fontWeight: '900',
-  },
-});
+      marginTop: 14,
+    },
+
+    typeButton: {
+      flex: 1,
+
+      height: 38,
+
+      borderRadius:
+        10,
+
+      backgroundColor:
+        '#111',
+
+      borderWidth: 1,
+
+      borderColor:
+        '#333',
+
+      alignItems:
+        'center',
+
+      justifyContent:
+        'center',
+    },
+
+    typeButtonActive: {
+      backgroundColor:
+        '#fff',
+
+      borderColor:
+        '#fff',
+    },
+
+    typeText: {
+      color: '#888',
+
+      fontSize: 10,
+
+      fontWeight:
+        '900',
+    },
+
+    typeTextActive: {
+      color: '#000',
+    },
+
+    errorBox: {
+      backgroundColor:
+        '#171717',
+
+      borderWidth: 1,
+
+      borderColor:
+        '#333',
+
+      borderRadius:
+        10,
+
+      padding: 9,
+
+      marginTop: 10,
+    },
+
+    errorText: {
+      color: '#aaa',
+
+      fontSize: 10,
+
+      lineHeight: 15,
+    },
+
+    bottomPanel: {
+      position:
+        'absolute',
+
+      left: 14,
+
+      right: 14,
+
+      bottom: 14,
+    },
+
+    statsCard: {
+      flexDirection:
+        'row',
+
+      backgroundColor:
+        '#000',
+
+      borderRadius:
+        18,
+
+      paddingVertical:
+        16,
+
+      marginBottom:
+        10,
+    },
+
+    stat: {
+      flex: 1,
+
+      alignItems:
+        'center',
+    },
+
+    statValue: {
+      color: '#fff',
+
+      fontSize: 16,
+
+      fontWeight:
+        '900',
+    },
+
+    statLabel: {
+      color: '#666',
+
+      fontSize: 8,
+
+      fontWeight:
+        '800',
+
+      marginTop: 4,
+
+      textAlign:
+        'center',
+    },
+
+    divider: {
+      width: 1,
+
+      backgroundColor:
+        '#292929',
+    },
+
+    actionRow: {
+      flexDirection:
+        'row',
+
+      gap: 8,
+
+      marginBottom:
+        8,
+    },
+
+    smallButton: {
+      flex: 1,
+
+      minHeight: 42,
+
+      borderRadius:
+        11,
+
+      backgroundColor:
+        '#111',
+
+      borderWidth: 1,
+
+      borderColor:
+        '#333',
+
+      alignItems:
+        'center',
+
+      justifyContent:
+        'center',
+
+      paddingHorizontal:
+        6,
+    },
+
+    smallButtonText: {
+      color: '#fff',
+
+      fontSize: 8,
+
+      fontWeight:
+        '900',
+
+      textAlign:
+        'center',
+    },
+
+    saveButton: {
+      height: 52,
+
+      backgroundColor:
+        '#fff',
+
+      borderRadius:
+        14,
+
+      alignItems:
+        'center',
+
+      justifyContent:
+        'center',
+    },
+
+    saveButtonDisabled: {
+      backgroundColor:
+        '#333',
+    },
+
+    saveButtonText: {
+      color: '#000',
+
+      fontSize: 10,
+
+      fontWeight:
+        '900',
+    },
+  });
 
 export default RoutePlannerScreen;
-
