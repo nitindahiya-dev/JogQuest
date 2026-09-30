@@ -56,6 +56,14 @@ export type RootStackParamList = {
   ClubDetails: {
     clubId: string;
   };
+
+  Competitions: undefined;
+
+  CreateCompetition: undefined;
+
+  CompetitionDetails: {
+    competitionId: string;
+  };
 };
 
 export type MainTabParamList = {

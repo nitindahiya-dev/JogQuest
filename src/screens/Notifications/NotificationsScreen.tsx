@@ -32,6 +32,8 @@ type NotificationItem = {
 
   activity_id: string | null;
 
+  competition_id: string | null;
+
   created_at: string;
 
   read_at: string | null;

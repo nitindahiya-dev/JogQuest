@@ -1548,6 +1548,7 @@ app.get('/api/users/:userId/notifications', async (req, res) => {
         territory_id,
         challenge_id,
         activity_id,
+        competition_id,
         created_at,
         read_at
       FROM notifications
@@ -3076,6 +3077,726 @@ app.get(
   },
 );
 
+
+// ==================================================
+// COMPETITIONS
+// ==================================================
+
+// --------------------------------------------------
+// GET COMPETITIONS
+// --------------------------------------------------
+
+app.get(
+  '/api/competitions',
+  async (_req, res) => {
+    try {
+      const result = await query(
+        `
+        SELECT
+          c.id,
+          c.name,
+          c.description,
+          c.creator_id,
+          c.metric,
+          c.start_at,
+          c.end_at,
+          c.is_public,
+          c.created_at,
+
+          u.username AS creator_username,
+          u.display_name AS creator_display_name,
+
+          COUNT(cp.user_id)::int
+            AS participants_count,
+
+          CASE
+            WHEN NOW() < c.start_at
+              THEN 'UPCOMING'
+            WHEN NOW() > c.end_at
+              THEN 'ENDED'
+            ELSE 'ACTIVE'
+          END AS status
+
+        FROM competitions c
+
+        JOIN users u
+          ON u.id = c.creator_id
+
+        LEFT JOIN competition_participants cp
+          ON cp.competition_id = c.id
+
+        WHERE c.is_public = TRUE
+
+        GROUP BY
+          c.id,
+          u.username,
+          u.display_name
+
+        ORDER BY
+          CASE
+            WHEN NOW() BETWEEN c.start_at
+              AND c.end_at THEN 0
+            WHEN NOW() < c.start_at THEN 1
+            ELSE 2
+          END,
+          c.start_at ASC
+        `,
+      );
+
+      res.json(result.rows);
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to fetch competitions',
+      });
+    }
+  },
+);
+
+
+// --------------------------------------------------
+// GET USER COMPETITIONS
+// --------------------------------------------------
+
+app.get(
+  '/api/users/:userId/competitions',
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      const result = await query(
+        `
+        SELECT
+          c.id,
+          c.name,
+          c.description,
+          c.metric,
+          c.start_at,
+          c.end_at,
+          c.created_at,
+
+          COUNT(all_cp.user_id)::int
+            AS participants_count,
+
+          CASE
+            WHEN NOW() < c.start_at
+              THEN 'UPCOMING'
+            WHEN NOW() > c.end_at
+              THEN 'ENDED'
+            ELSE 'ACTIVE'
+          END AS status
+
+        FROM competition_participants mine
+
+        JOIN competitions c
+          ON c.id = mine.competition_id
+
+        LEFT JOIN competition_participants all_cp
+          ON all_cp.competition_id = c.id
+
+        WHERE mine.user_id = $1
+
+        GROUP BY c.id
+
+        ORDER BY
+          mine.joined_at DESC
+        `,
+        [userId],
+      );
+
+      res.json(result.rows);
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to fetch user competitions',
+      });
+    }
+  },
+);
+
+
+// --------------------------------------------------
+// CREATE COMPETITION
+// --------------------------------------------------
+
+app.post(
+  '/api/competitions',
+  async (req, res) => {
+    try {
+      const {
+        userId,
+        name,
+        description,
+        metric,
+        durationDays,
+      } = req.body;
+
+      const cleanName =
+        typeof name === 'string'
+          ? name.trim()
+          : '';
+
+      const cleanDescription =
+        typeof description === 'string'
+          ? description.trim()
+          : '';
+
+      if (!userId || !cleanName) {
+        return res.status(400).json({
+          error:
+            'userId and name are required',
+        });
+      }
+
+      if (
+        ![
+          'DISTANCE',
+          'TERRITORY',
+          'ACTIVITIES',
+        ].includes(metric)
+      ) {
+        return res.status(400).json({
+          error:
+            'Invalid competition metric',
+        });
+      }
+
+      const days =
+        Number(durationDays);
+
+      if (
+        !Number.isFinite(days) ||
+        days < 1 ||
+        days > 90
+      ) {
+        return res.status(400).json({
+          error:
+            'durationDays must be between 1 and 90',
+        });
+      }
+
+      if (cleanName.length > 120) {
+        return res.status(400).json({
+          error:
+            'Competition name cannot exceed 120 characters',
+        });
+      }
+
+      if (cleanDescription.length > 500) {
+        return res.status(400).json({
+          error:
+            'Competition description cannot exceed 500 characters',
+        });
+      }
+
+      const userResult = await query(
+        `
+        SELECT id
+        FROM users
+        WHERE id = $1
+        `,
+        [userId],
+      );
+
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({
+          error: 'User not found',
+        });
+      }
+
+      const result = await query(
+        `
+        INSERT INTO competitions (
+          name,
+          description,
+          creator_id,
+          metric,
+          start_at,
+          end_at
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          NOW(),
+          NOW() + ($5 * INTERVAL '1 day')
+        )
+        RETURNING
+          id,
+          name,
+          description,
+          creator_id,
+          metric,
+          start_at,
+          end_at,
+          is_public,
+          created_at
+        `,
+        [
+          cleanName,
+          cleanDescription,
+          userId,
+          metric,
+          days,
+        ],
+      );
+
+      const competition =
+        result.rows[0];
+
+      await query(
+        `
+        INSERT INTO competition_participants (
+          competition_id,
+          user_id
+        )
+        VALUES ($1, $2)
+        ON CONFLICT DO NOTHING
+        `,
+        [
+          competition.id,
+          userId,
+        ],
+      );
+
+      res.status(201).json({
+        ...competition,
+        participants_count: 1,
+      });
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to create competition',
+      });
+    }
+  },
+);
+
+
+// --------------------------------------------------
+// GET COMPETITION DETAILS
+// --------------------------------------------------
+
+app.get(
+  '/api/competitions/:competitionId',
+  async (req, res) => {
+    try {
+      const {
+        competitionId,
+      } = req.params;
+
+      const result = await query(
+        `
+        SELECT
+          c.id,
+          c.name,
+          c.description,
+          c.creator_id,
+          c.metric,
+          c.start_at,
+          c.end_at,
+          c.is_public,
+          c.created_at,
+
+          u.username AS creator_username,
+          u.display_name AS creator_display_name,
+
+          COUNT(cp.user_id)::int
+            AS participants_count,
+
+          CASE
+            WHEN NOW() < c.start_at
+              THEN 'UPCOMING'
+            WHEN NOW() > c.end_at
+              THEN 'ENDED'
+            ELSE 'ACTIVE'
+          END AS status
+
+        FROM competitions c
+
+        JOIN users u
+          ON u.id = c.creator_id
+
+        LEFT JOIN competition_participants cp
+          ON cp.competition_id = c.id
+
+        WHERE c.id = $1
+
+        GROUP BY
+          c.id,
+          u.username,
+          u.display_name
+        `,
+        [competitionId],
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          error:
+            'Competition not found',
+        });
+      }
+
+      res.json(result.rows[0]);
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to fetch competition',
+      });
+    }
+  },
+);
+
+
+// --------------------------------------------------
+// GET COMPETITION LEADERBOARD
+// --------------------------------------------------
+
+app.get(
+  '/api/competitions/:competitionId/leaderboard',
+  async (req, res) => {
+    try {
+      const {
+        competitionId,
+      } = req.params;
+
+      const competitionResult =
+        await query(
+          `
+          SELECT
+            id,
+            metric,
+            start_at,
+            end_at
+          FROM competitions
+          WHERE id = $1
+          `,
+          [competitionId],
+        );
+
+      if (
+        competitionResult.rows.length === 0
+      ) {
+        return res.status(404).json({
+          error:
+            'Competition not found',
+        });
+      }
+
+      const competition =
+        competitionResult.rows[0];
+
+      const result = await query(
+        `
+        WITH participant_activity_stats AS (
+          SELECT
+            cp.user_id,
+
+            COALESCE(
+              SUM(a.distance_km),
+              0
+            )::double precision
+              AS distance_score,
+
+            COUNT(a.id)::int
+              AS activity_count
+
+          FROM competition_participants cp
+
+          LEFT JOIN activities a
+            ON a.user_id = cp.user_id
+            AND a.created_at >= $2
+            AND a.created_at <= $3
+
+          WHERE cp.competition_id = $1
+
+          GROUP BY cp.user_id
+        ),
+
+        participant_territory_stats AS (
+          SELECT
+            cp.user_id,
+
+            COALESCE(
+              SUM(t.area_km2),
+              0
+            )::double precision
+              AS territory_score
+
+          FROM competition_participants cp
+
+          LEFT JOIN territories t
+            ON t.user_id = cp.user_id
+            AND t.captured_at >= $2
+            AND t.captured_at <= $3
+
+          WHERE cp.competition_id = $1
+
+          GROUP BY cp.user_id
+        ),
+
+        participant_scores AS (
+          SELECT
+            cp.user_id,
+
+            u.username,
+
+            u.display_name,
+
+            u.avatar_url,
+
+            CASE
+              WHEN $4 = 'DISTANCE' THEN
+                COALESCE(
+                  pas.distance_score,
+                  0
+                )
+
+              WHEN $4 = 'TERRITORY' THEN
+                COALESCE(
+                  pts.territory_score,
+                  0
+                )
+
+              WHEN $4 = 'ACTIVITIES' THEN
+                COALESCE(
+                  pas.activity_count,
+                  0
+                )::double precision
+
+              ELSE 0
+            END AS score
+
+          FROM competition_participants cp
+
+          JOIN users u
+            ON u.id = cp.user_id
+
+          LEFT JOIN participant_activity_stats pas
+            ON pas.user_id = cp.user_id
+
+          LEFT JOIN participant_territory_stats pts
+            ON pts.user_id = cp.user_id
+
+          WHERE cp.competition_id = $1
+        )
+
+        SELECT
+          ROW_NUMBER() OVER (
+            ORDER BY score DESC, display_name ASC
+          )::int AS rank,
+
+          *
+        FROM participant_scores
+
+        ORDER BY rank ASC
+        `,
+        [
+          competitionId,
+          competition.start_at,
+          competition.end_at,
+          competition.metric,
+        ],
+      );
+
+      res.json(result.rows);
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to fetch competition leaderboard',
+      });
+    }
+  },
+);
+
+
+// --------------------------------------------------
+// JOIN COMPETITION
+// --------------------------------------------------
+
+app.post(
+  '/api/competitions/:competitionId/join/:userId',
+  async (req, res) => {
+    try {
+      const {
+        competitionId,
+        userId,
+      } = req.params;
+
+      const competitionResult =
+        await query(
+          `
+          SELECT
+            id,
+            is_public,
+            start_at,
+            end_at
+          FROM competitions
+          WHERE id = $1
+          `,
+          [competitionId],
+        );
+
+      if (
+        competitionResult.rows.length === 0
+      ) {
+        return res.status(404).json({
+          error:
+            'Competition not found',
+        });
+      }
+
+      const competition =
+        competitionResult.rows[0];
+
+      if (!competition.is_public) {
+        return res.status(403).json({
+          error:
+            'This competition is private',
+        });
+      }
+
+      if (
+        new Date(competition.end_at) <
+        new Date()
+      ) {
+        return res.status(400).json({
+          error:
+            'Competition has already ended',
+        });
+      }
+
+      const result = await query(
+        `
+        INSERT INTO competition_participants (
+          competition_id,
+          user_id
+        )
+        VALUES ($1, $2)
+        ON CONFLICT DO NOTHING
+        RETURNING
+          competition_id,
+          user_id,
+          joined_at
+        `,
+        [
+          competitionId,
+          userId,
+        ],
+      );
+
+      res.json({
+        joined: true,
+        created:
+          result.rows.length > 0,
+      });
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to join competition',
+      });
+    }
+  },
+);
+
+
+// --------------------------------------------------
+// LEAVE COMPETITION
+// --------------------------------------------------
+
+app.delete(
+  '/api/competitions/:competitionId/join/:userId',
+  async (req, res) => {
+    try {
+      const {
+        competitionId,
+        userId,
+      } = req.params;
+
+      const result = await query(
+        `
+        DELETE FROM competition_participants
+        WHERE competition_id = $1
+          AND user_id = $2
+        `,
+        [
+          competitionId,
+          userId,
+        ],
+      );
+
+      res.json({
+        joined: false,
+        removed:
+          (result.rowCount ?? 0) > 0,
+      });
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to leave competition',
+      });
+    }
+  },
+);
+
+
+// --------------------------------------------------
+// COMPETITION MEMBERSHIP STATUS
+// --------------------------------------------------
+
+app.get(
+  '/api/competitions/:competitionId/membership/:userId',
+  async (req, res) => {
+    try {
+      const {
+        competitionId,
+        userId,
+      } = req.params;
+
+      const result = await query(
+        `
+        SELECT EXISTS (
+          SELECT 1
+          FROM competition_participants
+          WHERE competition_id = $1
+            AND user_id = $2
+        ) AS joined
+        `,
+        [
+          competitionId,
+          userId,
+        ],
+      );
+
+      res.json({
+        joined:
+          result.rows[0]?.joined ?? false,
+      });
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to fetch competition membership',
+      });
+    }
+  },
+);
 
 // --------------------------------------------------
 // START SERVER

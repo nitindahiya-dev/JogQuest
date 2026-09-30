@@ -15,15 +15,19 @@ import {
   useFocusEffect,
   useNavigation,
 } from '@react-navigation/native';
+
 import type {
   BottomTabNavigationProp,
 } from '@react-navigation/bottom-tabs';
+
 import type {
   CompositeNavigationProp,
 } from '@react-navigation/native';
+
 import type {
   NativeStackNavigationProp,
 } from '@react-navigation/native-stack';
+
 import type {
   MainTabParamList,
   RootStackParamList,
@@ -54,6 +58,10 @@ type Profile = {
   level: number;
 };
 
+type NotificationsResponse = {
+  unreadCount: number;
+};
+
 const API_BASE_URL =
   'http://127.0.0.1:4000';
 
@@ -64,24 +72,36 @@ const ProfileScreen = () => {
   const navigation =
     useNavigation<NavigationProp>();
 
-  const [profile, setProfile] =
-    useState<Profile | null>(null);
+  const [
+    profile,
+    setProfile,
+  ] = useState<Profile | null>(null);
 
-  const [loading, setLoading] =
-    useState(true);
+  const [
+    unreadCount,
+    setUnreadCount,
+  ] = useState(0);
 
-  const [error, setError] =
-    useState<string | null>(null);
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
 
-  const loadProfile = useCallback(
-    async () => {
+  const [
+    error,
+    setError,
+  ] = useState<string | null>(null);
+
+  const loadProfile =
+    useCallback(async () => {
       try {
         setLoading(true);
         setError(null);
 
-        const response = await fetch(
-          `${API_BASE_URL}/api/users/${DEV_USER_ID}/profile`,
-        );
+        const response =
+          await fetch(
+            `${API_BASE_URL}/api/users/${DEV_USER_ID}/profile`,
+          );
 
         if (!response.ok) {
           throw new Error(
@@ -105,20 +125,62 @@ const ProfileScreen = () => {
       } finally {
         setLoading(false);
       }
-    },
-    [],
-  );
+    }, []);
+
+  const loadUnreadCount =
+    useCallback(async () => {
+      try {
+        const response =
+          await fetch(
+            `${API_BASE_URL}/api/users/${DEV_USER_ID}/notifications`,
+          );
+
+        if (!response.ok) {
+          return;
+        }
+
+        const data =
+          (await response.json()) as
+            NotificationsResponse;
+
+        setUnreadCount(
+          Number(
+            data.unreadCount ?? 0,
+          ),
+        );
+      } catch (err) {
+        console.error(
+          'Failed to load notification count:',
+          err,
+        );
+      }
+    }, []);
 
   useFocusEffect(
     useCallback(() => {
       loadProfile();
-    }, [loadProfile]),
+      loadUnreadCount();
+    }, [
+      loadProfile,
+      loadUnreadCount,
+    ]),
   );
+
+  const openNotifications =
+    () => {
+      navigation
+        .getParent()
+        ?.navigate('Notifications');
+    };
 
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" />
+        <ActivityIndicator
+          size="large"
+          color="#fff"
+        />
+
         <Text style={styles.loadingText}>
           Loading profile...
         </Text>
@@ -129,30 +191,98 @@ const ProfileScreen = () => {
   if (error || !profile) {
     return (
       <View style={styles.center}>
+
         <Text style={styles.errorText}>
-          {error ?? 'Profile unavailable.'}
+          {error ??
+            'Profile unavailable.'}
         </Text>
 
         <TouchableOpacity
           style={styles.retryButton}
-          onPress={loadProfile}>
+          onPress={() => {
+            loadProfile();
+            loadUnreadCount();
+          }}>
           <Text style={styles.retryText}>
             RETRY
           </Text>
         </TouchableOpacity>
+
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <View style={styles.profileHeader}>
+
+      {/* =========================================
+          PROFILE TOP BAR
+          ========================================= */}
+
+      <View style={styles.topBar}>
+
+        <Text style={styles.screenTitle}>
+          Profile
+        </Text>
+
+        <TouchableOpacity
+          style={styles.notificationButton}
+          activeOpacity={0.8}
+          onPress={
+            openNotifications
+          }>
+
+          <View
+            style={
+              styles.notificationCircle
+            }>
+
+            <Text
+              style={
+                styles.notificationIcon
+              }>
+              !
+            </Text>
+
+            {unreadCount > 0 && (
+              <View
+                style={styles.notificationBadge}>
+
+                <Text
+                  style={
+                    styles.notificationBadgeText
+                  }>
+                  {unreadCount > 99
+                    ? '99+'
+                    : unreadCount}
+                </Text>
+
+              </View>
+            )}
+
+          </View>
+
+        </TouchableOpacity>
+
+      </View>
+
+      {/* =========================================
+          PROFILE HEADER
+          ========================================= */}
+
+      <View
+        style={
+          styles.profileHeader
+        }>
+
         <View style={styles.avatar}>
+
           <Text style={styles.avatarText}>
             {profile.display_name
               .charAt(0)
               .toUpperCase()}
           </Text>
+
         </View>
 
         <Text style={styles.name}>
@@ -164,14 +294,23 @@ const ProfileScreen = () => {
         </Text>
 
         <View style={styles.levelBadge}>
+
           <Text style={styles.levelText}>
             LEVEL {profile.level}
           </Text>
+
         </View>
+
       </View>
 
+      {/* =========================================
+          MAIN STATS
+          ========================================= */}
+
       <View style={styles.statsCard}>
+
         <View style={styles.stat}>
+
           <Text style={styles.value}>
             {Number(
               profile.territory_km2,
@@ -181,11 +320,13 @@ const ProfileScreen = () => {
           <Text style={styles.label}>
             TERRITORY KM²
           </Text>
+
         </View>
 
         <View style={styles.divider} />
 
         <View style={styles.stat}>
+
           <Text style={styles.value}>
             {profile.activities_count}
           </Text>
@@ -193,11 +334,13 @@ const ProfileScreen = () => {
           <Text style={styles.label}>
             ACTIVITIES
           </Text>
+
         </View>
 
         <View style={styles.divider} />
 
         <View style={styles.stat}>
+
           <Text style={styles.value}>
             {profile.rank}
           </Text>
@@ -205,15 +348,23 @@ const ProfileScreen = () => {
           <Text style={styles.label}>
             RANK
           </Text>
+
         </View>
+
       </View>
 
+      {/* =========================================
+          QUEST STATS
+          ========================================= */}
+
       <View style={styles.section}>
+
         <Text style={styles.sectionTitle}>
           Quest Stats
         </Text>
 
         <View style={styles.row}>
+
           <Text style={styles.rowLabel}>
             Distance
           </Text>
@@ -224,9 +375,11 @@ const ProfileScreen = () => {
             ).toFixed(2)}{' '}
             km
           </Text>
+
         </View>
 
         <View style={styles.row}>
+
           <Text style={styles.rowLabel}>
             Territories Captured
           </Text>
@@ -234,9 +387,11 @@ const ProfileScreen = () => {
           <Text style={styles.rowValue}>
             {profile.territories_captured}
           </Text>
+
         </View>
 
         <View style={styles.row}>
+
           <Text style={styles.rowLabel}>
             Territories Defended
           </Text>
@@ -244,35 +399,80 @@ const ProfileScreen = () => {
           <Text style={styles.rowValue}>
             {profile.territories_defended}
           </Text>
+
         </View>
+
       </View>
 
-      <TouchableOpacity
-        style={styles.activityButton}
-        onPress={() =>
-          navigation
-            .getParent()
-            ?.navigate('ActivityHistory')
-        }>
-        <Text style={styles.activityButtonText}>
-          VIEW ACTIVITY HISTORY
-        </Text>
-      </TouchableOpacity>
+      {/* =========================================
+          ACTIONS
+          ========================================= */}
 
-      <TouchableOpacity
-        style={[
-          styles.activityButton,
-          styles.clubsButton,
-        ]}
-        onPress={() =>
-          navigation
-            .getParent()
-            ?.navigate('Clubs')
-        }>
-        <Text style={styles.activityButtonText}>
-          EXPLORE CLUBS
-        </Text>
-      </TouchableOpacity>
+      <View style={styles.actions}>
+
+        <TouchableOpacity
+          style={styles.activityButton}
+          onPress={() =>
+            navigation
+              .getParent()
+              ?.navigate(
+                'ActivityHistory',
+              )
+          }>
+
+          <Text
+            style={
+              styles.activityButtonText
+            }>
+            VIEW ACTIVITY HISTORY
+          </Text>
+
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.activityButton,
+            styles.secondaryButton,
+          ]}
+          onPress={() =>
+            navigation
+              .getParent()
+              ?.navigate('Clubs')
+          }>
+
+          <Text
+            style={
+              styles.activityButtonText
+            }>
+            EXPLORE CLUBS
+          </Text>
+
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.activityButton,
+            styles.secondaryButton,
+          ]}
+          onPress={() =>
+            navigation
+              .getParent()
+              ?.navigate(
+                'Competitions',
+              )
+          }>
+
+          <Text
+            style={
+              styles.activityButtonText
+            }>
+            EXPLORE COMPETITIONS
+          </Text>
+
+        </TouchableOpacity>
+
+      </View>
+
     </View>
   );
 };
@@ -317,9 +517,73 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
 
+  /* =========================================
+     TOP BAR
+     ========================================= */
+
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+
+  screenTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '900',
+  },
+
+  notificationButton: {
+    padding: 2,
+  },
+
+  notificationCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#151515',
+    borderWidth: 1,
+    borderColor: '#333',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+
+  notificationIcon: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+
+  notificationBadge: {
+    position: 'absolute',
+    right: -4,
+    top: -5,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#fff',
+    borderWidth: 2,
+    borderColor: '#000',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+
+  notificationBadgeText: {
+    color: '#000',
+    fontSize: 8,
+    fontWeight: '900',
+  },
+
+  /* =========================================
+     PROFILE
+     ========================================= */
+
   profileHeader: {
     alignItems: 'center',
-    marginTop: 15,
+    marginTop: 10,
   },
 
   avatar: {
@@ -363,11 +627,15 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
 
+  /* =========================================
+     STATS
+     ========================================= */
+
   statsCard: {
     flexDirection: 'row',
     backgroundColor: '#111',
     borderRadius: 20,
-    marginTop: 25,
+    marginTop: 22,
     paddingVertical: 22,
   },
 
@@ -394,6 +662,10 @@ const styles = StyleSheet.create({
     width: 1,
     backgroundColor: '#292929',
   },
+
+  /* =========================================
+     QUEST STATS
+     ========================================= */
 
   section: {
     marginTop: 25,
@@ -423,20 +695,27 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  activityButton: {
+  /* =========================================
+     ACTIONS
+     ========================================= */
+
+  actions: {
     marginTop: 'auto',
+  },
+
+  activityButton: {
     backgroundColor: '#fff',
     paddingVertical: 17,
     borderRadius: 18,
     alignItems: 'center',
   },
 
+  secondaryButton: {
+    marginTop: 10,
+  },
+
   activityButtonText: {
     color: '#000',
     fontWeight: '900',
-  },
-
-  clubsButton: {
-    marginTop: 10,
   },
 });

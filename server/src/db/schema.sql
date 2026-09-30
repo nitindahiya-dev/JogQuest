@@ -135,6 +135,10 @@ CREATE TABLE IF NOT EXISTS notifications (
     REFERENCES activities(id)
     ON DELETE SET NULL,
 
+  competition_id UUID
+    REFERENCES competitions(id)
+    ON DELETE SET NULL,
+
   dedupe_key TEXT UNIQUE NOT NULL,
 
   created_at TIMESTAMPTZ NOT NULL
@@ -812,3 +816,159 @@ ON club_members (club_id);
 
 CREATE INDEX IF NOT EXISTS idx_club_members_user
 ON club_members (user_id);
+
+
+-- ==================================================
+-- COMPETITIONS
+-- ==================================================
+
+CREATE TABLE IF NOT EXISTS competitions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  name VARCHAR(120) NOT NULL,
+
+  description VARCHAR(500) NOT NULL DEFAULT '',
+
+  creator_id UUID NOT NULL
+    REFERENCES users(id)
+    ON DELETE CASCADE,
+
+  metric VARCHAR(20) NOT NULL
+    CHECK (
+      metric IN (
+        'DISTANCE',
+        'TERRITORY',
+        'ACTIVITIES'
+      )
+    ),
+
+  start_at TIMESTAMPTZ NOT NULL,
+
+  end_at TIMESTAMPTZ NOT NULL,
+
+  is_public BOOLEAN NOT NULL DEFAULT TRUE,
+
+  created_at TIMESTAMPTZ NOT NULL
+    DEFAULT NOW(),
+
+  CHECK (end_at > start_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_competitions_start_end
+ON competitions (start_at, end_at);
+
+CREATE INDEX IF NOT EXISTS idx_competitions_creator
+ON competitions (creator_id);
+
+CREATE INDEX IF NOT EXISTS idx_competitions_created
+ON competitions (created_at DESC);
+
+
+-- ==================================================
+-- COMPETITION PARTICIPANTS
+-- ==================================================
+
+CREATE TABLE IF NOT EXISTS competition_participants (
+  competition_id UUID NOT NULL
+    REFERENCES competitions(id)
+    ON DELETE CASCADE,
+
+  user_id UUID NOT NULL
+    REFERENCES users(id)
+    ON DELETE CASCADE,
+
+  joined_at TIMESTAMPTZ NOT NULL
+    DEFAULT NOW(),
+
+  PRIMARY KEY (
+    competition_id,
+    user_id
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_competition_participants_competition
+ON competition_participants (competition_id);
+
+CREATE INDEX IF NOT EXISTS idx_competition_participants_user
+ON competition_participants (user_id);
+
+-- ==================================================
+-- COMPETITION JOIN NOTIFICATION
+-- ==================================================
+
+CREATE OR REPLACE FUNCTION jq_notify_competition_join()
+RETURNS TRIGGER AS $$
+DECLARE
+  competition_creator UUID;
+  participant_name TEXT;
+  competition_name TEXT;
+BEGIN
+
+  SELECT
+    c.creator_id,
+    c.name
+  INTO
+    competition_creator,
+    competition_name
+  FROM competitions c
+  WHERE c.id = NEW.competition_id;
+
+  IF
+    competition_creator IS NULL
+    OR competition_creator = NEW.user_id
+  THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT
+    display_name
+  INTO participant_name
+  FROM users
+  WHERE id = NEW.user_id;
+
+  INSERT INTO notifications (
+    user_id,
+    type,
+    title,
+    message,
+    competition_id,
+    dedupe_key
+  )
+  VALUES (
+    competition_creator,
+    'COMPETITION_JOINED',
+    'New Competition Participant',
+    COALESCE(
+      participant_name,
+      'A runner'
+    )
+    || ' joined '
+    || COALESCE(
+      competition_name,
+      'your competition'
+    )
+    || '.',
+    NEW.competition_id,
+    'competition-joined:'
+      || NEW.competition_id::text
+      || ':'
+      || NEW.user_id::text
+  )
+  ON CONFLICT (dedupe_key) DO NOTHING;
+
+  RETURN NEW;
+
+END;
+$$ LANGUAGE plpgsql;
+
+
+DROP TRIGGER IF EXISTS
+trg_notify_competition_join
+ON competition_participants;
+
+CREATE TRIGGER
+trg_notify_competition_join
+AFTER INSERT ON competition_participants
+FOR EACH ROW
+EXECUTE FUNCTION
+jq_notify_competition_join();

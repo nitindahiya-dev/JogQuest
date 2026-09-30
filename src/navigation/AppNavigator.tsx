@@ -13,7 +13,11 @@ import {
 } from '@react-navigation/native-stack';
 
 import {
-  Pressable,
+  SafeAreaView,
+} from 'react-native-safe-area-context';
+
+import {
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -31,13 +35,16 @@ import SocialFeedScreen from '../screens/Social/SocialFeedScreen';
 import PublicProfileScreen from '../screens/Social/PublicProfileScreen';
 import FollowListScreen from '../screens/Social/FollowListScreen';
 import ClubsScreen from '../screens/Clubs/ClubsScreen';
+import CreateClubScreen from '../screens/Clubs/CreateClubScreen';
+import ClubDetailsScreen from '../screens/Clubs/ClubDetailsScreen';
+import CompetitionsScreen from '../screens/Competitions/CompetitionsScreen';
+import CreateCompetitionScreen from '../screens/Competitions/CreateCompetitionScreen';
+import CompetitionDetailsScreen from '../screens/Competitions/CompetitionDetailsScreen';
 
 import type {
   RootStackParamList,
   MainTabParamList,
 } from './types';
-import CreateClubScreen from '../screens/Clubs/CreateClubScreen';
-import ClubDetailsScreen from '../screens/Clubs/ClubDetailsScreen';
 
 const Tab =
   createBottomTabNavigator<MainTabParamList>();
@@ -59,7 +66,7 @@ const TabIcon = ({
       style={[
         styles.iconContainer,
         focused &&
-        styles.iconContainerActive,
+          styles.iconContainerActive,
       ]}>
 
       <Text
@@ -80,244 +87,321 @@ const TabIcon = ({
 
 const MainTabs = () => {
   return (
-    <Tab.Navigator
-      screenOptions={{
-        headerShown: false,
+    <SafeAreaView
+      style={styles.safeArea}
+      edges={['top']}>
 
-        tabBarStyle: {
-          height: 68,
-          width: '100%',
-          backgroundColor: '#050505',
-          borderTopWidth: 1,
-          borderTopColor: '#222',
-          paddingTop: 6,
-          paddingBottom: 7,
-          paddingHorizontal: 0,
-        },
+      <Tab.Navigator
+        screenOptions={{
+          headerShown: false,
 
-        tabBarActiveTintColor: '#fff',
-        tabBarInactiveTintColor: '#666',
+          tabBarStyle: {
+            height: 68,
+            width: '100%',
+            backgroundColor: '#050505',
+            borderTopWidth: 1,
+            borderTopColor: '#222',
+            paddingTop: 6,
+            paddingBottom: 7,
+            paddingHorizontal: 0,
+          },
 
-        tabBarLabelStyle: {
-          fontSize: 9,
-          fontWeight: '700',
-          marginTop: 2,
-        },
+          tabBarActiveTintColor: '#fff',
+          tabBarInactiveTintColor: '#666',
 
-        tabBarItemStyle: {
-          width: '20%',
-        },
-      }}>
+          tabBarLabelStyle: {
+            fontSize: 9,
+            fontWeight: '700',
+            marginTop: 2,
+          },
 
-      <Tab.Screen
-        name="Map"
-        component={MapScreen}
-        options={{
-          tabBarLabel: 'Map',
-          tabBarIcon: ({
-            color,
-            focused,
-          }) => (
-            <TabIcon
-              symbol="M"
-              color={color}
-              focused={focused}
-            />
-          ),
-        }}
-      />
+          tabBarItemStyle: {
+            width: '20%',
+          },
+        }}>
 
-      <Tab.Screen
-        name="Feed"
-        component={SocialFeedScreen}
-        options={{
-          tabBarLabel: 'Feed',
-          tabBarIcon: ({
-            color,
-            focused,
-          }) => (
-            <TabIcon
-              symbol="F"
-              color={color}
-              focused={focused}
-            />
-          ),
-        }}
-      />
+        <Tab.Screen
+          name="Map"
+          component={MapScreen}
+          options={{
+            tabBarLabel: 'Map',
 
-      <Tab.Screen
-        name="Activity"
-        component={ActivityScreen}
-        options={{
-          tabBarLabel: 'Activity',
-          tabBarIcon: ({
-            color,
-            focused,
-          }) => (
-            <TabIcon
-              symbol="A"
-              color={color}
-              focused={focused}
-            />
-          ),
-        }}
-      />
+            tabBarIcon: ({
+              color,
+              focused,
+            }) => (
+              <TabIcon
+                symbol="M"
+                color={color}
+                focused={focused}
+              />
+            ),
+          }}
+        />
 
-      <Tab.Screen
-        name="Leaderboard"
-        component={LeaderboardScreen}
-        options={{
-          tabBarLabel: 'Ranks',
-          tabBarIcon: ({
-            color,
-            focused,
-          }) => (
-            <TabIcon
-              symbol="R"
-              color={color}
-              focused={focused}
-            />
-          ),
-        }}
-      />
+        <Tab.Screen
+          name="Feed"
+          component={SocialFeedScreen}
+          options={{
+            tabBarLabel: 'Feed',
 
-      <Tab.Screen
-        name="Profile"
-        component={ProfileScreen}
-        options={{
-          tabBarLabel: 'Profile',
+            tabBarIcon: ({
+              color,
+              focused,
+            }) => (
+              <TabIcon
+                symbol="F"
+                color={color}
+                focused={focused}
+              />
+            ),
+          }}
+        />
 
-          tabBarIcon: ({
-            color,
-            focused,
-          }) => (
-            <TabIcon
-              symbol="P"
-              color={color}
-              focused={focused}
-            />
-          ),
-        }}
-      />
+        <Tab.Screen
+          name="Activity"
+          component={ActivityScreen}
+          options={{
+            tabBarLabel: 'Activity',
 
-    </Tab.Navigator>
+            tabBarIcon: ({
+              color,
+              focused,
+            }) => (
+              <TabIcon
+                symbol="A"
+                color={color}
+                focused={focused}
+              />
+            ),
+          }}
+        />
+
+        <Tab.Screen
+          name="Leaderboard"
+          component={LeaderboardScreen}
+          options={{
+            tabBarLabel: 'Ranks',
+
+            tabBarIcon: ({
+              color,
+              focused,
+            }) => (
+              <TabIcon
+                symbol="R"
+                color={color}
+                focused={focused}
+              />
+            ),
+          }}
+        />
+
+        <Tab.Screen
+          name="Profile"
+          component={ProfileScreen}
+          options={{
+            tabBarLabel: 'Profile',
+
+            tabBarIcon: ({
+              color,
+              focused,
+            }) => (
+              <TabIcon
+                symbol="P"
+                color={color}
+                focused={focused}
+              />
+            ),
+          }}
+        />
+
+      </Tab.Navigator>
+
+    </SafeAreaView>
   );
 };
 
 const AppNavigator = () => {
   return (
-    <NavigationContainer>
+    <>
+      <StatusBar
+        barStyle="light-content"
+      />
 
-      <Stack.Navigator
-        screenOptions={{
-          headerStyle: {
-            backgroundColor: '#000',
-          },
+      <NavigationContainer>
 
-          headerTintColor: '#fff',
+        <Stack.Navigator
+          screenOptions={{
+            headerStyle: {
+              backgroundColor: '#000',
+            },
 
-          headerTitleStyle: {
-            fontWeight: '700',
-          },
+            headerTintColor: '#fff',
 
-          contentStyle: {
-            backgroundColor: '#000',
-          },
-        }}>
+            headerTitleStyle: {
+              fontWeight: '700',
+            },
 
-        <Stack.Screen
-          name="MainTabs"
-          component={MainTabs}
-          options={{
-            headerShown: false,
-          }}
-        />
+            contentStyle: {
+              backgroundColor: '#000',
+            },
+          }}>
 
-        <Stack.Screen
-          name="ActivityHistory"
-          component={ActivityHistoryScreen}
-          options={{
-            title: 'Activity History',
-          }}
-        />
+          {/* =======================================
+              MAIN APP
+              ======================================= */}
 
-        <Stack.Screen
-          name="Notifications"
-          component={NotificationsScreen}
-          options={{
-            title: 'Notifications',
-          }}
-        />
+          <Stack.Screen
+            name="MainTabs"
+            component={MainTabs}
+            options={{
+              headerShown: false,
+            }}
+          />
 
-        <Stack.Screen
-          name="PublicProfile"
-          component={PublicProfileScreen}
-          options={{
-            title: 'Profile',
-          }}
-        />
+          {/* =======================================
+              SOCIAL
+              ======================================= */}
 
-        <Stack.Screen
-          name="FollowList"
-          component={FollowListScreen}
-          options={({ route }) => ({
-            title:
-              route.params.mode ===
+          <Stack.Screen
+            name="PublicProfile"
+            component={PublicProfileScreen}
+            options={{
+              title: 'Profile',
+            }}
+          />
+
+          <Stack.Screen
+            name="FollowList"
+            component={FollowListScreen}
+            options={({ route }) => ({
+              title:
+                route.params.mode ===
                 'followers'
-                ? 'Followers'
-                : 'Following',
-          })}
-        />
+                  ? 'Followers'
+                  : 'Following',
+            })}
+          />
 
-        <Stack.Screen
-          name="Clubs"
-          component={ClubsScreen}
-          options={{
-            title: 'Clubs',
-          }}
-        />
+          {/* =======================================
+              CLUBS
+              ======================================= */}
 
-        <Stack.Screen
-          name="CreateClub"
-          component={CreateClubScreen}
-          options={{
-            title: 'Create Club',
-          }}
-        />
+          <Stack.Screen
+            name="Clubs"
+            component={ClubsScreen}
+            options={{
+              title: 'Clubs',
+            }}
+          />
 
-        <Stack.Screen
-          name="ClubDetails"
-          component={ClubDetailsScreen}
-          options={{
-            title: 'Club',
-          }}
-        />
+          <Stack.Screen
+            name="CreateClub"
+            component={CreateClubScreen}
+            options={{
+              title: 'Create Club',
+            }}
+          />
 
-        <Stack.Screen
-          name="ActivityResult"
-          component={ActivityResultScreen}
-          options={{
-            title: 'Activity Result',
-          }}
-        />
+          <Stack.Screen
+            name="ClubDetails"
+            component={ClubDetailsScreen}
+            options={{
+              title: 'Club',
+            }}
+          />
 
-        <Stack.Screen
-          name="TerritoryDetails"
-          component={
-            TerritoryDetailsScreen
-          }
-          options={{
-            title: 'Territory',
-          }}
-        />
+          {/* =======================================
+              COMPETITIONS
+              ======================================= */}
 
-      </Stack.Navigator>
+          <Stack.Screen
+            name="Competitions"
+            component={CompetitionsScreen}
+            options={{
+              title: 'Competitions',
+            }}
+          />
 
-    </NavigationContainer>
+          <Stack.Screen
+            name="CreateCompetition"
+            component={
+              CreateCompetitionScreen
+            }
+            options={{
+              title: 'Create Competition',
+            }}
+          />
+
+          <Stack.Screen
+            name="CompetitionDetails"
+            component={
+              CompetitionDetailsScreen
+            }
+            options={{
+              title: 'Competition',
+            }}
+          />
+
+          {/* =======================================
+              ACTIVITY
+              ======================================= */}
+
+          <Stack.Screen
+            name="ActivityHistory"
+            component={ActivityHistoryScreen}
+            options={{
+              title: 'Activity History',
+            }}
+          />
+
+          <Stack.Screen
+            name="ActivityResult"
+            component={ActivityResultScreen}
+            options={{
+              title: 'Activity Result',
+            }}
+          />
+
+          {/* =======================================
+              NOTIFICATIONS
+              ======================================= */}
+
+          <Stack.Screen
+            name="Notifications"
+            component={NotificationsScreen}
+            options={{
+              title: 'Notifications',
+            }}
+          />
+
+          {/* =======================================
+              TERRITORY
+              ======================================= */}
+
+          <Stack.Screen
+            name="TerritoryDetails"
+            component={
+              TerritoryDetailsScreen
+            }
+            options={{
+              title: 'Territory',
+            }}
+          />
+
+        </Stack.Navigator>
+
+      </NavigationContainer>
+    </>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+
   iconContainer: {
     width: 30,
     height: 30,
