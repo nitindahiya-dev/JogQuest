@@ -1,10 +1,15 @@
 import dns from 'node:dns';
-
 dns.setDefaultResultOrder('ipv4first');
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { pool, query } from './db.js';
+import {
+  createHash,
+  randomBytes,
+  scryptSync,
+  timingSafeEqual,
+} from 'node:crypto';
 
 const app = express();
 
@@ -93,6 +98,71 @@ type NormalizedExternalActivity = {
   startedAt: string;
   finishedAt: string;
   route: Coordinate[];
+};
+
+const hashPassword = (
+  password: string,
+) => {
+  const salt =
+    randomBytes(16).toString('hex');
+
+  const hash =
+    scryptSync(
+      password,
+      salt,
+      64,
+    ).toString('hex');
+
+  return `${salt}:${hash}`;
+};
+
+const verifyPassword = (
+  password: string,
+  storedHash: string,
+) => {
+  const [
+    salt,
+    originalHash,
+  ] = storedHash.split(':');
+
+  if (
+    !salt ||
+    !originalHash
+  ) {
+    return false;
+  }
+
+  const derivedHash =
+    scryptSync(
+      password,
+      salt,
+      64,
+    );
+
+  const originalBuffer =
+    Buffer.from(
+      originalHash,
+      'hex',
+    );
+
+  return (
+    originalBuffer.length ===
+      derivedHash.length &&
+    timingSafeEqual(
+      originalBuffer,
+      derivedHash,
+    )
+  );
+};
+
+const hashSessionToken = (
+  token: string,
+) => {
+  return createHash(
+    'sha256',
+  )
+    .update(token)
+    .digest('hex');
 };
 
 const getMockGarminActivity =
@@ -234,6 +304,325 @@ app.post('/api/users', async (req, res) => {
     });
   }
 });
+
+app.post(
+  '/api/auth/signup',
+  async (req, res) => {
+    try {
+      const {
+        email,
+        username,
+        displayName,
+        password,
+      } = req.body as {
+        email?: string;
+        username?: string;
+        displayName?: string;
+        password?: string;
+      };
+
+      if (
+        !email ||
+        !username ||
+        !displayName ||
+        !password
+      ) {
+        return res.status(400).json({
+          error:
+            'email, username, displayName and password are required',
+        });
+      }
+
+      if (
+        password.length < 8
+      ) {
+        return res.status(400).json({
+          error:
+            'Password must be at least 8 characters',
+        });
+      }
+
+      const passwordHash =
+        hashPassword(password);
+
+      const result =
+        await query(
+          `
+          INSERT INTO users (
+            username,
+            display_name,
+            email,
+            password_hash
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4
+          )
+          RETURNING
+            id,
+            username,
+            display_name,
+            email,
+            avatar_url,
+            created_at
+          `,
+          [
+            username.trim(),
+            displayName.trim(),
+            email.trim().toLowerCase(),
+            passwordHash,
+          ],
+        );
+
+      res.status(201).json(
+        result.rows[0],
+      );
+    } catch (error: any) {
+      if (
+        error?.code ===
+        '23505'
+      ) {
+        return res.status(409).json({
+          error:
+            'Username or email already exists',
+        });
+      }
+
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to create account',
+      });
+    }
+  },
+);
+
+app.post(
+  '/api/auth/login',
+  async (req, res) => {
+    try {
+      const {
+        email,
+        password,
+      } = req.body as {
+        email?: string;
+        password?: string;
+      };
+
+      if (
+        !email ||
+        !password
+      ) {
+        return res.status(400).json({
+          error:
+            'email and password are required',
+        });
+      }
+
+      const result =
+        await query(
+          `
+          SELECT
+            id,
+            username,
+            display_name,
+            email,
+            avatar_url,
+            password_hash
+          FROM users
+          WHERE email = $1
+          `,
+          [
+            email.trim().toLowerCase(),
+          ],
+        );
+
+      if (
+        result.rows.length === 0
+      ) {
+        return res.status(401).json({
+          error:
+            'Invalid email or password',
+        });
+      }
+
+      const user =
+        result.rows[0];
+
+      if (
+        !user.password_hash ||
+        !verifyPassword(
+          password,
+          user.password_hash,
+        )
+      ) {
+        return res.status(401).json({
+          error:
+            'Invalid email or password',
+        });
+      }
+
+      const token =
+        randomBytes(32).toString(
+          'hex',
+        );
+
+      const tokenHash =
+        hashSessionToken(token);
+
+      await query(
+        `
+        INSERT INTO user_sessions (
+          user_id,
+          token_hash,
+          expires_at
+        )
+        VALUES (
+          $1,
+          $2,
+          NOW() + INTERVAL '30 days'
+        )
+        `,
+        [
+          user.id,
+          tokenHash,
+        ],
+      );
+
+      delete user.password_hash;
+
+      res.json({
+        token,
+        user,
+      });
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to login',
+      });
+    }
+  },
+);
+
+
+app.get(
+  '/api/me',
+  async (req, res) => {
+    try {
+      const authorization =
+        req.headers.authorization;
+
+      if (
+        !authorization ||
+        !authorization.startsWith(
+          'Bearer ',
+        )
+      ) {
+        return res.status(401).json({
+          error:
+            'Authentication required',
+        });
+      }
+
+      const token =
+        authorization.slice(7);
+
+      const tokenHash =
+        hashSessionToken(token);
+
+      const result =
+        await query(
+          `
+          SELECT
+            u.id,
+            u.username,
+            u.display_name,
+            u.email,
+            u.avatar_url
+          FROM user_sessions s
+          JOIN users u
+            ON u.id = s.user_id
+          WHERE s.token_hash = $1
+            AND s.expires_at > NOW()
+          `,
+          [
+            tokenHash,
+          ],
+        );
+
+      if (
+        result.rows.length === 0
+      ) {
+        return res.status(401).json({
+          error:
+            'Invalid or expired session',
+        });
+      }
+
+      res.json(
+        result.rows[0],
+      );
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to fetch current user',
+      });
+    }
+  },
+);
+
+
+app.post(
+  '/api/auth/logout',
+  async (req, res) => {
+    try {
+      const authorization =
+        req.headers.authorization;
+
+      if (
+        !authorization ||
+        !authorization.startsWith(
+          'Bearer ',
+        )
+      ) {
+        return res.status(204).send();
+      }
+
+      const token =
+        authorization.slice(7);
+
+      const tokenHash =
+        hashSessionToken(token);
+
+      await query(
+        `
+        DELETE FROM user_sessions
+        WHERE token_hash = $1
+        `,
+        [
+          tokenHash,
+        ],
+      );
+
+      res.status(204).send();
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          'Failed to logout',
+      });
+    }
+  },
+);
+
 
 // --------------------------------------------------
 // GET USER PROFILE
