@@ -17,6 +17,8 @@ import {
   useFocusEffect,
 } from '@react-navigation/native';
 
+import {useAuth} from '../../auth/AuthContext';
+
 type LeaderboardPlayer = {
   rank: number;
   id: string;
@@ -37,10 +39,9 @@ type LeaderboardScope =
 const API_BASE_URL =
   'http://127.0.0.1:4000';
 
-const DEV_USER_ID =
-  '7445aab6-039b-4e64-8559-1ec9ae702ffe';
-
 const LeaderboardScreen = () => {
+  const {user} = useAuth();
+
   const [players, setPlayers] =
     useState<LeaderboardPlayer[]>([]);
 
@@ -109,7 +110,7 @@ const LeaderboardScreen = () => {
   const currentPlayer =
     players.find(
       player =>
-        player.id === DEV_USER_ID,
+        player.id === user?.id,
     );
 
   const renderPlayer = ({

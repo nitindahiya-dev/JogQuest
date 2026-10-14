@@ -21,6 +21,8 @@ import {
   type RouteProp,
 } from '@react-navigation/native';
 
+import {useAuth} from '../../auth/AuthContext';
+
 import type {
   NativeStackNavigationProp,
 } from '@react-navigation/native-stack';
@@ -75,15 +77,15 @@ type LeaderboardRow = {
 const API_BASE_URL =
   'http://127.0.0.1:4000';
 
-const DEV_USER_ID =
-  '7445aab6-039b-4e64-8559-1ec9ae702ffe';
-
 const CompetitionDetailsScreen = () => {
   const route =
     useRoute<Route>();
 
   const navigation =
     useNavigation<Navigation>();
+
+  const {user} = useAuth();
+  const userId = user?.id;
 
   const {
     competitionId,
@@ -139,6 +141,13 @@ const CompetitionDetailsScreen = () => {
     useCallback(async (
       isRefresh = false,
     ) => {
+      if (!userId) {
+        setError('Please log in to view this competition.');
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
+
       try {
         if (isRefresh) {
           setRefreshing(true);
@@ -162,7 +171,7 @@ const CompetitionDetailsScreen = () => {
           ),
 
           fetch(
-            `${API_BASE_URL}/api/competitions/${competitionId}/membership/${DEV_USER_ID}`,
+            `${API_BASE_URL}/api/competitions/${competitionId}/membership/${userId}`,
           ),
         ]);
 
@@ -229,7 +238,7 @@ const CompetitionDetailsScreen = () => {
         setLoading(false);
         setRefreshing(false);
       }
-    }, [competitionId]);
+    }, [competitionId, userId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -260,6 +269,7 @@ const CompetitionDetailsScreen = () => {
   const toggleJoin =
     async () => {
       if (
+        !userId ||
         !competition ||
         actionLoading
       ) {
@@ -279,7 +289,7 @@ const CompetitionDetailsScreen = () => {
 
         const response =
           await fetch(
-            `${API_BASE_URL}/api/competitions/${competition.id}/join/${DEV_USER_ID}`,
+            `${API_BASE_URL}/api/competitions/${competition.id}/join/${userId}`,
             {
               method:
                 joined
@@ -455,11 +465,11 @@ const formatRemaining = (): {
   };
 
   const currentUser =
-    leaderboard.find(
-      item =>
-        item.user_id ===
-        DEV_USER_ID,
-    );
+    userId
+      ? leaderboard.find(
+          item => item.user_id === userId,
+        )
+      : undefined;
 
   const remaining =
     formatRemaining();
@@ -741,8 +751,7 @@ const formatRemaining = (): {
           <TouchableOpacity
             style={[
               styles.row,
-              item.user_id ===
-                DEV_USER_ID &&
+              item.user_id === userId &&
                 styles.currentUserRow,
             ]}
             activeOpacity={0.8}
@@ -1132,7 +1141,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 11,
     fontWeight: '900',
-    marginLeft: 8,
   },
 
   errorBox: {

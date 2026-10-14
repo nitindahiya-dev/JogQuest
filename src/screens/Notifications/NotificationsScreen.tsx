@@ -17,6 +17,8 @@ import {
   useFocusEffect,
 } from '@react-navigation/native';
 
+import { useAuth } from '../../auth/AuthContext';
+
 type NotificationItem = {
   id: string;
 
@@ -47,11 +49,11 @@ type NotificationsResponse = {
 const API_BASE_URL =
   'http://127.0.0.1:4000';
 
-const DEV_USER_ID =
-  '7445aab6-039b-4e64-8559-1ec9ae702ffe';
-
-
 const NotificationsScreen = () => {
+
+  const { user } = useAuth();
+
+  const userId = user?.id;
 
   const [
     notifications,
@@ -85,13 +87,13 @@ const NotificationsScreen = () => {
 
         const response =
           await fetch(
-            `${API_BASE_URL}/api/users/${DEV_USER_ID}/notifications`,
+            `${API_BASE_URL}/api/users/${userId}/notifications`,
           );
 
         const data =
           (await response.json()) as
-            | NotificationsResponse
-            | { error?: string };
+          | NotificationsResponse
+          | { error?: string };
 
         if (!response.ok) {
           throw new Error(
@@ -118,7 +120,7 @@ const NotificationsScreen = () => {
         setLoading(false);
         setRefreshing(false);
       }
-    }, []);
+    }, [userId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -153,10 +155,10 @@ const NotificationsScreen = () => {
           current.map(item =>
             item.id === notification.id
               ? {
-                  ...item,
-                  read_at:
-                    new Date().toISOString(),
-                }
+                ...item,
+                read_at:
+                  new Date().toISOString(),
+              }
               : item,
           ),
       );
@@ -182,7 +184,7 @@ const NotificationsScreen = () => {
     try {
       const response =
         await fetch(
-          `${API_BASE_URL}/api/users/${DEV_USER_ID}/notifications/read-all`,
+          `${API_BASE_URL}/api/users/${userId}/notifications/read-all`,
           {
             method: 'PATCH',
           },
@@ -196,7 +198,7 @@ const NotificationsScreen = () => {
       if (!response.ok) {
         throw new Error(
           data.error ??
-            'Failed to mark all notifications as read',
+          'Failed to mark all notifications as read',
         );
       }
 
@@ -228,7 +230,7 @@ const NotificationsScreen = () => {
     return new Date(value).toLocaleString();
   };
 
-  if (loading) {
+  if (!userId) {
     return (
       <View style={styles.center}>
         <ActivityIndicator
@@ -311,7 +313,7 @@ const NotificationsScreen = () => {
               style={[
                 styles.card,
                 !item.read_at &&
-                  styles.unreadCard,
+                styles.unreadCard,
               ]}>
 
               <View style={styles.cardTop}>

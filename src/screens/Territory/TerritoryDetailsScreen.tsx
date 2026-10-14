@@ -19,6 +19,8 @@ import {
   useRoute,
 } from '@react-navigation/native';
 
+import {useAuth} from '../../auth/AuthContext';
+
 import type {
   RootStackParamList,
 } from '../../navigation/types';
@@ -100,10 +102,10 @@ type ActivityRoutePoint = {
 const API_BASE_URL =
   'http://127.0.0.1:4000';
 
-const DEV_USER_ID =
-  '7445aab6-039b-4e64-8559-1ec9ae702ffe';
-
 const TerritoryDetailsScreen = () => {
+  const {user} = useAuth();
+  const userId = user?.id;
+
   const route =
     useRoute<TerritoryDetailsRouteProp>();
 
@@ -258,12 +260,18 @@ const TerritoryDetailsScreen = () => {
 
   const loadActivities =
     useCallback(async () => {
+      if (!userId) {
+        setActivities([]);
+        setActivityLoading(false);
+        return;
+      }
+
       try {
         setActivityLoading(true);
 
         const response =
           await fetch(
-            `${API_BASE_URL}/api/activities/${DEV_USER_ID}`,
+            `${API_BASE_URL}/api/activities/${userId}`,
           );
 
         if (!response.ok) {
@@ -284,7 +292,7 @@ const TerritoryDetailsScreen = () => {
       } finally {
         setActivityLoading(false);
       }
-    }, []);
+    }, [userId]);
 
   // --------------------------------------------------
   // Initial loading
@@ -330,6 +338,7 @@ const TerritoryDetailsScreen = () => {
   const submitChallenge =
     async () => {
       if (
+        !userId ||
         !selectedActivityId ||
         submittingChallenge
       ) {
@@ -391,7 +400,7 @@ const TerritoryDetailsScreen = () => {
               },
               body: JSON.stringify({
                 challengerId:
-                  DEV_USER_ID,
+                  userId,
                 activityId:
                   selectedActivityId,
                 polygon,
@@ -437,6 +446,10 @@ const TerritoryDetailsScreen = () => {
         | 'ACCEPT'
         | 'REJECT',
     ) => {
+      if (!userId) {
+        return;
+      }
+
       try {
         setResolvingId(challengeId);
 
@@ -451,7 +464,7 @@ const TerritoryDetailsScreen = () => {
               },
               body: JSON.stringify({
                 resolverId:
-                  DEV_USER_ID,
+                  userId,
                 decision,
               }),
             },
@@ -532,16 +545,15 @@ const TerritoryDetailsScreen = () => {
     );
 
   const isOwner =
-    territory.user_id ===
-    DEV_USER_ID;
+    !!userId &&
+    territory.user_id === userId;
 
   const hasPendingOwnChallenge =
+    !!userId &&
     challenges.some(
       challenge =>
-        challenge.challenger_id ===
-          DEV_USER_ID &&
-        challenge.status ===
-          'PENDING',
+        challenge.challenger_id === userId &&
+        challenge.status === 'PENDING',
     );
 
   return (

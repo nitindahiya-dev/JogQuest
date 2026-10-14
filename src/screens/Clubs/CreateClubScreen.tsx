@@ -18,6 +18,8 @@ import {
   useNavigation,
 } from '@react-navigation/native';
 
+import {useAuth} from '../../auth/AuthContext';
+
 import type {
   NativeStackNavigationProp,
 } from '@react-navigation/native-stack';
@@ -35,10 +37,10 @@ type Navigation =
 const API_BASE_URL =
   'http://127.0.0.1:4000';
 
-const DEV_USER_ID =
-  '7445aab6-039b-4e64-8559-1ec9ae702ffe';
-
 const CreateClubScreen = () => {
+  const {user} = useAuth();
+  const userId = user?.id;
+
   const navigation =
     useNavigation<Navigation>();
 
@@ -64,6 +66,11 @@ const CreateClubScreen = () => {
 
   const createClub =
     async () => {
+      if (!userId) {
+        setError('Please log in to create a club.');
+        return;
+      }
+
       const cleanName =
         name.trim();
 
@@ -97,8 +104,7 @@ const CreateClubScreen = () => {
               },
 
               body: JSON.stringify({
-                userId:
-                  DEV_USER_ID,
+                userId,
 
                 name: cleanName,
 

@@ -17,6 +17,8 @@ import {
   useFocusEffect,
 } from '@react-navigation/native';
 
+import {useAuth} from '../../auth/AuthContext';
+
 type Integration = {
   id: string;
   provider: string;
@@ -33,9 +35,6 @@ type Integration = {
 
 const API_BASE_URL =
   'http://127.0.0.1:4000';
-
-const DEV_USER_ID =
-  '7445aab6-039b-4e64-8559-1ec9ae702ffe';
 
 const providers = [
   'garmin',
@@ -79,6 +78,9 @@ const formatDate = (
 
 const IntegrationsScreen =
   () => {
+    const {user} = useAuth();
+    const userId = user?.id;
+
     const [
       integrations,
       setIntegrations,
@@ -101,12 +103,18 @@ const IntegrationsScreen =
     const loadIntegrations =
       useCallback(
         async () => {
+          if (!userId) {
+            setIntegrations([]);
+            setLoading(false);
+            return;
+          }
+
           try {
             setLoading(true);
 
             const response =
               await fetch(
-                `${API_BASE_URL}/api/users/${DEV_USER_ID}/integrations`,
+                `${API_BASE_URL}/api/users/${userId}/integrations`,
               );
 
             if (
@@ -137,7 +145,7 @@ const IntegrationsScreen =
             setLoading(false);
           }
         },
-        [],
+        [userId],
       );
 
     useFocusEffect(
@@ -161,6 +169,11 @@ const IntegrationsScreen =
 
     const connectGarmin =
       async () => {
+        if (!userId) {
+          Alert.alert('Not signed in', 'Please log in again.');
+          return;
+        }
+
         try {
           setActionProvider(
             'garmin',
@@ -168,7 +181,7 @@ const IntegrationsScreen =
 
           const response =
             await fetch(
-              `${API_BASE_URL}/api/users/${DEV_USER_ID}/integrations/garmin`,
+              `${API_BASE_URL}/api/users/${userId}/integrations/garmin`,
               {
                 method: 'POST',
                 headers: {
@@ -219,6 +232,11 @@ const IntegrationsScreen =
 
     const importGarmin =
       async () => {
+        if (!userId) {
+          Alert.alert('Not signed in', 'Please log in again.');
+          return;
+        }
+
         try {
           setActionProvider(
             'garmin-sync',
@@ -226,7 +244,7 @@ const IntegrationsScreen =
 
           const response =
             await fetch(
-              `${API_BASE_URL}/api/users/${DEV_USER_ID}/integrations/garmin/import-demo`,
+              `${API_BASE_URL}/api/users/${userId}/integrations/garmin/import-demo`,
               {
                 method: 'POST',
               },
@@ -287,6 +305,11 @@ const IntegrationsScreen =
       async (
         provider: string,
       ) => {
+        if (!userId) {
+          Alert.alert('Not signed in', 'Please log in again.');
+          return;
+        }
+
         try {
           setActionProvider(
             provider,
@@ -294,7 +317,7 @@ const IntegrationsScreen =
 
           const response =
             await fetch(
-              `${API_BASE_URL}/api/users/${DEV_USER_ID}/integrations/${provider}`,
+              `${API_BASE_URL}/api/users/${userId}/integrations/${provider}`,
               {
                 method: 'DELETE',
               },

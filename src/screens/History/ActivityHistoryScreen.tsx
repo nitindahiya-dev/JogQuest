@@ -17,6 +17,8 @@ import {
   useFocusEffect,
 } from '@react-navigation/native';
 
+import { useAuth } from '../../auth/AuthContext';
+
 type Activity = {
   id: string;
   activity_type: 'Run' | 'Walk' | 'Cycle';
@@ -32,9 +34,6 @@ type Activity = {
 };
 
 const API_BASE_URL = 'http://127.0.0.1:4000';
-
-const DEV_USER_ID =
-  '7445aab6-039b-4e64-8559-1ec9ae702ffe';
 
 const formatDuration = (
   seconds: number,
@@ -88,7 +87,17 @@ const ActivityHistoryScreen = () => {
 
   const [error, setError] =
     useState<string | null>(null);
+  const { user } = useAuth();
 
+  if (!user) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.errorText}>
+          Authentication required.
+        </Text>
+      </View>
+    );
+  }
   const loadActivities = useCallback(
     async (isRefresh = false) => {
       try {
@@ -101,7 +110,7 @@ const ActivityHistoryScreen = () => {
         setError(null);
 
         const response = await fetch(
-          `${API_BASE_URL}/api/activities/${DEV_USER_ID}`,
+          `${API_BASE_URL}/api/activities/${user.id}`,
         );
 
         if (!response.ok) {
@@ -128,7 +137,7 @@ const ActivityHistoryScreen = () => {
         setRefreshing(false);
       }
     },
-    [],
+    [user.id],
   );
 
   useFocusEffect(

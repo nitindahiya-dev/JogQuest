@@ -18,6 +18,8 @@ import {
   type RouteProp,
 } from '@react-navigation/native';
 
+import {useAuth} from '../../auth/AuthContext';
+
 import type {
   NativeStackNavigationProp,
 } from '@react-navigation/native-stack';
@@ -63,10 +65,10 @@ type SocialProfile = {
 const API_BASE_URL =
   'http://127.0.0.1:4000';
 
-const DEV_USER_ID =
-  '7445aab6-039b-4e64-8559-1ec9ae702ffe';
-
 const PublicProfileScreen = () => {
+  const {user} = useAuth();
+  const viewerId = user?.id;
+
   const route =
     useRoute<Route>();
 
@@ -101,13 +103,19 @@ const PublicProfileScreen = () => {
 
   const loadProfile =
     useCallback(async () => {
+      if (!viewerId) {
+        setError('Please log in to view this profile.');
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
         setError(null);
 
         const response =
           await fetch(
-            `${API_BASE_URL}/api/users/${userId}/social-profile?viewerId=${DEV_USER_ID}`,
+            `${API_BASE_URL}/api/users/${userId}/social-profile?viewerId=${viewerId}`,
           );
 
         const data =
@@ -136,7 +144,7 @@ const PublicProfileScreen = () => {
       } finally {
         setLoading(false);
       }
-    }, [userId]);
+    }, [userId, viewerId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -147,8 +155,9 @@ const PublicProfileScreen = () => {
   const toggleFollow =
     async () => {
       if (
+        !viewerId ||
         !profile ||
-        profile.id === DEV_USER_ID ||
+        profile.id === viewerId ||
         followLoading
       ) {
         return;
@@ -164,7 +173,7 @@ const PublicProfileScreen = () => {
 
         const response =
           await fetch(
-            `${API_BASE_URL}/api/users/${DEV_USER_ID}/follow/${profile.id}`,
+            `${API_BASE_URL}/api/users/${viewerId}/follow/${profile.id}`,
             {
               method,
             },
@@ -268,7 +277,8 @@ const PublicProfileScreen = () => {
   }
 
   const isOwnProfile =
-    profile.id === DEV_USER_ID;
+    !!viewerId &&
+    profile.id === viewerId;
 
   return (
     <View style={styles.container}>

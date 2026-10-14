@@ -34,6 +34,8 @@ import type {
   RootStackParamList,
 } from '../../navigation/types';
 
+import {useAuth} from '../../auth/AuthContext';
+
 type FeedPost = {
   id: string;
 
@@ -99,10 +101,10 @@ type Navigation =
 const API_BASE_URL =
   'http://127.0.0.1:4000';
 
-const DEV_USER_ID =
-  '7445aab6-039b-4e64-8559-1ec9ae702ffe';
-
 const SocialFeedScreen = () => {
+  const {user} = useAuth();
+  const userId = user?.id;
+
   const navigation =
     useNavigation<Navigation>();
 
@@ -160,12 +162,19 @@ const SocialFeedScreen = () => {
 
   const loadFeed = useCallback(
     async () => {
+      if (!userId) {
+        setPosts([]);
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
+
       try {
         setError(null);
 
         const response =
           await fetch(
-            `${API_BASE_URL}/api/feed/${DEV_USER_ID}?scope=all`,
+            `${API_BASE_URL}/api/feed/${userId}?scope=all`,
           );
 
         const data =
@@ -195,7 +204,7 @@ const SocialFeedScreen = () => {
         setRefreshing(false);
       }
     },
-    [],
+    [userId],
   );
 
   useFocusEffect(
@@ -208,7 +217,7 @@ const SocialFeedScreen = () => {
     const content =
       newPost.trim();
 
-    if (!content || posting) {
+    if (!userId || !content || posting) {
       return;
     }
 
@@ -228,7 +237,7 @@ const SocialFeedScreen = () => {
             },
 
             body: JSON.stringify({
-              userId: DEV_USER_ID,
+              userId,
               content,
             }),
           },
@@ -263,6 +272,11 @@ const SocialFeedScreen = () => {
   const toggleLike = async (
     post: FeedPost,
   ) => {
+    if (!userId) {
+      setError('Please log in to like posts.');
+      return;
+    }
+
     try {
       const method =
         post.liked_by_me
@@ -271,7 +285,7 @@ const SocialFeedScreen = () => {
 
       const response =
         await fetch(
-          `${API_BASE_URL}/api/posts/${post.id}/like/${DEV_USER_ID}`,
+          `${API_BASE_URL}/api/posts/${post.id}/like/${userId}`,
           {
             method,
           },
@@ -382,7 +396,7 @@ const SocialFeedScreen = () => {
     const value =
       commentText.trim();
 
-    if (!value || commentLoading) {
+    if (!userId || !value || commentLoading) {
       return;
     }
 
@@ -401,7 +415,7 @@ const SocialFeedScreen = () => {
             },
 
             body: JSON.stringify({
-              userId: DEV_USER_ID,
+              userId,
               comment: value,
             }),
           },

@@ -20,6 +20,8 @@ import {
   type RouteProp,
 } from '@react-navigation/native';
 
+import {useAuth} from '../../auth/AuthContext';
+
 import type {
   NativeStackNavigationProp,
 } from '@react-navigation/native-stack';
@@ -63,10 +65,10 @@ type Member = {
 const API_BASE_URL =
   'http://127.0.0.1:4000';
 
-const DEV_USER_ID =
-  '7445aab6-039b-4e64-8559-1ec9ae702ffe';
-
 const ClubDetailsScreen = () => {
+  const {user} = useAuth();
+  const userId = user?.id;
+
   const route =
     useRoute<Route>();
 
@@ -114,6 +116,13 @@ const ClubDetailsScreen = () => {
 
   const loadClub =
     useCallback(async () => {
+      if (!userId) {
+        setError('Please log in to view membership.');
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
+
       try {
         setError(null);
 
@@ -131,7 +140,7 @@ const ClubDetailsScreen = () => {
           ),
 
           fetch(
-            `${API_BASE_URL}/api/clubs/${clubId}/membership/${DEV_USER_ID}`,
+            `${API_BASE_URL}/api/clubs/${clubId}/membership/${userId}`,
           ),
         ]);
 
@@ -198,7 +207,7 @@ const ClubDetailsScreen = () => {
         setLoading(false);
         setRefreshing(false);
       }
-    }, [clubId]);
+    }, [clubId, userId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -209,6 +218,7 @@ const ClubDetailsScreen = () => {
   const toggleMembership =
     async () => {
       if (
+        !userId ||
         !club ||
         actionLoading
       ) {
@@ -217,7 +227,7 @@ const ClubDetailsScreen = () => {
 
       const isOwner =
         club.creator_id ===
-        DEV_USER_ID;
+        userId;
 
       if (
         joined &&
@@ -232,7 +242,7 @@ const ClubDetailsScreen = () => {
 
         const response =
           await fetch(
-            `${API_BASE_URL}/api/clubs/${club.id}/join/${DEV_USER_ID}`,
+            `${API_BASE_URL}/api/clubs/${club.id}/join/${userId}`,
             {
               method:
                 joined
@@ -289,8 +299,8 @@ const ClubDetailsScreen = () => {
   }
 
   const isOwner =
-    club.creator_id ===
-    DEV_USER_ID;
+    !!userId &&
+    club.creator_id === userId;
 
   return (
     <View style={styles.container}>
