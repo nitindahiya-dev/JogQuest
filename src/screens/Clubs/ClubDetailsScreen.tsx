@@ -66,7 +66,7 @@ const API_BASE_URL =
   'http://127.0.0.1:4000';
 
 const ClubDetailsScreen = () => {
-  const {user} = useAuth();
+  const {user, token} = useAuth();
   const userId = user?.id;
 
   const route =
@@ -248,6 +248,7 @@ const ClubDetailsScreen = () => {
                 joined
                   ? 'DELETE'
                   : 'POST',
+              headers: {Authorization: `Bearer ${token}`},
             },
           );
 

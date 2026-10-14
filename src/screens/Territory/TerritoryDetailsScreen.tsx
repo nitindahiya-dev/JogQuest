@@ -103,7 +103,7 @@ const API_BASE_URL =
   'http://127.0.0.1:4000';
 
 const TerritoryDetailsScreen = () => {
-  const {user} = useAuth();
+  const {user, token} = useAuth();
   const userId = user?.id;
 
   const route =
@@ -395,8 +395,8 @@ const TerritoryDetailsScreen = () => {
             {
               method: 'POST',
               headers: {
-                'Content-Type':
-                  'application/json',
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
               },
               body: JSON.stringify({
                 challengerId:
@@ -459,8 +459,8 @@ const TerritoryDetailsScreen = () => {
             {
               method: 'POST',
               headers: {
-                'Content-Type':
-                  'application/json',
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
               },
               body: JSON.stringify({
                 resolverId:

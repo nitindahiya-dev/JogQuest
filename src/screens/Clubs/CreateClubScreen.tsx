@@ -38,7 +38,7 @@ const API_BASE_URL =
   'http://127.0.0.1:4000';
 
 const CreateClubScreen = () => {
-  const {user} = useAuth();
+  const {user, token} = useAuth();
   const userId = user?.id;
 
   const navigation =
@@ -101,6 +101,7 @@ const CreateClubScreen = () => {
               headers: {
                 'Content-Type':
                   'application/json',
+                Authorization: `Bearer ${token}`,
               },
 
               body: JSON.stringify({

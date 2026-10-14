@@ -81,7 +81,7 @@ const ActivityScreen = () => {
   const navigation =
     useNavigation<NavigationProp>();
 
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   if (!user) {
     return (
       <View style={styles.container}>
@@ -767,8 +767,8 @@ const ActivityScreen = () => {
             method: 'POST',
 
             headers: {
-              'Content-Type':
-                'application/json',
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
             },
 
             body: JSON.stringify({
@@ -847,8 +847,8 @@ const ActivityScreen = () => {
             method: 'POST',
 
             headers: {
-              'Content-Type':
-                'application/json',
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
             },
 
             body: JSON.stringify({

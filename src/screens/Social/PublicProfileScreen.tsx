@@ -66,7 +66,7 @@ const API_BASE_URL =
   'http://127.0.0.1:4000';
 
 const PublicProfileScreen = () => {
-  const {user} = useAuth();
+  const {user, token} = useAuth();
   const viewerId = user?.id;
 
   const route =
@@ -176,6 +176,7 @@ const PublicProfileScreen = () => {
             `${API_BASE_URL}/api/users/${viewerId}/follow/${profile.id}`,
             {
               method,
+              headers: {Authorization: `Bearer ${token}`},
             },
           );
 

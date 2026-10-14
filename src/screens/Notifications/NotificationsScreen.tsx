@@ -51,7 +51,7 @@ const API_BASE_URL =
 
 const NotificationsScreen = () => {
 
-  const { user } = useAuth();
+  const { user, token } = useAuth();
 
   const userId = user?.id;
 
@@ -85,10 +85,14 @@ const NotificationsScreen = () => {
       try {
         setError(null);
 
-        const response =
-          await fetch(
-            `${API_BASE_URL}/api/users/${userId}/notifications`,
-          );
+        const response = await fetch(
+          `${API_BASE_URL}/api/users/${userId}/notifications`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
+        );
 
         const data =
           (await response.json()) as
@@ -120,7 +124,7 @@ const NotificationsScreen = () => {
         setLoading(false);
         setRefreshing(false);
       }
-    }, [userId]);
+    }, [userId, token]);
 
   useFocusEffect(
     useCallback(() => {
@@ -141,6 +145,9 @@ const NotificationsScreen = () => {
           `${API_BASE_URL}/api/notifications/${notification.id}/read`,
           {
             method: 'PATCH',
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
           },
         );
 
@@ -187,6 +194,9 @@ const NotificationsScreen = () => {
           `${API_BASE_URL}/api/users/${userId}/notifications/read-all`,
           {
             method: 'PATCH',
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
           },
         );
 

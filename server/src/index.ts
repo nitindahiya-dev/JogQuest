@@ -147,7 +147,7 @@ const verifyPassword = (
 
   return (
     originalBuffer.length ===
-      derivedHash.length &&
+    derivedHash.length &&
     timingSafeEqual(
       originalBuffer,
       derivedHash,
@@ -164,6 +164,60 @@ const hashSessionToken = (
     .update(token)
     .digest('hex');
 };
+
+
+const requireAuth: import('express').RequestHandler =
+  async (req, res, next) => {
+    try {
+      const authorization =
+        req.headers.authorization;
+
+      if (!authorization?.startsWith('Bearer ')) {
+        res.status(401).json({
+          error: 'Authentication required',
+        });
+        return;
+      }
+
+      const token = authorization.slice(7).trim();
+
+      if (!token) {
+        res.status(401).json({
+          error: 'Authentication required',
+        });
+        return;
+      }
+
+      const result = await query<{ user_id: string }>(
+        `
+        SELECT user_id
+        FROM user_sessions
+        WHERE token_hash = $1
+          AND expires_at > NOW()
+        `,
+        [hashSessionToken(token)],
+      );
+
+      if (result.rows.length === 0) {
+        res.status(401).json({
+          error: 'Invalid or expired session',
+        });
+        return;
+      }
+
+      res.locals.authenticatedUserId =
+        result.rows[0].user_id;
+
+      next();
+    } catch (error) {
+      console.error('Authentication failed:', error);
+
+      res.status(500).json({
+        error: 'Authentication verification failed',
+      });
+    }
+  };
+
 
 const getMockGarminActivity =
   (): NormalizedExternalActivity => {
@@ -936,19 +990,18 @@ app.post('/api/territories/check-overlap', async (req, res) => {
 // CLAIM TERRITORY
 // --------------------------------------------------
 
-app.post('/api/territories/claim', async (req, res) => {
+app.post('/api/territories/claim', requireAuth, async (req, res) => {
   const client = await pool.connect();
 
   try {
+    const userId = res.locals.authenticatedUserId as string;
     const {
-      userId,
       activityId,
       activityType,
       polygon,
     } = req.body;
 
     if (
-      !userId ||
       !activityId ||
       !activityType ||
       !Array.isArray(polygon) ||
@@ -1306,17 +1359,16 @@ app.get('/api/territories/:id/history', async (req, res) => {
 // CREATE TERRITORY CHALLENGE
 // --------------------------------------------------
 
-app.post('/api/territories/:id/challenges', async (req, res) => {
+app.post('/api/territories/:id/challenges', requireAuth, async (req, res) => {
   try {
     const { id: territoryId } = req.params;
+    const challengerId = res.locals.authenticatedUserId as string;
     const {
-      challengerId,
       activityId,
       polygon,
     } = req.body;
 
     if (
-      !challengerId ||
       !activityId ||
       !Array.isArray(polygon) ||
       polygon.length < 4
@@ -1514,6 +1566,7 @@ app.post('/api/territories/:id/challenges', async (req, res) => {
 
 app.post(
   '/api/territories/:id/challenges/:challengeId/resolve',
+  requireAuth,
   async (req, res) => {
     const client = await pool.connect();
 
@@ -1523,13 +1576,10 @@ app.post(
         challengeId,
       } = req.params;
 
-      const {
-        resolverId,
-        decision,
-      } = req.body;
+      const resolverId = res.locals.authenticatedUserId as string;
+      const { decision } = req.body;
 
       if (
-        !resolverId ||
         !['ACCEPT', 'REJECT'].includes(decision)
       ) {
         return res.status(400).json({
@@ -1937,14 +1987,14 @@ app.get('/api/territories', async (_req, res) => {
 // CREATE ACTIVITY
 // --------------------------------------------------
 
-app.post('/api/activities', async (req, res) => {
+app.post('/api/activities', requireAuth, async (req, res) => {
   const client = await pool.connect();
 
   try {
     const body = req.body as CreateActivityBody;
+    const authenticatedUserId = res.locals.authenticatedUserId as string;
 
     if (
-      !body.userId ||
       !body.activityType ||
       typeof body.distanceKm !== 'number' ||
       typeof body.elapsedSeconds !== 'number' ||
@@ -2067,7 +2117,7 @@ app.post('/api/activities', async (req, res) => {
         created_at
       `,
       [
-        body.userId,
+        authenticatedUserId,
         body.activityType,
         serverDistanceKm,
         body.elapsedSeconds,
@@ -2134,105 +2184,124 @@ app.post('/api/activities', async (req, res) => {
 // GET USER NOTIFICATIONS
 // --------------------------------------------------
 
-app.get('/api/users/:userId/notifications', async (req, res) => {
-  try {
-    const { userId } = req.params;
+app.get(
+  '/api/users/:userId/notifications',
+  requireAuth,
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
 
-    const parsedLimit = Number.parseInt(
-      String(req.query.limit ?? '50'),
-      10,
-    );
+      if (userId !== res.locals.authenticatedUserId) {
+        res.status(403).json({
+          error: 'Forbidden',
+        });
+        return;
+      }
 
-    const limit = Number.isFinite(parsedLimit)
-      ? Math.min(Math.max(parsedLimit, 1), 100)
-      : 50;
+      const parsedLimit = Number.parseInt(
+        String(req.query.limit ?? '50'),
+        10,
+      );
 
-    const result = await query(
-      `
-      SELECT
-        id,
-        type,
-        title,
-        message,
-        territory_id,
-        challenge_id,
-        activity_id,
-        competition_id,
-        created_at,
-        read_at
-      FROM notifications
-      WHERE user_id = $1
-      ORDER BY created_at DESC
-      LIMIT $2
-      `,
-      [userId, limit],
-    );
+      const limit = Number.isFinite(parsedLimit)
+        ? Math.min(Math.max(parsedLimit, 1), 100)
+        : 50;
 
-    const unreadResult = await query(
-      `
-      SELECT
-        COUNT(*)::int AS unread_count
-      FROM notifications
-      WHERE user_id = $1
-        AND read_at IS NULL
-      `,
-      [userId],
-    );
+      const result = await query(
+        `
+        SELECT
+          id,
+          type,
+          title,
+          message,
+          territory_id,
+          challenge_id,
+          activity_id,
+          competition_id,
+          created_at,
+          read_at
+        FROM notifications
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+        LIMIT $2
+        `,
+        [userId, limit],
+      );
 
-    res.json({
-      unreadCount: Number(
-        unreadResult.rows[0]?.unread_count ?? 0,
-      ),
-      notifications: result.rows,
-    });
-  } catch (error) {
-    console.error(error);
+      const unreadResult = await query(
+        `
+        SELECT
+          COUNT(*)::int AS unread_count
+        FROM notifications
+        WHERE user_id = $1
+          AND read_at IS NULL
+        `,
+        [userId],
+      );
 
-    res.status(500).json({
-      error: 'Failed to fetch notifications',
-    });
-  }
-});
+      res.json({
+        unreadCount: Number(
+          unreadResult.rows[0]?.unread_count ?? 0,
+        ),
+        notifications: result.rows,
+      });
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error: 'Failed to fetch notifications',
+      });
+    }
+  },
+);
 
 
 // --------------------------------------------------
 // MARK NOTIFICATION AS READ
 // --------------------------------------------------
 
-app.patch('/api/notifications/:id/read', async (req, res) => {
-  try {
-    const { id } = req.params;
+app.patch(
+  '/api/notifications/:id/read',
+  requireAuth,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
 
-    const result = await query(
-      `
-      UPDATE notifications
-      SET read_at = COALESCE(read_at, NOW())
-      WHERE id = $1
-      RETURNING
-        id,
-        read_at
-      `,
-      [id],
-    );
+      const result = await query(
+        `
+        UPDATE notifications
+        SET read_at = COALESCE(read_at, NOW())
+        WHERE id = $1
+          AND user_id = $2
+        RETURNING
+          id,
+          read_at
+        `,
+        [
+          id,
+          res.locals.authenticatedUserId,
+        ],
+      );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        error: 'Notification not found',
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          error: 'Notification not found',
+        });
+      }
+
+      res.json({
+        ok: true,
+        notification: result.rows[0],
+      });
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error: 'Failed to mark notification as read',
       });
     }
-
-    res.json({
-      ok: true,
-      notification: result.rows[0],
-    });
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      error: 'Failed to mark notification as read',
-    });
-  }
-});
+  },
+);
 
 
 // --------------------------------------------------
@@ -2241,9 +2310,17 @@ app.patch('/api/notifications/:id/read', async (req, res) => {
 
 app.patch(
   '/api/users/:userId/notifications/read-all',
+  requireAuth,
   async (req, res) => {
     try {
       const { userId } = req.params;
+
+      if (userId !== res.locals.authenticatedUserId) {
+        res.status(403).json({
+          error: 'Forbidden',
+        });
+        return;
+      }
 
       const result = await query(
         `
@@ -2393,19 +2470,10 @@ app.get('/api/feed/:userId', async (req, res) => {
 // CREATE POST
 // --------------------------------------------------
 
-app.post('/api/posts', async (req, res) => {
+app.post('/api/posts', requireAuth, async (req, res) => {
   try {
-    const {
-      userId,
-      content,
-      activityId,
-    } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({
-        error: 'userId is required',
-      });
-    }
+    const userId = res.locals.authenticatedUserId as string;
+    const { content, activityId } = req.body;
 
     const cleanContent =
       typeof content === 'string'
@@ -2497,15 +2565,13 @@ app.post('/api/posts', async (req, res) => {
 // FOLLOW USER
 // --------------------------------------------------
 
-app.post('/api/users/:userId/follow/:targetUserId', async (
+app.post('/api/users/:userId/follow/:targetUserId', requireAuth, async (
   req,
   res,
 ) => {
   try {
-    const {
-      userId,
-      targetUserId,
-    } = req.params;
+    const userId = res.locals.authenticatedUserId as string;
+      const { targetUserId } = req.params;
 
     if (userId === targetUserId) {
       return res.status(400).json({
@@ -2571,12 +2637,10 @@ app.post('/api/users/:userId/follow/:targetUserId', async (
 
 app.delete(
   '/api/users/:userId/follow/:targetUserId',
-  async (req, res) => {
+  requireAuth, async (req, res) => {
     try {
-      const {
-        userId,
-        targetUserId,
-      } = req.params;
+      const userId = res.locals.authenticatedUserId as string;
+      const { targetUserId } = req.params;
 
       const result = await query(
         `
@@ -2655,12 +2719,10 @@ app.get(
 
 app.post(
   '/api/posts/:postId/like/:userId',
-  async (req, res) => {
+  requireAuth, async (req, res) => {
     try {
-      const {
-        postId,
-        userId,
-      } = req.params;
+      const postId = req.params.postId;
+      const userId = res.locals.authenticatedUserId as string;
 
       const postResult = await query(
         `
@@ -2717,12 +2779,10 @@ app.post(
 
 app.delete(
   '/api/posts/:postId/like/:userId',
-  async (req, res) => {
+  requireAuth, async (req, res) => {
     try {
-      const {
-        postId,
-        userId,
-      } = req.params;
+      const postId = req.params.postId;
+      const userId = res.locals.authenticatedUserId as string;
 
       const result = await query(
         `
@@ -2804,25 +2864,20 @@ app.get(
 
 app.post(
   '/api/posts/:postId/comments',
-  async (req, res) => {
+  requireAuth, async (req, res) => {
     try {
       const { postId } = req.params;
 
-      const {
-        userId,
-        comment,
-      } = req.body;
+      const userId = res.locals.authenticatedUserId as string;
+      const { comment } = req.body;
 
       const cleanComment =
         typeof comment === 'string'
           ? comment.trim()
           : '';
 
-      if (!userId || !cleanComment) {
-        return res.status(400).json({
-          error:
-            'userId and comment are required',
-        });
+      if (!cleanComment) {
+        return res.status(400).json({ error: 'comment is required' });
       }
 
       if (cleanComment.length > 500) {
@@ -3269,13 +3324,10 @@ app.get(
 // CREATE CLUB
 // --------------------------------------------------
 
-app.post('/api/clubs', async (req, res) => {
+app.post('/api/clubs', requireAuth, async (req, res) => {
   try {
-    const {
-      userId,
-      name,
-      description,
-    } = req.body;
+    const userId = res.locals.authenticatedUserId as string;
+    const { name, description } = req.body;
 
     const cleanName =
       typeof name === 'string'
@@ -3287,10 +3339,10 @@ app.post('/api/clubs', async (req, res) => {
         ? description.trim()
         : '';
 
-    if (!userId || !cleanName) {
+    if (!cleanName) {
       return res.status(400).json({
         error:
-          'userId and name are required',
+          'name is required',
       });
     }
 
@@ -3508,12 +3560,10 @@ app.get(
 
 app.post(
   '/api/clubs/:clubId/join/:userId',
-  async (req, res) => {
+  requireAuth, async (req, res) => {
     try {
-      const {
-        clubId,
-        userId,
-      } = req.params;
+      const { clubId } = req.params;
+      const userId = res.locals.authenticatedUserId as string;
 
       const clubResult = await query(
         `
@@ -3581,12 +3631,10 @@ app.post(
 
 app.delete(
   '/api/clubs/:clubId/join/:userId',
-  async (req, res) => {
+  requireAuth, async (req, res) => {
     try {
-      const {
-        clubId,
-        userId,
-      } = req.params;
+      const { clubId } = req.params;
+      const userId = res.locals.authenticatedUserId as string;
 
       const creatorResult = await query(
         `
@@ -3834,15 +3882,10 @@ app.get(
 
 app.post(
   '/api/competitions',
-  async (req, res) => {
+  requireAuth, async (req, res) => {
     try {
-      const {
-        userId,
-        name,
-        description,
-        metric,
-        durationDays,
-      } = req.body;
+      const userId = res.locals.authenticatedUserId as string;
+      const { name, description, metric, durationDays } = req.body;
 
       const cleanName =
         typeof name === 'string'
@@ -3854,10 +3897,10 @@ app.post(
           ? description.trim()
           : '';
 
-      if (!userId || !cleanName) {
+      if (!cleanName) {
         return res.status(400).json({
           error:
-            'userId and name are required',
+            'name is required',
         });
       }
 
@@ -4236,12 +4279,10 @@ app.get(
 
 app.post(
   '/api/competitions/:competitionId/join/:userId',
-  async (req, res) => {
+  requireAuth, async (req, res) => {
     try {
-      const {
-        competitionId,
-        userId,
-      } = req.params;
+      const { competitionId } = req.params;
+      const userId = res.locals.authenticatedUserId as string;
 
       const competitionResult =
         await query(
@@ -4328,12 +4369,10 @@ app.post(
 
 app.delete(
   '/api/competitions/:competitionId/join/:userId',
-  async (req, res) => {
+  requireAuth, async (req, res) => {
     try {
-      const {
-        competitionId,
-        userId,
-      } = req.params;
+      const { competitionId } = req.params;
+      const userId = res.locals.authenticatedUserId as string;
 
       const result = await query(
         `
@@ -4673,9 +4712,9 @@ app.post(
 
 app.get(
   '/api/users/:userId/integrations',
-  async (req, res) => {
+  requireAuth, async (req, res) => {
     try {
-      const { userId } = req.params;
+      const userId = res.locals.authenticatedUserId as string;
 
       const result = await query(
         `
@@ -4713,12 +4752,10 @@ app.get(
 
 app.post(
   '/api/users/:userId/integrations/:provider',
-  async (req, res) => {
+  requireAuth, async (req, res) => {
     try {
-      const {
-        userId,
-        provider,
-      } = req.params;
+      const userId = res.locals.authenticatedUserId as string;
+      const { provider } = req.params;
 
       const allowedProviders: DeviceProvider[] = [
         'garmin',
@@ -4814,12 +4851,10 @@ app.post(
 
 app.delete(
   '/api/users/:userId/integrations/:provider',
-  async (req, res) => {
+  requireAuth, async (req, res) => {
     try {
-      const {
-        userId,
-        provider,
-      } = req.params;
+      const userId = res.locals.authenticatedUserId as string;
+      const { provider } = req.params;
 
       const result = await query(
         `
@@ -4868,15 +4903,13 @@ app.delete(
 
 app.post(
   '/api/users/:userId/integrations/:provider/import-demo',
-  async (req, res) => {
+  requireAuth, async (req, res) => {
     const client =
       await pool.connect();
 
     try {
-      const {
-        userId,
-        provider,
-      } = req.params;
+      const userId = res.locals.authenticatedUserId as string;
+      const { provider } = req.params;
 
       if (
         provider !== 'garmin'

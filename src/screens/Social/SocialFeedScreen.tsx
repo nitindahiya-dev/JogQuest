@@ -102,7 +102,7 @@ const API_BASE_URL =
   'http://127.0.0.1:4000';
 
 const SocialFeedScreen = () => {
-  const {user} = useAuth();
+  const {user, token} = useAuth();
   const userId = user?.id;
 
   const navigation =
@@ -234,6 +234,7 @@ const SocialFeedScreen = () => {
             headers: {
               'Content-Type':
                 'application/json',
+              Authorization: `Bearer ${token}`,
             },
 
             body: JSON.stringify({
@@ -288,6 +289,7 @@ const SocialFeedScreen = () => {
           `${API_BASE_URL}/api/posts/${post.id}/like/${userId}`,
           {
             method,
+            headers: {Authorization: `Bearer ${token}`},
           },
         );
 
@@ -412,6 +414,7 @@ const SocialFeedScreen = () => {
             headers: {
               'Content-Type':
                 'application/json',
+              Authorization: `Bearer ${token}`,
             },
 
             body: JSON.stringify({

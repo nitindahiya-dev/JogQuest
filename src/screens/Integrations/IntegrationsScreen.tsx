@@ -78,7 +78,7 @@ const formatDate = (
 
 const IntegrationsScreen =
   () => {
-    const {user} = useAuth();
+    const {user, token} = useAuth();
     const userId = user?.id;
 
     const [
@@ -115,6 +115,7 @@ const IntegrationsScreen =
             const response =
               await fetch(
                 `${API_BASE_URL}/api/users/${userId}/integrations`,
+                {headers: {Authorization: `Bearer ${token}`}},
               );
 
             if (
@@ -187,6 +188,7 @@ const IntegrationsScreen =
                 headers: {
                   'Content-Type':
                     'application/json',
+                  Authorization: `Bearer ${token}`,
                 },
                 body:
                   JSON.stringify({
@@ -247,6 +249,7 @@ const IntegrationsScreen =
               `${API_BASE_URL}/api/users/${userId}/integrations/garmin/import-demo`,
               {
                 method: 'POST',
+                headers: {Authorization: `Bearer ${token}`},
               },
             );
 
@@ -320,6 +323,7 @@ const IntegrationsScreen =
               `${API_BASE_URL}/api/users/${userId}/integrations/${provider}`,
               {
                 method: 'DELETE',
+                headers: {Authorization: `Bearer ${token}`},
               },
             );
 

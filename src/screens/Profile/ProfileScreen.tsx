@@ -74,6 +74,7 @@ const ProfileScreen = () => {
 
   const {
     user,
+    token,
     logout,
   } = useAuth();
 
@@ -145,10 +146,14 @@ const ProfileScreen = () => {
   const loadUnreadCount =
     useCallback(async () => {
       try {
-        const response =
-          await fetch(
-            `${API_BASE_URL}/api/users/${user.id}/notifications`,
-          );
+        const response = await fetch(
+          `${API_BASE_URL}/api/users/${user.id}/notifications`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
+        );
 
         if (!response.ok) {
           return;
@@ -169,7 +174,7 @@ const ProfileScreen = () => {
           err,
         );
       }
-    }, [user.id]);
+    }, [user.id, token]);
 
   useFocusEffect(
     useCallback(() => {

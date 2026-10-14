@@ -46,7 +46,7 @@ const CreateCompetitionScreen = () => {
   const navigation =
     useNavigation<Navigation>();
 
-  const {user} = useAuth();
+  const {user, token} = useAuth();
   const userId = user?.id;
 
   const [
@@ -134,6 +134,7 @@ const CreateCompetitionScreen = () => {
               headers: {
                 'Content-Type':
                   'application/json',
+                Authorization: `Bearer ${token}`,
               },
 
               body: JSON.stringify({

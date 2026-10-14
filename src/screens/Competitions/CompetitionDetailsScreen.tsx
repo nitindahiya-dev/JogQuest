@@ -84,7 +84,7 @@ const CompetitionDetailsScreen = () => {
   const navigation =
     useNavigation<Navigation>();
 
-  const {user} = useAuth();
+  const {user, token} = useAuth();
   const userId = user?.id;
 
   const {
@@ -295,6 +295,7 @@ const CompetitionDetailsScreen = () => {
                 joined
                   ? 'DELETE'
                   : 'POST',
+              headers: {Authorization: `Bearer ${token}`},
             },
           );
 
