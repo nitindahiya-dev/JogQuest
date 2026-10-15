@@ -1372,42 +1372,133 @@ app.post('/api/territories/:id/challenges', requireAuth, async (req, res) => {
   try {
     const { id: territoryId } = req.params;
     const challengerId = res.locals.authenticatedUserId as string;
-    const {
-      activityId,
-      polygon,
-    } = req.body;
+    const { activityId } = req.body;
 
-    if (
-      !activityId ||
-      !Array.isArray(polygon) ||
-      polygon.length < 4
-    ) {
-      return res.status(400).json({
-        error: 'challengerId, activityId and polygon are required',
-      });
-    }
+if (typeof activityId !== 'string' || !activityId.trim()) {
+  return res.status(400).json({
+    error: 'activityId is required',
+  });
+}
 
-    const first = polygon[0];
-    const last = polygon[polygon.length - 1];
+const routeResult = await query<{
+  latitude: number;
+  longitude: number;
+}>(
+  `
+  SELECT
+    ST_Y(ap.location::geometry) AS latitude,
+    ST_X(ap.location::geometry) AS longitude
+  FROM activities a
+  JOIN activity_points ap ON ap.activity_id = a.id
+  WHERE a.id = $1
+    AND a.user_id = $2
+  ORDER BY ap.sequence_number ASC
+  `,
+  [activityId, challengerId],
+);
 
-    if (
-      first.latitude !== last.latitude ||
-      first.longitude !== last.longitude
-    ) {
-      return res.status(400).json({
-        error: 'Polygon must be closed',
-      });
-    }
+if (routeResult.rows.length === 0) {
+  return res.status(404).json({
+    error: 'Activity not found for challenger or has no saved GPS points',
+  });
+}
 
-    const coordinates = polygon.map(
-      (point: Coordinate) =>
-        `${point.longitude} ${point.latitude}`,
-    );
+const route = routeResult.rows.map(point => ({
+  latitude: Number(point.latitude),
+  longitude: Number(point.longitude),
+}));
 
-    const polygonWkt =
-      `SRID=4326;POLYGON((${coordinates.join(',')}))`;
+if (
+  route.length < 10 ||
+  route.some(point =>
+    !Number.isFinite(point.latitude) ||
+    !Number.isFinite(point.longitude) ||
+    point.latitude < -90 ||
+    point.latitude > 90 ||
+    point.longitude < -180 ||
+    point.longitude > 180
+  )
+) {
+  return res.status(400).json({
+    error: 'Activity must contain at least 10 valid GPS points',
+  });
+}
 
-    const result = await query(
+const first = route[0];
+const last = route[route.length - 1];
+
+if (distanceBetweenCoordinates(first, last) > 0.05) {
+  return res.status(400).json({
+    error: 'Route must finish within 50 metres of its starting point',
+  });
+}
+
+const ring = [...route];
+ring[ring.length - 1] = first;
+
+const lineGeoJson = JSON.stringify({
+  type: 'LineString',
+  coordinates: ring.map(point => [
+    point.longitude,
+    point.latitude,
+  ]),
+});
+
+const geometryResult = await query<{
+  polygon_wkt: string;
+  area_m2: number;
+  is_valid: boolean;
+}>(
+  `
+  WITH route_line AS (
+    SELECT ST_SetSRID(ST_GeomFromGeoJSON($1), 4326) AS geom
+  ),
+  noded AS (
+    SELECT ST_Node(geom) AS geom
+    FROM route_line
+  ),
+  polygonized AS (
+    SELECT ST_Polygonize(geom) AS geom
+    FROM noded
+  ),
+  candidates AS (
+    SELECT (ST_Dump(p.geom)).geom AS geom
+    FROM polygonized p
+  )
+  SELECT
+    ST_AsText(geom) AS polygon_wkt,
+    ST_Area(geom::geography) AS area_m2,
+    ST_IsValid(geom) AS is_valid
+  FROM candidates
+  WHERE GeometryType(geom) = 'POLYGON'
+    AND ST_IsValid(geom)
+    AND ST_Area(geom::geography) >= 1000
+  ORDER BY ST_Area(geom::geography) DESC
+  LIMIT 1
+  `,
+  [lineGeoJson],
+);
+
+if (geometryResult.rows.length === 0) {
+  return res.status(400).json({
+    error: 'Route does not enclose a valid territory of at least 1,000 m²',
+  });
+}
+
+const selectedPolygon = geometryResult.rows[0];
+
+if (
+  !selectedPolygon.is_valid ||
+  !Number.isFinite(Number(selectedPolygon.area_m2))
+) {
+  return res.status(400).json({
+    error: 'Could not construct a valid challenge polygon',
+  });
+}
+
+const polygonWkt = `SRID=4326;${selectedPolygon.polygon_wkt}`;
+
+const result = await query(
       `
       WITH target AS (
         SELECT
