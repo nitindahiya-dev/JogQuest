@@ -992,128 +992,181 @@ app.post('/api/territories/check-overlap', async (req, res) => {
 
 app.post('/api/territories/claim', requireAuth, async (req, res) => {
   const client = await pool.connect();
+  let transactionStarted = false;
 
   try {
     const userId = res.locals.authenticatedUserId as string;
-    const {
-      activityId,
-      activityType,
-      polygon,
-    } = req.body;
+    const { activityId } = req.body;
 
-    if (
-      !activityId ||
-      !activityType ||
-      !Array.isArray(polygon) ||
-      polygon.length < 4
-    ) {
-      return res.status(400).json({
-        error: 'userId, activityId, activityType and polygon are required',
-      });
+    if (typeof activityId !== 'string' || !activityId.trim()) {
+      res.status(400).json({ error: 'activityId is required' });
+      return;
     }
-
-    if (
-      !['Run', 'Walk', 'Cycle'].includes(activityType)
-    ) {
-      return res.status(400).json({
-        error: 'Invalid activity type',
-      });
-    }
-
-    const first = polygon[0];
-    const last = polygon[polygon.length - 1];
-
-    if (
-      first.latitude !== last.latitude ||
-      first.longitude !== last.longitude
-    ) {
-      return res.status(400).json({
-        error: 'Polygon must be closed',
-      });
-    }
-
-    const coordinates = polygon.map(
-      (point: Coordinate) =>
-        `${point.longitude} ${point.latitude}`,
-    );
-
-    const polygonWkt =
-      `SRID=4326;POLYGON((${coordinates.join(',')}))`;
 
     await client.query('BEGIN');
+    transactionStarted = true;
 
-    // Make sure the user exists.
-    const userResult = await client.query(
+    // Only use GPS points saved for this authenticated user's activity.
+    const routeResult = await client.query<{
+      activity_type: 'Run' | 'Walk' | 'Cycle';
+      latitude: number;
+      longitude: number;
+    }>(
       `
-      SELECT id
-      FROM users
-      WHERE id = $1
-      `,
-      [userId],
-    );
-
-    if (userResult.rows.length === 0) {
-      await client.query('ROLLBACK');
-
-      return res.status(404).json({
-        error: 'User not found',
-      });
-    }
-
-    // Make sure the activity exists and belongs to the user.
-    const activityResult = await client.query(
-      `
-      SELECT id
-      FROM activities
-      WHERE id = $1
-        AND user_id = $2
+      SELECT
+        a.activity_type,
+        ST_Y(ap.location::geometry) AS latitude,
+        ST_X(ap.location::geometry) AS longitude
+      FROM activities a
+      JOIN activity_points ap ON ap.activity_id = a.id
+      WHERE a.id = $1 AND a.user_id = $2
+      ORDER BY ap.sequence_number ASC
       `,
       [activityId, userId],
     );
 
-    if (activityResult.rows.length === 0) {
+    if (routeResult.rows.length === 0) {
       await client.query('ROLLBACK');
-
-      return res.status(404).json({
-        error: 'Activity not found for this user',
+      transactionStarted = false;
+      res.status(404).json({
+        error: 'Activity not found for this user or has no saved GPS points',
       });
+      return;
     }
 
-    // Calculate the actual polygon area with PostGIS.
-    const areaResult = await client.query<{
+    const route = routeResult.rows.map(point => ({
+      latitude: Number(point.latitude),
+      longitude: Number(point.longitude),
+    }));
+    const activityType = routeResult.rows[0].activity_type;
+
+    if (route.length < 10) {
+      await client.query('ROLLBACK');
+      transactionStarted = false;
+      res.status(400).json({
+        error: 'At least 10 GPS points are required to capture territory',
+      });
+      return;
+    }
+
+    if (route.some(point =>
+      !Number.isFinite(point.latitude) ||
+      !Number.isFinite(point.longitude) ||
+      point.latitude < -90 || point.latitude > 90 ||
+      point.longitude < -180 || point.longitude > 180
+    )) {
+      await client.query('ROLLBACK');
+      transactionStarted = false;
+      res.status(400).json({ error: 'Activity contains invalid GPS coordinates' });
+      return;
+    }
+
+    const first = route[0];
+    const last = route[route.length - 1];
+
+    if (distanceBetweenCoordinates(first, last) > 0.05) {
+      await client.query('ROLLBACK');
+      transactionStarted = false;
+      res.status(400).json({
+        error: 'Route must finish within 50 metres of its starting point',
+      });
+      return;
+    }
+
+    // Close the saved GPS route, then polygonize its noded linework.
+    // This handles self-crossing routes without trusting client geometry.
+    const ring = [...route];
+    ring[ring.length - 1] = first;
+
+    const lineGeoJson = JSON.stringify({
+      type: 'LineString',
+      coordinates: ring.map(point => [point.longitude, point.latitude]),
+    });
+
+    const geometryResult = await client.query<{
+      polygon_wkt: string;
       area_m2: number;
+      is_valid: boolean;
     }>(
       `
+      WITH route_line AS (
+        SELECT ST_SetSRID(ST_GeomFromGeoJSON($1), 4326) AS geom
+      ),
+      noded AS (
+        SELECT ST_Node(geom) AS geom
+        FROM route_line
+      ),
+      polygonized AS (
+        SELECT ST_Polygonize(geom) AS geom
+        FROM noded
+      ),
+      candidates AS (
+        SELECT (ST_Dump(p.geom)).geom AS geom
+        FROM polygonized p
+      )
       SELECT
-        ST_Area(
-          ST_GeogFromText($1)
-        ) AS area_m2
+        ST_AsText(geom) AS polygon_wkt,
+        ST_Area(geom::geography) AS area_m2,
+        ST_IsValid(geom) AS is_valid
+      FROM candidates
+      WHERE GeometryType(geom) = 'POLYGON'
+        AND ST_IsValid(geom)
+        AND ST_Area(geom::geography) >= 1000
+      ORDER BY ST_Area(geom::geography) DESC
+      LIMIT 1
       `,
-      [polygonWkt],
+      [lineGeoJson],
     );
 
-    const areaM2 =
-      Number(areaResult.rows[0].area_m2);
+    if (geometryResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      transactionStarted = false;
+      res.status(400).json({
+        error: 'Route does not enclose a valid territory of at least 1,000 m²',
+      });
+      return;
+    }
 
-    const areaKm2 =
-      areaM2 / 1_000_000;
+    const selectedPolygon = geometryResult.rows[0];
+    const polygonWkt = `SRID=4326;${selectedPolygon.polygon_wkt}`;
+    const areaM2 = Number(selectedPolygon.area_m2);
+    const areaKm2 = areaM2 / 1_000_000;
+
+    if (!selectedPolygon.is_valid || !Number.isFinite(areaM2)) {
+      await client.query('ROLLBACK');
+      transactionStarted = false;
+      res.status(400).json({ error: 'Could not construct a valid territory polygon' });
+      return;
+    }
 
     if (areaM2 < 1000) {
       await client.query('ROLLBACK');
-
-      return res.status(400).json({
+      transactionStarted = false;
+      res.status(400).json({
         error: 'Territory is too small',
         areaM2,
         areaKm2,
       });
+      return;
     }
 
-    // Find existing territories that intersect the claim.
+    // Prevent the same activity from claiming territory more than once.
+    const existingClaim = await client.query(
+      'SELECT id FROM territories WHERE activity_id = $1',
+      [activityId],
+    );
+
+    if (existingClaim.rows.length > 0) {
+      await client.query('ROLLBACK');
+      transactionStarted = false;
+      res.status(409).json({ error: 'This activity has already claimed territory' });
+      return;
+    }
+
     const conflictsResult = await client.query(
       `
       WITH claim AS (
-        SELECT
-          ST_GeogFromText($1) AS polygon
+        SELECT ST_GeogFromText($1) AS polygon
       )
       SELECT
         t.id,
@@ -1122,20 +1175,12 @@ app.post('/api/territories/claim', requireAuth, async (req, res) => {
         u.display_name,
         t.area_m2,
         t.area_km2,
-        ST_Area(
-          ST_Intersection(
-            t.polygon,
-            claim.polygon
-          )
-        ) AS intersection_area_m2
+        ST_Area(ST_Intersection(t.polygon, claim.polygon))
+          AS intersection_area_m2
       FROM territories t
-      JOIN users u
-        ON u.id = t.user_id
+      JOIN users u ON u.id = t.user_id
       CROSS JOIN claim
-      WHERE ST_Intersects(
-        t.polygon,
-        claim.polygon
-      )
+      WHERE ST_Intersects(t.polygon, claim.polygon)
       ORDER BY intersection_area_m2 DESC
       `,
       [polygonWkt],
@@ -1143,94 +1188,58 @@ app.post('/api/territories/claim', requireAuth, async (req, res) => {
 
     if (conflictsResult.rows.length > 0) {
       await client.query('ROLLBACK');
-
-      return res.status(409).json({
+      transactionStarted = false;
+      res.status(409).json({
         error: 'Territory overlaps existing territory',
         areaM2,
         areaKm2,
         conflicts: conflictsResult.rows,
       });
+      return;
     }
 
-    // Create the new territory.
     const territoryResult = await client.query(
       `
       INSERT INTO territories (
-        user_id,
-        activity_id,
-        activity_type,
-        area_m2,
-        area_km2,
-        polygon
+        user_id, activity_id, activity_type, area_m2, area_km2, polygon
       )
-      VALUES (
-        $1,
-        $2,
-        $3,
-        $4,
-        $5,
-        ST_GeogFromText($6)
-      )
+      VALUES ($1, $2, $3, $4, $5, ST_GeogFromText($6))
       RETURNING
-        id,
-        user_id,
-        activity_id,
-        activity_type,
-        area_m2,
-        area_km2,
+        id, user_id, activity_id, activity_type,
+        area_m2, area_km2,
+        ST_AsGeoJSON(polygon::geometry)::json AS polygon,
         captured_at
       `,
-      [
-        userId,
-        activityId,
-        activityType,
-        areaM2,
-        areaKm2,
-        polygonWkt,
-      ],
+      [userId, activityId, activityType, areaM2, areaKm2, polygonWkt],
     );
 
-    const territory =
-      territoryResult.rows[0];
+    const territory = territoryResult.rows[0];
 
     await client.query(
       `
       INSERT INTO territory_history (
-        territory_id,
-        previous_owner_id,
-        new_owner_id,
-        action
+        territory_id, previous_owner_id, new_owner_id, action
       )
-      VALUES (
-        $1,
-        NULL,
-        $2,
-        'CAPTURED'
-      )
+      VALUES ($1, NULL, $2, 'CAPTURED')
       `,
       [territory.id, userId],
     );
 
     await client.query('COMMIT');
+    transactionStarted = false;
 
-    res.status(201).json({
-      ok: true,
-      territory,
-    });
+    res.status(201).json({ ok: true, territory });
   } catch (error) {
-    await client.query('ROLLBACK');
-
+    if (transactionStarted) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
     console.error(error);
-
-    res.status(500).json({
-      error: 'Failed to claim territory',
-    });
+    res.status(500).json({ error: 'Failed to claim territory' });
   } finally {
     client.release();
   }
 });
 
-// --------------------------------------------------
 // GET TERRITORY DETAILS
 // --------------------------------------------------
 
@@ -2565,7 +2574,9 @@ app.post('/api/posts', requireAuth, async (req, res) => {
 // FOLLOW USER
 // --------------------------------------------------
 
-app.post('/api/users/:userId/follow/:targetUserId', requireAuth, async (
+app.post('/api/users/:userId/follow/:targetUserId',
+  requireAuth,
+  async (
   req,
   res,
 ) => {
@@ -2719,7 +2730,8 @@ app.get(
 
 app.post(
   '/api/posts/:postId/like/:userId',
-  requireAuth, async (req, res) => {
+  requireAuth,
+  async (req, res) => {
     try {
       const postId = req.params.postId;
       const userId = res.locals.authenticatedUserId as string;
@@ -2864,7 +2876,8 @@ app.get(
 
 app.post(
   '/api/posts/:postId/comments',
-  requireAuth, async (req, res) => {
+  requireAuth,
+  async (req, res) => {
     try {
       const { postId } = req.params;
 

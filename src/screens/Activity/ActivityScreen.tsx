@@ -71,6 +71,21 @@ type CreateActivityResponse = {
   };
 };
 
+type ClaimTerritoryResponse = {
+  ok: boolean;
+  territory: {
+    id: string;
+    area_m2: number | string;
+    area_km2: number | string;
+    activity_type: ActivityType;
+    captured_at: string;
+    polygon: {
+      type: 'Polygon';
+      coordinates: number[][][];
+    };
+  };
+};
+
 const API_BASE_URL =
   'http://127.0.0.1:4000';
 
@@ -874,7 +889,7 @@ const ActivityScreen = () => {
         );
       }
 
-      return response.json();
+      return (await response.json()) as ClaimTerritoryResponse;
     };
 
   // --------------------------------------------------
@@ -932,29 +947,33 @@ const ActivityScreen = () => {
         activityResponse?.activity?.id
       ) {
         try {
-          await claimTerritoryOnBackend(
-            activityResponse.activity.id,
-            territory,
-          );
+          const claimResponse =
+            await claimTerritoryOnBackend(
+              activityResponse.activity.id,
+              territory,
+            );
 
-          // Only persist locally after the server
-          // confirms the territory claim.
+          // Persist only the territory confirmed by the server.
+          if (!claimResponse?.territory?.polygon?.coordinates?.[0]) {
+            throw new Error(
+              'Territory claim succeeded but the server returned no polygon.',
+            );
+          }
+
+          const savedTerritory = claimResponse.territory;
+          const serverRing =
+            savedTerritory.polygon.coordinates[0];
+
           await saveTerritory({
-            id: `territory-${Date.now()}`,
-
-            areaM2:
-              territory.areaM2,
-
-            areaKm2:
-              territory.areaKm2,
-
-            polygon:
-              territory.polygon,
-
-            activityType,
-
-            capturedAt:
-              new Date().toISOString(),
+            id: savedTerritory.id,
+            areaM2: Number(savedTerritory.area_m2),
+            areaKm2: Number(savedTerritory.area_km2),
+            polygon: serverRing.map(([longitude, latitude]) => ({
+              latitude,
+              longitude,
+            })),
+            activityType: savedTerritory.activity_type,
+            capturedAt: savedTerritory.captured_at,
           });
         } catch (territoryError) {
           console.warn(
@@ -969,22 +988,11 @@ const ActivityScreen = () => {
             captured: false,
           };
 
-          const message =
-            territoryError instanceof
-              Error
-              ? territoryError.message
-              : 'Territory could not be captured.';
-
           Alert.alert(
-            'Activity Saved',
-            message.includes(
-              '409',
-            ) ||
-              message.includes(
-                'Territory overlaps',
-              )
-              ? 'Your activity was saved successfully, but this territory overlaps an existing territory and was not captured.'
-              : 'Your activity was saved successfully, but the territory could not be captured.',
+            'Territory Claim Failed',
+            territoryError instanceof Error
+              ? territoryError.message
+              : String(territoryError),
           );
         }
       }
