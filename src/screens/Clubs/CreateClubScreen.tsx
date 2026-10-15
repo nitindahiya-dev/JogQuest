@@ -1,7 +1,4 @@
-import React, {
-  useState,
-} from 'react';
-
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -13,246 +10,152 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-
+import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '../../auth/AuthContext';
 import {
-  useNavigation,
-} from '@react-navigation/native';
+  COLORS,
+  SPACING,
+  TYPOGRAPHY,
+  SHADOWS,
+} from '../../theme';
 
-import {useAuth} from '../../auth/AuthContext';
-
-import type {
-  NativeStackNavigationProp,
-} from '@react-navigation/native-stack';
-
-import type {
-  RootStackParamList,
-} from '../../navigation/types';
-
-type Navigation =
-  NativeStackNavigationProp<
-    RootStackParamList,
-    'CreateClub'
-  >;
-
-const API_BASE_URL =
-  'http://127.0.0.1:4000';
+const API_BASE_URL = 'http://127.0.0.1:4000';
 
 const CreateClubScreen = () => {
-  const {user, token} = useAuth();
-  const userId = user?.id;
+  const { user, token } = useAuth();
+  const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
 
-  const navigation =
-    useNavigation<Navigation>();
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const [
-    name,
-    setName,
-  ] = useState('');
+  const createClub = async () => {
+    if (!user?.id) return;
 
-  const [
-    description,
-    setDescription,
-  ] = useState('');
+    const cleanName = name.trim();
 
-  const [
-    loading,
-    setLoading,
-  ] = useState(false);
+    if (!cleanName) {
+      setError('Club name is required.');
+      return;
+    }
 
-  const [
-    error,
-    setError,
-  ] = useState<string | null>(null);
+    try {
+      setLoading(true);
+      setError(null);
 
-  const createClub =
-    async () => {
-      if (!userId) {
-        setError('Please log in to create a club.');
-        return;
+      const response = await fetch(`${API_BASE_URL}/api/clubs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          name: cleanName,
+          description: description.trim(),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.id) {
+        throw new Error(data.error ?? 'Failed to create club');
       }
 
-      const cleanName =
-        name.trim();
-
-      const cleanDescription =
-        description.trim();
-
-      if (!cleanName) {
-        setError(
-          'Club name is required.',
-        );
-        return;
-      }
-
-      if (loading) {
-        return;
-      }
-
-      try {
-        setLoading(true);
-        setError(null);
-
-        const response =
-          await fetch(
-            `${API_BASE_URL}/api/clubs`,
-            {
-              method: 'POST',
-
-              headers: {
-                'Content-Type':
-                  'application/json',
-                Authorization: `Bearer ${token}`,
-              },
-
-              body: JSON.stringify({
-                userId,
-
-                name: cleanName,
-
-                description:
-                  cleanDescription,
-              }),
-            },
-          );
-
-        const data =
-          (await response.json()) as {
-            id?: string;
-            error?: string;
-          };
-
-        if (!response.ok) {
-          throw new Error(
-            data.error ??
-              'Failed to create club',
-          );
-        }
-
-        if (!data.id) {
-          throw new Error(
-            'Club was created but no ID was returned.',
-          );
-        }
-
-        navigation.replace(
-          'ClubDetails',
-          {
-            clubId: data.id,
-          },
-        );
-      } catch (error) {
-        setError(
-          error instanceof Error
-            ? error.message
-            : 'Failed to create club',
-        );
-      } finally {
-        setLoading(false);
-      }
-    };
+      navigation.replace('ClubDetails', {
+        clubId: data.id,
+      });
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to create club',
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={
-        Platform.OS === 'ios'
-          ? 'padding'
-          : undefined
-      }>
-
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <ScrollView
-        contentContainerStyle={
-          styles.content
-        }
-        keyboardShouldPersistTaps="handled">
-
-        <Text style={styles.title}>
-          Create a Club
-        </Text>
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: insets.bottom + 40 },
+        ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={styles.title}>CREATE CLUB</Text>
 
         <Text style={styles.subtitle}>
-          Build a community around your
-          running goals.
+          Build a community around your running goals.
         </Text>
 
         {error && (
           <View style={styles.errorBox}>
-            <Text style={styles.errorText}>
-              {error}
-            </Text>
+            <Text style={styles.errorText}>{error}</Text>
           </View>
         )}
 
-        <Text style={styles.label}>
-          CLUB NAME
-        </Text>
+        <View style={styles.inputWrapper}>
+          <Text style={styles.label}>CLUB NAME</Text>
 
-        <TextInput
-          value={name}
-          onChangeText={setName}
-          placeholder="e.g. Delhi Runners"
-          placeholderTextColor="#555"
-          maxLength={100}
-          style={styles.input}
-        />
+          <TextInput
+            value={name}
+            onChangeText={setName}
+            placeholder="e.g. Delhi Runners"
+            placeholderTextColor={COLORS.textMuted}
+            maxLength={100}
+            style={styles.input}
+          />
 
-        <Text style={styles.counter}>
-          {name.length}/100
-        </Text>
+          <Text style={styles.counter}>{name.length}/100</Text>
+        </View>
 
-        <Text
-          style={[
-            styles.label,
-            styles.descriptionLabel,
-          ]}>
-          DESCRIPTION
-        </Text>
+        <View style={styles.inputWrapper}>
+          <Text style={styles.label}>DESCRIPTION</Text>
 
-        <TextInput
-          value={description}
-          onChangeText={setDescription}
-          placeholder="Tell runners what this club is about..."
-          placeholderTextColor="#555"
-          multiline
-          maxLength={500}
-          textAlignVertical="top"
-          style={[
-            styles.input,
-            styles.descriptionInput,
-          ]}
-        />
+          <TextInput
+            value={description}
+            onChangeText={setDescription}
+            placeholder="Tell runners what this club is about..."
+            placeholderTextColor={COLORS.textMuted}
+            multiline
+            maxLength={500}
+            textAlignVertical="top"
+            style={[styles.input, styles.descriptionInput]}
+          />
 
-        <Text style={styles.counter}>
-          {description.length}/500
-        </Text>
+          <Text style={styles.counter}>
+            {description.length}/500
+          </Text>
+        </View>
 
         <TouchableOpacity
           style={[
             styles.createButton,
-            !name.trim() &&
-              styles.createButtonDisabled,
+            (!name.trim() || loading) && styles.disabledButton,
           ]}
           onPress={createClub}
-          disabled={
-            loading ||
-            !name.trim()
-          }>
-
+          disabled={loading || !name.trim()}
+          activeOpacity={0.85}
+        >
           {loading ? (
-            <ActivityIndicator
-              size="small"
-              color="#000"
-            />
+            <ActivityIndicator color={COLORS.background} />
           ) : (
             <Text style={styles.createButtonText}>
               CREATE CLUB
             </Text>
           )}
-
         </TouchableOpacity>
-
       </ScrollView>
-
     </KeyboardAvoidingView>
   );
 };
@@ -260,94 +163,88 @@ const CreateClubScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.background,
   },
 
   content: {
-    padding: 20,
-    paddingBottom: 40,
+    padding: SPACING.xl,
+    paddingTop: 40,
   },
 
   title: {
-    color: '#fff',
-    fontSize: 26,
-    fontWeight: '900',
-    marginTop: 10,
+    ...TYPOGRAPHY.hero,
+    fontSize: 30,
   },
 
   subtitle: {
-    color: '#666',
-    fontSize: 12,
-    lineHeight: 19,
-    marginTop: 6,
-    marginBottom: 26,
+    ...TYPOGRAPHY.body,
+    marginTop: SPACING.sm,
+    marginBottom: SPACING.xl,
   },
 
   errorBox: {
-    backgroundColor: '#151515',
+    backgroundColor: 'rgba(255, 69, 58, 0.1)',
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: COLORS.danger,
     borderRadius: 12,
-    padding: 12,
-    marginBottom: 18,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
   },
 
   errorText: {
-    color: '#aaa',
-    fontSize: 12,
-  },
-
-  label: {
-    color: '#777',
-    fontSize: 9,
-    fontWeight: '900',
-    marginBottom: 7,
-  },
-
-  descriptionLabel: {
-    marginTop: 18,
-  },
-
-  input: {
-    backgroundColor: '#111',
-    borderWidth: 1,
-    borderColor: '#292929',
-    borderRadius: 13,
-    minHeight: 48,
-    color: '#fff',
-    paddingHorizontal: 13,
+    color: COLORS.danger,
     fontSize: 13,
   },
 
+  inputWrapper: {
+    marginBottom: SPACING.md,
+  },
+
+  label: {
+    ...TYPOGRAPHY.label,
+    marginBottom: SPACING.xs,
+  },
+
+  input: {
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 16,
+    minHeight: 56,
+    color: COLORS.text,
+    paddingHorizontal: SPACING.md,
+    fontSize: 16,
+  },
+
   descriptionInput: {
-    minHeight: 130,
-    paddingTop: 13,
+    minHeight: 140,
+    paddingTop: SPACING.md,
   },
 
   counter: {
-    color: '#555',
-    fontSize: 9,
-    marginTop: 5,
+    ...TYPOGRAPHY.caption,
+    fontSize: 11,
+    marginTop: 6,
     textAlign: 'right',
   },
 
   createButton: {
-    marginTop: 28,
-    height: 52,
-    backgroundColor: '#fff',
-    borderRadius: 13,
+    backgroundColor: COLORS.accent,
+    paddingVertical: SPACING.lg,
+    borderRadius: 20,
     alignItems: 'center',
-    justifyContent: 'center',
+    marginTop: SPACING.lg,
+    ...SHADOWS.glow,
   },
 
-  createButtonDisabled: {
-    backgroundColor: '#333',
+  disabledButton: {
+    opacity: 0.5,
   },
 
   createButtonText: {
-    color: '#000',
-    fontSize: 11,
-    fontWeight: '900',
+    ...TYPOGRAPHY.label,
+    color: COLORS.background,
+    fontSize: 13,
   },
 });
 

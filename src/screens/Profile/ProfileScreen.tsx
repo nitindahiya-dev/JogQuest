@@ -16,36 +16,28 @@ import {
   useFocusEffect,
   useNavigation,
 } from '@react-navigation/native';
-
 import type {
   BottomTabNavigationProp,
 } from '@react-navigation/bottom-tabs';
-
 import type {
   CompositeNavigationProp,
 } from '@react-navigation/native';
-
 import type {
   NativeStackNavigationProp,
 } from '@react-navigation/native-stack';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import type {
   MainTabParamList,
   RootStackParamList,
 } from '../../navigation/types';
 
-import { useAuth } from '../../auth/AuthContext';
+import {useAuth} from '../../auth/AuthContext';
 
-type NavigationProp =
-  CompositeNavigationProp<
-    BottomTabNavigationProp<
-      MainTabParamList,
-      'Profile'
-    >,
-    NativeStackNavigationProp<
-      RootStackParamList
-    >
-  >;
+type NavigationProp = CompositeNavigationProp<
+  BottomTabNavigationProp<MainTabParamList, 'Profile'>,
+  NativeStackNavigationProp<RootStackParamList>
+>;
 
 type Profile = {
   id: string;
@@ -65,145 +57,104 @@ type NotificationsResponse = {
   unreadCount: number;
 };
 
-const API_BASE_URL =
-  'http://127.0.0.1:4000';
+const API_BASE_URL = 'http://127.0.0.1:4000';
+
+// ─── Design tokens ───
+const COLORS = {
+  background: '#0A0A0A',
+  surface: 'rgba(18, 18, 18, 0.95)',
+  surfaceLight: '#171717',
+  accent: '#D4FF00',
+  text: '#FFFFFF',
+  textSecondary: '#A0A0A0',
+  textMuted: '#666666',
+  border: 'rgba(255,255,255,0.10)',
+  danger: '#FF4D4D',
+};
+
+const SPACING = {
+  sm: 8,
+  md: 16,
+  lg: 24,
+};
 
 const ProfileScreen = () => {
-  const navigation =
-    useNavigation<NavigationProp>();
-
-  const {
-    user,
-    token,
-    logout,
-  } = useAuth();
+  const navigation = useNavigation<NavigationProp>();
+  const {user, token, logout} = useAuth();
+  const insets = useSafeAreaInsets();
 
   if (!user) {
     return (
       <View style={styles.center}>
-        <Text style={styles.errorText}>
-          Authentication required.
-        </Text>
+        <Text style={styles.errorText}>Authentication required.</Text>
       </View>
     );
   }
 
-  const [
-    profile,
-    setProfile,
-  ] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const [
-    unreadCount,
-    setUnreadCount,
-  ] = useState(0);
+  const loadProfile = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
 
-  const [
-    loading,
-    setLoading,
-  ] = useState(true);
+      const response = await fetch(
+        `${API_BASE_URL}/api/users/${user.id}/profile`,
+      );
 
-  const [
-    error,
-    setError,
-  ] = useState<string | null>(null);
-
-  const loadProfile =
-    useCallback(async () => {
-      try {
-        setLoading(true);
-        setError(null);
-
-        const response =
-          await fetch(
-            `${API_BASE_URL}/api/users/${user.id}/profile`,
-          );
-
-        if (!response.ok) {
-          throw new Error(
-            `Server returned ${response.status}`,
-          );
-        }
-
-        const data =
-          (await response.json()) as Profile;
-
-        setProfile(data);
-      } catch (err) {
-        console.error(
-          'Failed to load profile:',
-          err,
-        );
-
-        setError(
-          'Could not load profile data.',
-        );
-      } finally {
-        setLoading(false);
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}`);
       }
-    }, [user.id]);
 
-  const loadUnreadCount =
-    useCallback(async () => {
-      try {
-        const response = await fetch(
-          `${API_BASE_URL}/api/users/${user.id}/notifications`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
+      const data = (await response.json()) as Profile;
+      setProfile(data);
+    } catch (err) {
+      console.error('Failed to load profile:', err);
+      setError('Could not load profile data.');
+    } finally {
+      setLoading(false);
+    }
+  }, [user.id]);
+
+  const loadUnreadCount = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/users/${user.id}/notifications`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
           },
-        );
+        },
+      );
 
-        if (!response.ok) {
-          return;
-        }
+      if (!response.ok) return;
 
-        const data =
-          (await response.json()) as
-          NotificationsResponse;
-
-        setUnreadCount(
-          Number(
-            data.unreadCount ?? 0,
-          ),
-        );
-      } catch (err) {
-        console.error(
-          'Failed to load notification count:',
-          err,
-        );
-      }
-    }, [user.id, token]);
+      const data = (await response.json()) as NotificationsResponse;
+      setUnreadCount(Number(data.unreadCount ?? 0));
+    } catch (err) {
+      console.error('Failed to load notification count:', err);
+    }
+  }, [user.id, token]);
 
   useFocusEffect(
     useCallback(() => {
       loadProfile();
       loadUnreadCount();
-    }, [
-      loadProfile,
-      loadUnreadCount,
-    ]),
+    }, [loadProfile, loadUnreadCount]),
   );
 
-  const openNotifications =
-    () => {
-      navigation
-        .getParent()
-        ?.navigate('Notifications');
-    };
+  const openNotifications = () => {
+    navigation.getParent()?.navigate('Notifications');
+  };
 
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator
-          size="large"
-          color="#fff"
-        />
-
-        <Text style={styles.loadingText}>
-          Loading profile...
-        </Text>
+        <ActivityIndicator size="large" color={COLORS.accent} />
+        <Text style={styles.loadingText}>Loading profile...</Text>
       </View>
     );
   }
@@ -211,23 +162,17 @@ const ProfileScreen = () => {
   if (error || !profile) {
     return (
       <View style={styles.center}>
-
         <Text style={styles.errorText}>
-          {error ??
-            'Profile unavailable.'}
+          {error ?? 'Profile unavailable.'}
         </Text>
-
         <TouchableOpacity
           style={styles.retryButton}
           onPress={() => {
             loadProfile();
             loadUnreadCount();
           }}>
-          <Text style={styles.retryText}>
-            RETRY
-          </Text>
+          <Text style={styles.retryText}>RETRY</Text>
         </TouchableOpacity>
-
       </View>
     );
   }
@@ -235,295 +180,150 @@ const ProfileScreen = () => {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={
-        styles.contentContainer
-      }
+      contentContainerStyle={[
+        styles.contentContainer,
+        {
+          paddingTop: insets.top + 12,
+          paddingBottom: insets.bottom + 120,
+        },
+      ]}
       showsVerticalScrollIndicator={false}>
-
-      {/* =========================================
-          PROFILE TOP BAR
-          ========================================= */}
-
+      {/* Header */}
       <View style={styles.topBar}>
-
-        <Text style={styles.screenTitle}>
-          Profile
-        </Text>
+        <Text style={styles.screenTitle}>PROFILE</Text>
 
         <TouchableOpacity
           style={styles.notificationButton}
           activeOpacity={0.8}
-          onPress={
-            openNotifications
-          }>
-
-          <View
-            style={
-              styles.notificationCircle
-            }>
-
-            <Text
-              style={
-                styles.notificationIcon
-              }>
-              !
-            </Text>
-
+          onPress={openNotifications}>
+          <View style={styles.notificationCircle}>
+            <Text style={styles.notificationIcon}>!</Text>
             {unreadCount > 0 && (
-              <View
-                style={styles.notificationBadge}>
-
-                <Text
-                  style={
-                    styles.notificationBadgeText
-                  }>
-                  {unreadCount > 99
-                    ? '99+'
-                    : unreadCount}
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationBadgeText}>
+                  {unreadCount > 99 ? '99+' : unreadCount}
                 </Text>
-
               </View>
             )}
-
           </View>
-
         </TouchableOpacity>
-
       </View>
 
-      {/* =========================================
-          PROFILE HEADER
-          ========================================= */}
-
-      <View
-        style={
-          styles.profileHeader
-        }>
-
+      {/* Hero */}
+      <View style={styles.profileHeader}>
         <View style={styles.avatar}>
-
           <Text style={styles.avatarText}>
-            {profile.display_name
-              .charAt(0)
-              .toUpperCase()}
+            {profile.display_name.charAt(0).toUpperCase()}
           </Text>
-
         </View>
 
-        <Text style={styles.name}>
-          {profile.display_name}
-        </Text>
-
-        <Text style={styles.username}>
-          @{profile.username}
-        </Text>
+        <Text style={styles.name}>{profile.display_name}</Text>
+        <Text style={styles.username}>@{profile.username}</Text>
 
         <View style={styles.levelBadge}>
-
-          <Text style={styles.levelText}>
-            LEVEL {profile.level}
-          </Text>
-
+          <Text style={styles.levelText}>LEVEL {profile.level}</Text>
         </View>
-
       </View>
 
-      {/* =========================================
-          MAIN STATS
-          ========================================= */}
-
+      {/* Main Stats */}
       <View style={styles.statsCard}>
-
         <View style={styles.stat}>
-
           <Text style={styles.value}>
-            {Number(
-              profile.territory_km2,
-            ).toFixed(3)}
+            {Number(profile.territory_km2).toFixed(3)}
           </Text>
-
-          <Text style={styles.label}>
-            TERRITORY KM²
-          </Text>
-
+          <Text style={styles.label}>TERRITORY KM²</Text>
         </View>
 
         <View style={styles.divider} />
 
         <View style={styles.stat}>
-
-          <Text style={styles.value}>
-            {profile.activities_count}
-          </Text>
-
-          <Text style={styles.label}>
-            ACTIVITIES
-          </Text>
-
+          <Text style={styles.value}>{profile.activities_count}</Text>
+          <Text style={styles.label}>ACTIVITIES</Text>
         </View>
 
         <View style={styles.divider} />
 
         <View style={styles.stat}>
-
-          <Text style={styles.value}>
-            {profile.rank}
-          </Text>
-
-          <Text style={styles.label}>
-            RANK
-          </Text>
-
+          <Text style={styles.value}>#{profile.rank}</Text>
+          <Text style={styles.label}>RANK</Text>
         </View>
-
       </View>
 
-      {/* =========================================
-          QUEST STATS
-          ========================================= */}
-
+      {/* Quest Stats */}
       <View style={styles.section}>
+        <Text style={styles.sectionTitle}>QUEST STATS</Text>
 
-        <Text style={styles.sectionTitle}>
-          Quest Stats
-        </Text>
+        <View style={styles.listCard}>
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>Total Distance</Text>
+            <Text style={styles.rowValue}>
+              {Number(profile.total_distance_km).toFixed(2)} km
+            </Text>
+          </View>
 
-        <View style={styles.row}>
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>Territories Captured</Text>
+            <Text style={styles.rowValue}>
+              {profile.territories_captured}
+            </Text>
+          </View>
 
-          <Text style={styles.rowLabel}>
-            Distance
-          </Text>
-
-          <Text style={styles.rowValue}>
-            {Number(
-              profile.total_distance_km,
-            ).toFixed(2)}{' '}
-            km
-          </Text>
-
+          <View style={[styles.row, styles.rowLast]}>
+            <Text style={styles.rowLabel}>Territories Defended</Text>
+            <Text style={styles.rowValue}>
+              {profile.territories_defended}
+            </Text>
+          </View>
         </View>
-
-        <View style={styles.row}>
-
-          <Text style={styles.rowLabel}>
-            Territories Captured
-          </Text>
-
-          <Text style={styles.rowValue}>
-            {profile.territories_captured}
-          </Text>
-
-        </View>
-
-        <View style={styles.row}>
-
-          <Text style={styles.rowLabel}>
-            Territories Defended
-          </Text>
-
-          <Text style={styles.rowValue}>
-            {profile.territories_defended}
-          </Text>
-
-        </View>
-
       </View>
 
-      {/* =========================================
-          ACTIONS
-          ========================================= */}
-
+      {/* Actions */}
       <View style={styles.actions}>
-
         <TouchableOpacity
-          style={styles.activityButton}
+          style={styles.primaryButton}
+          activeOpacity={0.85}
           onPress={() =>
-            navigation
-              .getParent()
-              ?.navigate(
-                'ActivityHistory',
-              )
+            navigation.getParent()?.navigate('ActivityHistory')
           }>
-
-          <Text
-            style={
-              styles.activityButtonText
-            }>
+          <Text style={styles.primaryButtonText}>
             VIEW ACTIVITY HISTORY
           </Text>
-
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[
-            styles.activityButton,
-            styles.secondaryButton,
-          ]}
-          onPress={() =>
-            navigation
-              .getParent()
-              ?.navigate('Clubs')
-          }>
-
-          <Text
-            style={
-              styles.activityButtonText
-            }>
-            EXPLORE CLUBS
-          </Text>
-
+          style={styles.secondaryButton}
+          activeOpacity={0.85}
+          onPress={() => navigation.getParent()?.navigate('Clubs')}>
+          <Text style={styles.secondaryButtonText}>EXPLORE CLUBS</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[
-            styles.activityButton,
-            styles.secondaryButton,
-          ]}
+          style={styles.secondaryButton}
+          activeOpacity={0.85}
           onPress={() =>
-            navigation
-              .getParent()
-              ?.navigate(
-                'Competitions',
-              )
+            navigation.getParent()?.navigate('Competitions')
           }>
-
-          <Text
-            style={
-              styles.activityButtonText
-            }>
+          <Text style={styles.secondaryButtonText}>
             EXPLORE COMPETITIONS
           </Text>
-
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[
-            styles.activityButton,
-            styles.secondaryButton
-          ]}
-          onPress={() =>
-            navigation.navigate(
-              'Integrations',
-            )
-          }>
-          <Text
-            style={
-              styles.activityButtonText
-            }>
+          style={styles.secondaryButton}
+          activeOpacity={0.85}
+          onPress={() => navigation.navigate('Integrations')}>
+          <Text style={styles.secondaryButtonText}>
             MANAGE INTEGRATIONS
           </Text>
         </TouchableOpacity>
+
         <TouchableOpacity
           style={styles.logoutButton}
+          activeOpacity={0.85}
           onPress={logout}>
-
-          <Text style={styles.logoutButtonText}>
-            SIGN OUT
-          </Text>
-
+          <Text style={styles.logoutButtonText}>SIGN OUT</Text>
         </TouchableOpacity>
       </View>
-
     </ScrollView>
   );
 };
@@ -533,84 +333,72 @@ export default ProfileScreen;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.background,
   },
-
   contentContainer: {
-    padding: 20,
-    paddingBottom: 110,
+    paddingHorizontal: SPACING.md,
   },
-
   center: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.background,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
   },
-
   loadingText: {
-    color: '#888',
+    color: COLORS.textMuted,
     marginTop: 12,
+    fontSize: 14,
   },
-
   errorText: {
-    color: '#aaa',
+    color: COLORS.textSecondary,
     textAlign: 'center',
+    fontSize: 15,
   },
-
   retryButton: {
     marginTop: 18,
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.accent,
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 14,
   },
-
   retryText: {
-    color: '#000',
+    color: COLORS.background,
     fontWeight: '900',
+    fontSize: 13,
   },
-
-  /* =========================================
-     TOP BAR
-     ========================================= */
 
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 4,
+    marginBottom: 8,
   },
-
   screenTitle: {
-    color: '#fff',
-    fontSize: 20,
+    color: COLORS.text,
+    fontSize: 28,
     fontWeight: '900',
+    letterSpacing: -0.5,
   },
-
   notificationButton: {
     padding: 2,
   },
-
   notificationCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#151515',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.surfaceLight,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: COLORS.border,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
   },
-
   notificationIcon: {
-    color: '#fff',
+    color: COLORS.text,
     fontSize: 16,
     fontWeight: '900',
   },
-
   notificationBadge: {
     position: 'absolute',
     right: -4,
@@ -618,181 +406,173 @@ const styles = StyleSheet.create({
     minWidth: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.accent,
     borderWidth: 2,
-    borderColor: '#000',
+    borderColor: COLORS.background,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 3,
   },
-
   notificationBadgeText: {
-    color: '#000',
-    fontSize: 8,
+    color: COLORS.background,
+    fontSize: 9,
     fontWeight: '900',
   },
-
-  /* =========================================
-     PROFILE
-     ========================================= */
 
   profileHeader: {
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: 12,
+    marginBottom: 8,
   },
-
   avatar: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: '#fff',
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: COLORS.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   avatarText: {
-    color: '#000',
-    fontSize: 34,
+    color: COLORS.background,
+    fontSize: 38,
     fontWeight: '900',
   },
-
   name: {
-    color: '#fff',
+    color: COLORS.text,
     fontSize: 26,
     fontWeight: '800',
-    marginTop: 12,
+    marginTop: 14,
   },
-
   username: {
-    color: '#666',
+    color: COLORS.textMuted,
+    fontSize: 14,
     marginTop: 3,
   },
-
   levelBadge: {
-    marginTop: 10,
-    paddingHorizontal: 12,
+    marginTop: 12,
+    paddingHorizontal: 14,
     paddingVertical: 6,
-    backgroundColor: '#111',
-    borderRadius: 10,
+    backgroundColor: COLORS.surfaceLight,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
-
   levelText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '800',
+    color: COLORS.accent,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.5,
   },
-
-  /* =========================================
-     STATS
-     ========================================= */
 
   statsCard: {
     flexDirection: 'row',
-    backgroundColor: '#111',
-    borderRadius: 20,
+    backgroundColor: COLORS.surface,
+    borderRadius: 22,
     marginTop: 22,
     paddingVertical: 22,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
-
   stat: {
     flex: 1,
     alignItems: 'center',
   },
-
   value: {
-    color: '#fff',
-    fontSize: 21,
+    color: COLORS.accent,
+    fontSize: 20,
     fontWeight: '800',
   },
-
   label: {
-    color: '#666',
+    color: COLORS.textMuted,
     fontSize: 9,
     fontWeight: '800',
     marginTop: 5,
     textAlign: 'center',
+    letterSpacing: 0.3,
   },
-
   divider: {
     width: 1,
-    backgroundColor: '#292929',
+    backgroundColor: COLORS.border,
   },
-
-  /* =========================================
-     QUEST STATS
-     ========================================= */
 
   section: {
-    marginTop: 25,
+    marginTop: 28,
   },
-
   sectionTitle: {
-    color: '#fff',
-    fontSize: 19,
-    fontWeight: '800',
+    color: COLORS.accent,
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 1,
     marginBottom: 12,
   },
-
+  listCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 13,
+    paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#151515',
+    borderBottomColor: COLORS.border,
   },
-
+  rowLast: {
+    borderBottomWidth: 0,
+  },
   rowLabel: {
-    color: '#777',
+    color: COLORS.textSecondary,
+    fontSize: 15,
   },
-
   rowValue: {
-    color: '#fff',
-    fontWeight: '700',
+    color: COLORS.accent,
+    fontSize: 15,
+    fontWeight: '800',
   },
-
-  /* =========================================
-     ACTIONS
-     ========================================= */
 
   actions: {
-    marginTop: 'auto',
-  },
-
-  activityButton: {
-    backgroundColor: '#fff',
-    minHeight: 52,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  actionStack: {
     marginTop: 28,
-    gap: 12,
-    paddingBottom: 10,
+    gap: 10,
   },
-
-  secondaryButton: {
-    marginTop: 10,
-  },
-
-  activityButtonText: {
-    color: '#000',
-    fontWeight: '900',
-  },
-
-  logoutButton: {
-    minHeight: 52,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#333',
+  primaryButton: {
+    backgroundColor: COLORS.accent,
+    minHeight: 54,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 10,
   },
-
-  logoutButtonText: {
-    color: '#fff',
+  primaryButtonText: {
+    color: COLORS.background,
     fontWeight: '900',
+    fontSize: 13,
+    letterSpacing: 0.4,
+  },
+  secondaryButton: {
+    backgroundColor: COLORS.surface,
+    minHeight: 54,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  secondaryButtonText: {
+    color: COLORS.text,
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  logoutButton: {
+    minHeight: 54,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 6,
+  },
+  logoutButtonText: {
+    color: COLORS.danger,
+    fontWeight: '900',
+    fontSize: 13,
   },
 });

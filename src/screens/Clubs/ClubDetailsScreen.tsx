@@ -20,7 +20,8 @@ import {
   type RouteProp,
 } from '@react-navigation/native';
 
-import {useAuth} from '../../auth/AuthContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '../../auth/AuthContext';
 
 import type {
   NativeStackNavigationProp,
@@ -30,17 +31,11 @@ import type {
   RootStackParamList,
 } from '../../navigation/types';
 
-type Route =
-  RouteProp<
-    RootStackParamList,
-    'ClubDetails'
-  >;
-
-type Navigation =
-  NativeStackNavigationProp<
-    RootStackParamList,
-    'ClubDetails'
-  >;
+type Route = RouteProp<RootStackParamList, 'ClubDetails'>;
+type Navigation = NativeStackNavigationProp<
+  RootStackParamList,
+  'ClubDetails'
+>;
 
 type Club = {
   id: string;
@@ -62,152 +57,115 @@ type Member = {
   joined_at: string;
 };
 
-const API_BASE_URL =
-  'http://127.0.0.1:4000';
+const API_BASE_URL = 'http://127.0.0.1:4000';
+
+// ─── Design tokens ───
+const COLORS = {
+  background: '#0A0A0A',
+  surface: 'rgba(18, 18, 18, 0.95)',
+  surfaceLight: '#171717',
+  accent: '#D4FF00',
+  text: '#FFFFFF',
+  textSecondary: '#A0A0A0',
+  textMuted: '#666666',
+  border: 'rgba(255,255,255,0.10)',
+  danger: '#FF4D4D',
+};
+
+const SPACING = {
+  sm: 8,
+  md: 16,
+  lg: 24,
+};
 
 const ClubDetailsScreen = () => {
-  const {user, token} = useAuth();
+  const { user, token } = useAuth();
   const userId = user?.id;
 
-  const route =
-    useRoute<Route>();
+  const route = useRoute<Route>();
+  const navigation = useNavigation<Navigation>();
+  const insets = useSafeAreaInsets();
 
-  const navigation =
-    useNavigation<Navigation>();
+  const { clubId } = route.params;
 
-  const {
-    clubId,
-  } = route.params;
+  const [club, setClub] = useState<Club | null>(null);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [joined, setJoined] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const [
-    club,
-    setClub,
-  ] = useState<Club | null>(null);
+  const loadClub = useCallback(async () => {
+    if (!userId) {
+      setError('Please log in to view membership.');
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
 
-  const [
-    members,
-    setMembers,
-  ] = useState<Member[]>([]);
+    try {
+      setError(null);
 
-  const [
-    joined,
-    setJoined,
-  ] = useState(false);
+      const [
+        clubResponse,
+        membersResponse,
+        membershipResponse,
+      ] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/clubs/${clubId}`),
+        fetch(`${API_BASE_URL}/api/clubs/${clubId}/members`),
+        fetch(
+          `${API_BASE_URL}/api/clubs/${clubId}/membership/${userId}`,
+        ),
+      ]);
 
-  const [
-    loading,
-    setLoading,
-  ] = useState(true);
+      const clubData = (await clubResponse.json()) as
+        | Club
+        | { error?: string };
 
-  const [
-    actionLoading,
-    setActionLoading,
-  ] = useState(false);
+      const membersData = (await membersResponse.json()) as
+        | Member[]
+        | { error?: string };
 
-  const [
-    refreshing,
-    setRefreshing,
-  ] = useState(false);
+      const membershipData = (await membershipResponse.json()) as {
+        joined?: boolean;
+        error?: string;
+      };
 
-  const [
-    error,
-    setError,
-  ] = useState<string | null>(null);
-
-  const loadClub =
-    useCallback(async () => {
-      if (!userId) {
-        setError('Please log in to view membership.');
-        setLoading(false);
-        setRefreshing(false);
-        return;
-      }
-
-      try {
-        setError(null);
-
-        const [
-          clubResponse,
-          membersResponse,
-          membershipResponse,
-        ] = await Promise.all([
-          fetch(
-            `${API_BASE_URL}/api/clubs/${clubId}`,
-          ),
-
-          fetch(
-            `${API_BASE_URL}/api/clubs/${clubId}/members`,
-          ),
-
-          fetch(
-            `${API_BASE_URL}/api/clubs/${clubId}/membership/${userId}`,
-          ),
-        ]);
-
-        const clubData =
-          (await clubResponse.json()) as
-            | Club
-            | { error?: string };
-
-        const membersData =
-          (await membersResponse.json()) as
-            | Member[]
-            | { error?: string };
-
-        const membershipData =
-          (await membershipResponse.json()) as {
-            joined?: boolean;
-            error?: string;
-          };
-
-        if (!clubResponse.ok) {
-          throw new Error(
-            'error' in clubData &&
-            clubData.error
-              ? clubData.error
-              : 'Failed to load club',
-          );
-        }
-
-        if (!membersResponse.ok) {
-          throw new Error(
-            'error' in membersData &&
-            membersData.error
-              ? membersData.error
-              : 'Failed to load members',
-          );
-        }
-
-        if (!membershipResponse.ok) {
-          throw new Error(
-            membershipData.error ??
-              'Failed to load membership',
-          );
-        }
-
-        setClub(
-          clubData as Club,
-        );
-
-        setMembers(
-          membersData as Member[],
-        );
-
-        setJoined(
-          membershipData.joined ??
-            false,
-        );
-      } catch (error) {
-        setError(
-          error instanceof Error
-            ? error.message
+      if (!clubResponse.ok) {
+        throw new Error(
+          'error' in clubData && clubData.error
+            ? clubData.error
             : 'Failed to load club',
         );
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
       }
-    }, [clubId, userId]);
+
+      if (!membersResponse.ok) {
+        throw new Error(
+          'error' in membersData && membersData.error
+            ? membersData.error
+            : 'Failed to load members',
+        );
+      }
+
+      if (!membershipResponse.ok) {
+        throw new Error(
+          membershipData.error ?? 'Failed to load membership',
+        );
+      }
+
+      setClub(clubData as Club);
+      setMembers(membersData as Member[]);
+      setJoined(membershipData.joined ?? false);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to load club',
+      );
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [clubId, userId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -215,528 +173,452 @@ const ClubDetailsScreen = () => {
     }, [loadClub]),
   );
 
-  const toggleMembership =
-    async () => {
-      if (
-        !userId ||
-        !club ||
-        actionLoading
-      ) {
-        return;
-      }
+  const toggleMembership = async () => {
+    if (!userId || !club || actionLoading) return;
 
-      const isOwner =
-        club.creator_id ===
-        userId;
+    const isOwner = club.creator_id === userId;
+    if (joined && isOwner) return;
 
-      if (
-        joined &&
-        isOwner
-      ) {
-        return;
-      }
+    try {
+      setActionLoading(true);
+      setError(null);
 
-      try {
-        setActionLoading(true);
-        setError(null);
+      const response = await fetch(
+        `${API_BASE_URL}/api/clubs/${club.id}/join/${userId}`,
+        {
+          method: joined ? 'DELETE' : 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
 
-        const response =
-          await fetch(
-            `${API_BASE_URL}/api/clubs/${club.id}/join/${userId}`,
-            {
-              method:
-                joined
-                  ? 'DELETE'
-                  : 'POST',
-              headers: {Authorization: `Bearer ${token}`},
-            },
-          );
+      const data = (await response.json()) as {
+        joined?: boolean;
+        error?: string;
+      };
 
-        const data =
-          (await response.json()) as {
-            joined?: boolean;
-            error?: string;
-          };
-
-        if (!response.ok) {
-          throw new Error(
-            data.error ??
-              'Failed to update membership',
-          );
-        }
-
-        await loadClub();
-      } catch (error) {
-        setError(
-          error instanceof Error
-            ? error.message
-            : 'Failed to update membership',
+      if (!response.ok) {
+        throw new Error(
+          data.error ?? 'Failed to update membership',
         );
-      } finally {
-        setActionLoading(false);
       }
-    };
+
+      await loadClub();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to update membership',
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator
-          size="large"
-          color="#fff"
-        />
+      <View
+        style={[
+          styles.center,
+          { paddingBottom: insets.bottom + 40 },
+        ]}
+      >
+        <ActivityIndicator size="large" color={COLORS.accent} />
       </View>
     );
   }
 
   if (!club) {
     return (
-      <View style={styles.center}>
+      <View
+        style={[
+          styles.center,
+          { paddingBottom: insets.bottom + 40 },
+        ]}
+      >
         <Text style={styles.errorText}>
-          {error ??
-            'Club unavailable.'}
+          {error ?? 'Club unavailable.'}
         </Text>
       </View>
     );
   }
 
-  const isOwner =
-    !!userId &&
-    club.creator_id === userId;
+  const isOwner = !!userId && club.creator_id === userId;
 
   return (
     <View style={styles.container}>
-
       <FlatList
         data={members}
         keyExtractor={item => item.id}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            tintColor="#fff"
+            tintColor={COLORS.accent}
             onRefresh={() => {
               setRefreshing(true);
               loadClub();
             }}
           />
         }
-        contentContainerStyle={
-          styles.list
-        }
-
+        contentContainerStyle={[
+          styles.list,
+          { paddingBottom: insets.bottom + 40 },
+        ]}
         ListHeaderComponent={
           <View>
-
+            {/* Hero */}
             <View style={styles.hero}>
-
-              <View style={styles.clubIcon}>
-                <Text style={styles.clubIconText}>
-                  C
+              <View style={styles.heroIcon}>
+                <Text style={styles.heroIconText}>
+                  {club.name.charAt(0).toUpperCase()}
                 </Text>
               </View>
 
-              <Text style={styles.name}>
-                {club.name}
+              <Text style={styles.heroName}>{club.name}</Text>
+
+              <Text style={styles.heroDescription}>
+                {club.description || 'No description'}
               </Text>
 
-              <Text style={styles.description}>
-                {club.description ||
-                  'No description'}
-              </Text>
-
-              <Text style={styles.creator}>
+              <Text style={styles.heroCreator}>
                 Created by{' '}
-                <Text style={styles.creatorStrong}>
+                <Text style={{ color: COLORS.accent }}>
                   @{club.creator_username}
                 </Text>
               </Text>
-
             </View>
 
             {error && (
               <View style={styles.errorBox}>
-                <Text style={styles.errorText}>
-                  {error}
-                </Text>
+                <Text style={styles.errorText}>{error}</Text>
               </View>
             )}
 
+            {/* Join / Leave */}
             {!isOwner && (
               <TouchableOpacity
-                style={
-                  joined
-                    ? styles.leaveButton
-                    : styles.joinButton
-                }
-                onPress={
-                  toggleMembership
-                }
-                disabled={actionLoading}>
-
+                style={[
+                  styles.actionBtn,
+                  joined && styles.actionBtnLeave,
+                ]}
+                onPress={toggleMembership}
+                disabled={actionLoading}
+                activeOpacity={0.85}
+              >
                 {actionLoading ? (
                   <ActivityIndicator
-                    size="small"
-                    color={
-                      joined
-                        ? '#fff'
-                        : '#000'
-                    }
+                    color={joined ? COLORS.text : COLORS.background}
                   />
                 ) : (
                   <Text
-                    style={
-                      joined
-                        ? styles.leaveText
-                        : styles.joinText
-                    }>
-                    {joined
-                      ? 'LEAVE CLUB'
-                      : 'JOIN CLUB'}
+                    style={[
+                      styles.actionBtnText,
+                      joined && styles.actionBtnTextLeave,
+                    ]}
+                  >
+                    {joined ? 'LEAVE CLUB' : 'JOIN CLUB'}
                   </Text>
                 )}
-
               </TouchableOpacity>
             )}
 
             {isOwner && (
-              <View style={styles.ownerBadge}>
-                <Text style={styles.ownerText}>
-                  CLUB OWNER
+              <View style={styles.ownerBanner}>
+                <Text style={styles.ownerBannerText}>
+                  ⚡ YOU ARE THE OWNER
                 </Text>
               </View>
             )}
 
-            <View style={styles.statsCard}>
-
-              <View style={styles.stat}>
+            {/* Stats */}
+            <View style={styles.statsRow}>
+              <View style={styles.statBox}>
                 <Text style={styles.statValue}>
                   {club.members_count}
                 </Text>
-
-                <Text style={styles.statLabel}>
-                  MEMBERS
-                </Text>
+                <Text style={styles.statLabel}>MEMBERS</Text>
               </View>
 
-              <View style={styles.divider} />
+              <View style={styles.statDivider} />
 
-              <View style={styles.stat}>
+              <View style={styles.statBox}>
                 <Text style={styles.statValue}>
-                  {club.is_public
-                    ? 'PUBLIC'
-                    : 'PRIVATE'}
+                  {club.is_public ? 'PUBLIC' : 'PRIVATE'}
                 </Text>
-
-                <Text style={styles.statLabel}>
-                  VISIBILITY
-                </Text>
+                <Text style={styles.statLabel}>VISIBILITY</Text>
               </View>
-
             </View>
 
-            <Text style={styles.membersTitle}>
-              Members
-            </Text>
-
+            <Text style={styles.sectionTitle}>MEMBERS</Text>
           </View>
         }
-
         renderItem={({ item }) => (
           <TouchableOpacity
             style={styles.memberCard}
-            activeOpacity={0.8}
+            activeOpacity={0.85}
             onPress={() =>
-              navigation.navigate(
-                'PublicProfile',
-                {
-                  userId: item.id,
-                },
-              )
-            }>
-
+              navigation.navigate('PublicProfile', {
+                userId: item.id,
+              })
+            }
+          >
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>
-                {item.display_name
-                  .charAt(0)
-                  .toUpperCase()}
+                {item.display_name.charAt(0).toUpperCase()}
               </Text>
             </View>
 
-            <View style={styles.memberInfo}>
-
+            <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={styles.memberName}>
                 {item.display_name}
               </Text>
-
               <Text style={styles.memberUsername}>
                 @{item.username}
               </Text>
-
             </View>
 
-            {item.id ===
-              club.creator_id && (
-              <View
-                style={
-                  styles.memberOwnerBadge
-                }>
-                <Text
-                  style={
-                    styles.memberOwnerText
-                  }>
-                  OWNER
-                </Text>
+            {item.id === club.creator_id && (
+              <View style={styles.ownerBadge}>
+                <Text style={styles.ownerBadgeText}>OWNER</Text>
               </View>
             )}
-
           </TouchableOpacity>
         )}
-
         ListEmptyComponent={
-          <Text style={styles.emptyMembers}>
-            No members yet.
-          </Text>
+          <Text style={styles.emptyText}>No members yet.</Text>
         }
       />
-
     </View>
   );
 };
 
+export default ClubDetailsScreen;
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.background,
   },
 
   center: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.background,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
   },
 
   list: {
-    padding: 14,
-    paddingBottom: 35,
+    padding: SPACING.md,
   },
 
+  // Hero
   hero: {
-    backgroundColor: '#111',
-    borderWidth: 1,
-    borderColor: '#222',
-    borderRadius: 18,
-    padding: 20,
+    backgroundColor: COLORS.surface,
+    borderRadius: 24,
+    padding: 22,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginTop: 8,
   },
 
-  clubIcon: {
-    width: 68,
-    height: 68,
-    borderRadius: 20,
-    backgroundColor: '#fff',
+  heroIcon: {
+    width: 84,
+    height: 84,
+    borderRadius: 22,
+    backgroundColor: COLORS.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  clubIconText: {
-    color: '#000',
-    fontSize: 26,
+  heroIconText: {
+    color: COLORS.background,
+    fontSize: 36,
     fontWeight: '900',
   },
 
-  name: {
-    color: '#fff',
+  heroName: {
+    color: COLORS.text,
     fontSize: 24,
     fontWeight: '900',
     marginTop: 14,
     textAlign: 'center',
   },
 
-  description: {
-    color: '#888',
-    fontSize: 13,
+  heroDescription: {
+    color: COLORS.textSecondary,
+    fontSize: 14,
     lineHeight: 20,
     textAlign: 'center',
     marginTop: 8,
   },
 
-  creator: {
-    color: '#555',
-    fontSize: 10,
+  heroCreator: {
+    color: COLORS.textMuted,
+    fontSize: 12,
     marginTop: 12,
   },
 
-  creatorStrong: {
-    color: '#aaa',
-    fontWeight: '700',
-  },
-
-  joinButton: {
-    height: 48,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
-  },
-
-  leaveButton: {
-    height: 48,
-    backgroundColor: '#111',
-    borderWidth: 1,
-    borderColor: '#333',
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
-  },
-
-  joinText: {
-    color: '#000',
-    fontSize: 10,
-    fontWeight: '900',
-  },
-
-  leaveText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '900',
-  },
-
-  ownerBadge: {
-    height: 48,
-    backgroundColor: '#171717',
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
-  },
-
-  ownerText: {
-    color: '#888',
-    fontSize: 10,
-    fontWeight: '900',
-  },
-
-  statsCard: {
-    flexDirection: 'row',
-    backgroundColor: '#111',
-    borderWidth: 1,
-    borderColor: '#222',
+  // Actions
+  actionBtn: {
+    backgroundColor: COLORS.accent,
+    paddingVertical: 16,
     borderRadius: 18,
-    marginTop: 12,
-    paddingVertical: 18,
+    alignItems: 'center',
+    marginTop: 14,
   },
 
-  stat: {
+  actionBtnLeave: {
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.danger,
+  },
+
+  actionBtnText: {
+    color: COLORS.background,
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+  },
+
+  actionBtnTextLeave: {
+    color: COLORS.danger,
+  },
+
+  ownerBanner: {
+    backgroundColor: 'rgba(212, 255, 0, 0.10)',
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: 'center',
+    marginTop: 14,
+  },
+
+  ownerBannerText: {
+    color: COLORS.accent,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+
+  // Stats
+  statsRow: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.surface,
+    borderRadius: 18,
+    paddingVertical: 18,
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+
+  statBox: {
     flex: 1,
     alignItems: 'center',
   },
 
   statValue: {
-    color: '#fff',
-    fontSize: 17,
+    color: COLORS.accent,
+    fontSize: 18,
     fontWeight: '900',
   },
 
   statLabel: {
-    color: '#555',
-    fontSize: 8,
+    color: COLORS.textMuted,
+    fontSize: 9,
     fontWeight: '800',
-    marginTop: 5,
+    marginTop: 4,
+    letterSpacing: 0.4,
   },
 
-  divider: {
+  statDivider: {
     width: 1,
-    backgroundColor: '#292929',
+    backgroundColor: COLORS.border,
   },
 
-  membersTitle: {
-    color: '#fff',
-    fontSize: 18,
+  sectionTitle: {
+    color: COLORS.accent,
+    fontSize: 12,
     fontWeight: '900',
-    marginTop: 22,
-    marginBottom: 10,
+    letterSpacing: 1,
+    marginTop: 26,
+    marginBottom: 12,
   },
 
+  // Members
   memberCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#111',
-    borderWidth: 1,
-    borderColor: '#222',
-    borderRadius: 14,
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
     padding: 12,
     marginBottom: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
 
   avatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#fff',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   avatarText: {
-    color: '#000',
-    fontSize: 16,
+    color: COLORS.background,
+    fontSize: 17,
     fontWeight: '900',
   },
 
-  memberInfo: {
-    flex: 1,
-    marginLeft: 11,
-  },
-
   memberName: {
-    color: '#fff',
-    fontSize: 13,
+    color: COLORS.text,
+    fontSize: 15,
     fontWeight: '800',
   },
 
   memberUsername: {
-    color: '#666',
-    fontSize: 10,
-    marginTop: 3,
+    color: COLORS.textMuted,
+    fontSize: 12,
+    marginTop: 2,
   },
 
-  memberOwnerBadge: {
-    backgroundColor: '#1b1b1b',
-    borderRadius: 8,
-    paddingHorizontal: 8,
+  ownerBadge: {
+    backgroundColor: 'rgba(212, 255, 0, 0.12)',
+    paddingHorizontal: 10,
     paddingVertical: 5,
+    borderRadius: 10,
   },
 
-  memberOwnerText: {
-    color: '#888',
-    fontSize: 8,
+  ownerBadgeText: {
+    color: COLORS.accent,
+    fontSize: 9,
     fontWeight: '900',
   },
 
-  emptyMembers: {
-    color: '#555',
-    fontSize: 12,
+  emptyText: {
+    color: COLORS.textMuted,
     textAlign: 'center',
     paddingVertical: 30,
+    fontSize: 13,
   },
 
   errorBox: {
-    backgroundColor: '#151515',
+    backgroundColor: COLORS.surfaceLight,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: COLORS.border,
     borderRadius: 12,
     padding: 12,
     marginTop: 12,
   },
 
   errorText: {
-    color: '#aaa',
-    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontSize: 13,
     textAlign: 'center',
   },
 });
-
-export default ClubDetailsScreen;

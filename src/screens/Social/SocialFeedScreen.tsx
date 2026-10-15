@@ -29,6 +29,8 @@ import type {
 import type {
   NativeStackNavigationProp,
 } from '@react-navigation/native-stack';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+
 import type {
   MainTabParamList,
   RootStackParamList,
@@ -38,41 +40,21 @@ import {useAuth} from '../../auth/AuthContext';
 
 type FeedPost = {
   id: string;
-
   user_id: string;
-
   activity_id: string | null;
-
   content: string;
-
   created_at: string;
-
   username: string;
-
   display_name: string;
-
   avatar_url: string | null;
-
-  activity_type:
-    | 'Run'
-    | 'Walk'
-    | 'Cycle'
-    | null;
-
+  activity_type: 'Run' | 'Walk' | 'Cycle' | null;
   distance_km: number | null;
-
   elapsed_seconds: number | null;
-
   pace: string | null;
-
   started_at: string | null;
-
   finished_at: string | null;
-
   likes_count: number;
-
   comments_count: number;
-
   liked_by_me: boolean;
 };
 
@@ -87,125 +69,79 @@ type Comment = {
   avatar_url: string | null;
 };
 
-type Navigation =
-  CompositeNavigationProp<
-    BottomTabNavigationProp<
-      MainTabParamList,
-      'Feed'
-    >,
-    NativeStackNavigationProp<
-      RootStackParamList
-    >
-  >;
+type Navigation = CompositeNavigationProp<
+  BottomTabNavigationProp<MainTabParamList, 'Feed'>,
+  NativeStackNavigationProp<RootStackParamList>
+>;
 
-const API_BASE_URL =
-  'http://127.0.0.1:4000';
+const API_BASE_URL = 'http://127.0.0.1:4000';
+
+// ─── Design tokens ───
+const COLORS = {
+  background: '#0A0A0A',
+  surface: 'rgba(18, 18, 18, 0.95)',
+  surfaceLight: '#171717',
+  accent: '#D4FF00',
+  text: '#FFFFFF',
+  textSecondary: '#A0A0A0',
+  textMuted: '#666666',
+  border: 'rgba(255,255,255,0.10)',
+  danger: '#FF4D4D',
+};
+
+const SPACING = {
+  sm: 8,
+  md: 16,
+  lg: 24,
+};
 
 const SocialFeedScreen = () => {
   const {user, token} = useAuth();
   const userId = user?.id;
+  const navigation = useNavigation<Navigation>();
+  const insets = useSafeAreaInsets();
 
-  const navigation =
-    useNavigation<Navigation>();
+  const [posts, setPosts] = useState<FeedPost[]>([]);
+  const [newPost, setNewPost] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [posting, setPosting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const [
-    posts,
-    setPosts,
-  ] = useState<FeedPost[]>([]);
+  const [activeCommentsPostId, setActiveCommentsPostId] = useState<string | null>(null);
+  const [comments, setComments] = useState<Record<string, Comment[]>>({});
+  const [commentText, setCommentText] = useState('');
+  const [commentLoading, setCommentLoading] = useState(false);
 
-  const [
-    newPost,
-    setNewPost,
-  ] = useState('');
+  const loadFeed = useCallback(async () => {
+    if (!userId) {
+      setPosts([]);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
 
-  const [
-    loading,
-    setLoading,
-  ] = useState(true);
+    try {
+      setError(null);
+      const response = await fetch(
+        `${API_BASE_URL}/api/feed/${userId}?scope=all`,
+      );
+      const data = (await response.json()) as FeedPost[] | {error?: string};
 
-  const [
-    refreshing,
-    setRefreshing,
-  ] = useState(false);
-
-  const [
-    posting,
-    setPosting,
-  ] = useState(false);
-
-  const [
-    error,
-    setError,
-  ] = useState<string | null>(null);
-
-  const [
-    activeCommentsPostId,
-    setActiveCommentsPostId,
-  ] = useState<string | null>(null);
-
-  const [
-    comments,
-    setComments,
-  ] = useState<
-    Record<string, Comment[]>
-  >({});
-
-  const [
-    commentText,
-    setCommentText,
-  ] = useState('');
-
-  const [
-    commentLoading,
-    setCommentLoading,
-  ] = useState(false);
-
-  const loadFeed = useCallback(
-    async () => {
-      if (!userId) {
-        setPosts([]);
-        setLoading(false);
-        setRefreshing(false);
-        return;
+      if (!response.ok) {
+        throw new Error(
+          'error' in data && data.error ? data.error : 'Failed to load feed',
+        );
       }
 
-      try {
-        setError(null);
-
-        const response =
-          await fetch(
-            `${API_BASE_URL}/api/feed/${userId}?scope=all`,
-          );
-
-        const data =
-          (await response.json()) as
-            | FeedPost[]
-            | { error?: string };
-
-        if (!response.ok) {
-          throw new Error(
-            'error' in data && data.error
-              ? data.error
-              : 'Failed to load feed',
-          );
-        }
-
-        setPosts(
-          data as FeedPost[],
-        );
-      } catch (error) {
-        setError(
-          error instanceof Error
-            ? error.message
-            : 'Failed to load feed',
-        );
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [userId],
-  );
+      setPosts(data as FeedPost[]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load feed');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [userId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -214,519 +150,296 @@ const SocialFeedScreen = () => {
   );
 
   const createPost = async () => {
-    const content =
-      newPost.trim();
-
-    if (!userId || !content || posting) {
-      return;
-    }
+    const content = newPost.trim();
+    if (!userId || !content || posting) return;
 
     try {
       setPosting(true);
       setError(null);
 
-      const response =
-        await fetch(
-          `${API_BASE_URL}/api/posts`,
-          {
-            method: 'POST',
+      const response = await fetch(`${API_BASE_URL}/api/posts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({userId, content}),
+      });
 
-            headers: {
-              'Content-Type':
-                'application/json',
-              Authorization: `Bearer ${token}`,
-            },
-
-            body: JSON.stringify({
-              userId,
-              content,
-            }),
-          },
-        );
-
-      const data =
-        (await response.json()) as {
-          error?: string;
-        };
-
+      const data = (await response.json()) as {error?: string};
       if (!response.ok) {
-        throw new Error(
-          data.error ??
-            'Failed to create post',
-        );
+        throw new Error(data.error ?? 'Failed to create post');
       }
 
       setNewPost('');
-
       await loadFeed();
-    } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : 'Failed to create post',
-      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create post');
     } finally {
       setPosting(false);
     }
   };
 
-  const toggleLike = async (
-    post: FeedPost,
-  ) => {
+  const toggleLike = async (post: FeedPost) => {
     if (!userId) {
       setError('Please log in to like posts.');
       return;
     }
 
     try {
-      const method =
-        post.liked_by_me
-          ? 'DELETE'
-          : 'POST';
+      const method = post.liked_by_me ? 'DELETE' : 'POST';
+      const response = await fetch(
+        `${API_BASE_URL}/api/posts/${post.id}/like/${userId}`,
+        {
+          method,
+          headers: {Authorization: `Bearer ${token}`},
+        },
+      );
 
-      const response =
-        await fetch(
-          `${API_BASE_URL}/api/posts/${post.id}/like/${userId}`,
-          {
-            method,
-            headers: {Authorization: `Bearer ${token}`},
-          },
-        );
-
-      const data =
-        (await response.json()) as {
-          error?: string;
-        };
-
+      const data = (await response.json()) as {error?: string};
       if (!response.ok) {
-        throw new Error(
-          data.error ??
-            'Failed to update like',
-        );
+        throw new Error(data.error ?? 'Failed to update like');
       }
 
-      setPosts(
-        current =>
-          current.map(item =>
-            item.id === post.id
-              ? {
-                  ...item,
-                  liked_by_me:
-                    !item.liked_by_me,
-                  likes_count:
-                    item.liked_by_me
-                      ? Math.max(
-                          item.likes_count - 1,
-                          0,
-                        )
-                      : item.likes_count + 1,
-                }
-              : item,
-          ),
+      setPosts(current =>
+        current.map(item =>
+          item.id === post.id
+            ? {
+                ...item,
+                liked_by_me: !item.liked_by_me,
+                likes_count: item.liked_by_me
+                  ? Math.max(item.likes_count - 1, 0)
+                  : item.likes_count + 1,
+              }
+            : item,
+        ),
       );
-    } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : 'Failed to update like',
-      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update like');
     }
   };
 
-  const loadComments = async (
-    postId: string,
-  ) => {
+  const loadComments = async (postId: string) => {
     try {
-      const response =
-        await fetch(
-          `${API_BASE_URL}/api/posts/${postId}/comments`,
-        );
-
-      const data =
-        (await response.json()) as
-          | Comment[]
-          | { error?: string };
+      const response = await fetch(
+        `${API_BASE_URL}/api/posts/${postId}/comments`,
+      );
+      const data = (await response.json()) as Comment[] | {error?: string};
 
       if (!response.ok) {
         throw new Error(
-          'error' in data && data.error
-            ? data.error
-            : 'Failed to load comments',
+          'error' in data && data.error ? data.error : 'Failed to load comments',
         );
       }
 
-      setComments(
-        current => ({
-          ...current,
-          [postId]:
-            data as Comment[],
-        }),
-      );
-    } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : 'Failed to load comments',
-      );
+      setComments(current => ({
+        ...current,
+        [postId]: data as Comment[],
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load comments');
     }
   };
 
-  const toggleComments = async (
-    postId: string,
-  ) => {
-    if (
-      activeCommentsPostId ===
-      postId
-    ) {
-      setActiveCommentsPostId(
-        null,
-      );
+  const toggleComments = async (postId: string) => {
+    if (activeCommentsPostId === postId) {
+      setActiveCommentsPostId(null);
       setCommentText('');
       return;
     }
-
-    setActiveCommentsPostId(
-      postId,
-    );
-
+    setActiveCommentsPostId(postId);
     await loadComments(postId);
   };
 
-  const submitComment = async (
-    postId: string,
-  ) => {
-    const value =
-      commentText.trim();
-
-    if (!userId || !value || commentLoading) {
-      return;
-    }
+  const submitComment = async (postId: string) => {
+    const value = commentText.trim();
+    if (!userId || !value || commentLoading) return;
 
     try {
       setCommentLoading(true);
-
-      const response =
-        await fetch(
-          `${API_BASE_URL}/api/posts/${postId}/comments`,
-          {
-            method: 'POST',
-
-            headers: {
-              'Content-Type':
-                'application/json',
-              Authorization: `Bearer ${token}`,
-            },
-
-            body: JSON.stringify({
-              userId,
-              comment: value,
-            }),
+      const response = await fetch(
+        `${API_BASE_URL}/api/posts/${postId}/comments`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
           },
-        );
+          body: JSON.stringify({userId, comment: value}),
+        },
+      );
 
-      const data =
-        (await response.json()) as
-          | Comment
-          | { error?: string };
-
+      const data = (await response.json()) as Comment | {error?: string};
       if (!response.ok) {
         throw new Error(
-          'error' in data && data.error
-            ? data.error
-            : 'Failed to create comment',
+          'error' in data && data.error ? data.error : 'Failed to create comment',
         );
       }
 
       setCommentText('');
-
       await loadComments(postId);
 
-      setPosts(
-        current =>
-          current.map(item =>
-            item.id === postId
-              ? {
-                  ...item,
-                  comments_count:
-                    item.comments_count + 1,
-                }
-              : item,
-          ),
+      setPosts(current =>
+        current.map(item =>
+          item.id === postId
+            ? {...item, comments_count: item.comments_count + 1}
+            : item,
+        ),
       );
-    } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : 'Failed to create comment',
-      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create comment');
     } finally {
       setCommentLoading(false);
     }
   };
 
-  const formatTime = (
-    value: string,
-  ) => {
-    return new Date(
-      value,
-    ).toLocaleString();
+  const formatTime = (value: string) => {
+    const date = new Date(value);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`;
+    return date.toLocaleDateString();
   };
 
-  const formatDistance = (
-    value: number | null,
-  ) => {
-    if (
-      typeof value !==
-      'number'
-    ) {
-      return null;
-    }
-
-    return `${value.toFixed(2)} km`;
+  const formatDistance = (value: number | null) => {
+    if (typeof value !== 'number') return null;
+    return `${value.toFixed(2)}`;
   };
 
-  const formatElapsed = (
-    value: number | null,
-  ) => {
-    if (
-      typeof value !==
-      'number'
-    ) {
-      return null;
-    }
-
-    const minutes =
-      Math.floor(value / 60);
-
-    const seconds =
-      value % 60;
-
-    return `${minutes}:${String(
-      seconds,
-    ).padStart(2, '0')}`;
+  const formatElapsed = (value: number | null) => {
+    if (typeof value !== 'number') return null;
+    const minutes = Math.floor(value / 60);
+    const seconds = value % 60;
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
   };
 
-  const renderPost = ({
-    item,
-  }: {
-    item: FeedPost;
-  }) => {
-    const postComments =
-      comments[item.id] ?? [];
-
-    const showComments =
-      activeCommentsPostId ===
-      item.id;
+  const renderPost = ({item}: {item: FeedPost}) => {
+    const postComments = comments[item.id] ?? [];
+    const showComments = activeCommentsPostId === item.id;
 
     return (
       <View style={styles.postCard}>
-
         <TouchableOpacity
           style={styles.userRow}
           activeOpacity={0.8}
           onPress={() =>
-            navigation.navigate(
-              'PublicProfile',
-              {
-                userId: item.user_id,
-              },
-            )
+            navigation.navigate('PublicProfile', {userId: item.user_id})
           }>
-
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>
-              {item.display_name
-                .slice(0, 1)
-                .toUpperCase()}
+              {item.display_name.slice(0, 1).toUpperCase()}
             </Text>
           </View>
 
           <View style={styles.userInfo}>
-
-            <Text style={styles.displayName}>
-              {item.display_name}
-            </Text>
-
-            <Text style={styles.username}>
-              @{item.username}
-            </Text>
-
+            <Text style={styles.displayName}>{item.display_name}</Text>
+            <Text style={styles.username}>@{item.username}</Text>
           </View>
 
+          <Text style={styles.timestamp}>{formatTime(item.created_at)}</Text>
         </TouchableOpacity>
 
         {!!item.content && (
-          <Text style={styles.content}>
-            {item.content}
-          </Text>
+          <Text style={styles.content}>{item.content}</Text>
         )}
 
-        {item.activity_id &&
-          item.activity_type && (
-            <View style={styles.activityCard}>
-
-              <View style={styles.activityHeader}>
-                <Text style={styles.activityType}>
-                  {item.activity_type}
-                </Text>
-
-                <Text style={styles.activityLabel}>
-                  ACTIVITY
-                </Text>
-              </View>
-
-              <View style={styles.activityStats}>
-
-                <View style={styles.stat}>
-                  <Text style={styles.statValue}>
-                    {formatDistance(
-                      item.distance_km,
-                    ) ?? '--'}
-                  </Text>
-
-                  <Text style={styles.statLabel}>
-                    DISTANCE
-                  </Text>
-                </View>
-
-                <View style={styles.statDivider} />
-
-                <View style={styles.stat}>
-                  <Text style={styles.statValue}>
-                    {formatElapsed(
-                      item.elapsed_seconds,
-                    ) ?? '--'}
-                  </Text>
-
-                  <Text style={styles.statLabel}>
-                    TIME
-                  </Text>
-                </View>
-
-                <View style={styles.statDivider} />
-
-                <View style={styles.stat}>
-                  <Text style={styles.statValue}>
-                    {item.pace ?? '--'}
-                  </Text>
-
-                  <Text style={styles.statLabel}>
-                    PACE
-                  </Text>
-                </View>
-
-              </View>
-
+        {item.activity_id && item.activity_type && (
+          <View style={styles.activityCard}>
+            <View style={styles.activityHeader}>
+              <Text style={styles.activityType}>
+                {item.activity_type.toUpperCase()}
+              </Text>
+              <Text style={styles.activityLabel}>ACTIVITY</Text>
             </View>
-          )}
 
-        <Text style={styles.timestamp}>
-          {formatTime(
-            item.created_at,
-          )}
-        </Text>
+            <View style={styles.activityStats}>
+              <View style={styles.stat}>
+                <Text style={styles.statValue}>
+                  {formatDistance(item.distance_km) ?? '--'}
+                </Text>
+                <Text style={styles.statLabel}>KM</Text>
+              </View>
+
+              <View style={styles.statDivider} />
+
+              <View style={styles.stat}>
+                <Text style={styles.statValue}>
+                  {formatElapsed(item.elapsed_seconds) ?? '--'}
+                </Text>
+                <Text style={styles.statLabel}>TIME</Text>
+              </View>
+
+              <View style={styles.statDivider} />
+
+              <View style={styles.stat}>
+                <Text style={styles.statValue}>{item.pace ?? '--'}</Text>
+                <Text style={styles.statLabel}>PACE</Text>
+              </View>
+            </View>
+          </View>
+        )}
 
         <View style={styles.actions}>
-
           <TouchableOpacity
             style={styles.actionButton}
-            onPress={() =>
-              toggleLike(item)
-            }>
-
+            onPress={() => toggleLike(item)}>
             <Text
               style={[
                 styles.actionText,
-                item.liked_by_me &&
-                  styles.likedText,
+                item.liked_by_me && styles.likedText,
               ]}>
-              {item.liked_by_me
-                ? 'LIKED'
-                : 'LIKE'}
+              {item.liked_by_me ? '♥' : '♡'}  {item.likes_count}
             </Text>
-
-            <Text style={styles.actionCount}>
-              {item.likes_count}
-            </Text>
-
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.actionButton}
-            onPress={() =>
-              toggleComments(item.id)
-            }>
-
+            onPress={() => toggleComments(item.id)}>
             <Text style={styles.actionText}>
-              COMMENTS
+              💬  {item.comments_count}
             </Text>
-
-            <Text style={styles.actionCount}>
-              {item.comments_count}
-            </Text>
-
           </TouchableOpacity>
-
         </View>
 
         {showComments && (
           <View style={styles.commentsSection}>
-
             {postComments.length === 0 ? (
-              <Text style={styles.noComments}>
-                No comments yet.
-              </Text>
+              <Text style={styles.noComments}>No comments yet</Text>
             ) : (
               postComments.map(comment => (
-                <View
-                  key={comment.id}
-                  style={styles.commentRow}>
-
-                  <Text
-                    style={styles.commentName}>
+                <View key={comment.id} style={styles.commentRow}>
+                  <Text style={styles.commentName}>
                     {comment.display_name}
                   </Text>
-
-                  <Text
-                    style={styles.commentText}>
-                    {comment.comment}
-                  </Text>
-
+                  <Text style={styles.commentText}>{comment.comment}</Text>
                 </View>
               ))
             )}
 
             <View style={styles.commentInputRow}>
-
               <TextInput
                 value={commentText}
-                onChangeText={
-                  setCommentText
-                }
+                onChangeText={setCommentText}
                 placeholder="Write a comment..."
-                placeholderTextColor="#555"
+                placeholderTextColor={COLORS.textMuted}
                 maxLength={500}
                 style={styles.commentInput}
               />
-
               <TouchableOpacity
                 style={styles.commentButton}
-                onPress={() =>
-                  submitComment(item.id)
-                }
+                onPress={() => submitComment(item.id)}
                 disabled={commentLoading}>
-
                 <Text style={styles.commentButtonText}>
-                  POST
+                  {commentLoading ? '...' : 'POST'}
                 </Text>
-
               </TouchableOpacity>
-
             </View>
-
           </View>
         )}
-
       </View>
     );
   };
@@ -734,10 +447,7 @@ const SocialFeedScreen = () => {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator
-          size="large"
-          color="#fff"
-        />
+        <ActivityIndicator size="large" color={COLORS.accent} />
       </View>
     );
   }
@@ -745,59 +455,50 @@ const SocialFeedScreen = () => {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={
-        Platform.OS === 'ios'
-          ? 'padding'
-          : undefined
-      }>
-
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <FlatList
         data={posts}
         keyExtractor={item => item.id}
         renderItem={renderPost}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            tintColor="#fff"
+            tintColor={COLORS.accent}
             onRefresh={() => {
               setRefreshing(true);
               loadFeed();
             }}
           />
         }
-        contentContainerStyle={
-          styles.listContent
-        }
-
+        contentContainerStyle={[
+          styles.listContent,
+          {
+            paddingTop: insets.top + 12,
+            paddingBottom: insets.bottom + 120,
+          },
+        ]}
         ListHeaderComponent={
           <View>
-
             <View style={styles.header}>
-              <View>
-                <Text style={styles.title}>
-                  Social Feed
-                </Text>
-
-                <Text style={styles.subtitle}>
-                  See what the community is doing
-                </Text>
-              </View>
+              <Text style={styles.title}>COMMUNITY</Text>
+              <Text style={styles.subtitle}>
+                See what the squad is doing
+              </Text>
             </View>
 
             <View style={styles.createCard}>
-
               <TextInput
                 value={newPost}
                 onChangeText={setNewPost}
                 placeholder="Share an update..."
-                placeholderTextColor="#555"
+                placeholderTextColor={COLORS.textMuted}
                 multiline
                 maxLength={500}
                 style={styles.postInput}
               />
 
               <View style={styles.createFooter}>
-
                 <Text style={styles.characterCount}>
                   {newPost.length}/500
                 </Text>
@@ -805,386 +506,322 @@ const SocialFeedScreen = () => {
                 <TouchableOpacity
                   style={[
                     styles.postButton,
-                    !newPost.trim() &&
-                      styles.postButtonDisabled,
+                    !newPost.trim() && styles.postButtonDisabled,
                   ]}
                   onPress={createPost}
-                  disabled={
-                    posting ||
-                    !newPost.trim()
-                  }>
-
+                  disabled={posting || !newPost.trim()}>
                   {posting ? (
-                    <ActivityIndicator
-                      size="small"
-                      color="#000"
-                    />
+                    <ActivityIndicator size="small" color={COLORS.background} />
                   ) : (
-                    <Text style={styles.postButtonText}>
-                      POST
-                    </Text>
+                    <Text style={styles.postButtonText}>POST</Text>
                   )}
-
                 </TouchableOpacity>
-
               </View>
-
             </View>
 
             {error && (
               <View style={styles.errorBox}>
-                <Text style={styles.errorText}>
-                  {error}
-                </Text>
+                <Text style={styles.errorText}>{error}</Text>
               </View>
             )}
-
           </View>
         }
-
         ListEmptyComponent={
           <View style={styles.empty}>
-
-            <Text style={styles.emptyTitle}>
-              No posts yet
-            </Text>
-
+            <Text style={styles.emptyTitle}>No posts yet</Text>
             <Text style={styles.emptyText}>
-              Create the first post and
-              start the community feed.
+              Be the first to share something with the community.
             </Text>
-
           </View>
         }
       />
-
     </KeyboardAvoidingView>
   );
 };
 
+export default SocialFeedScreen;
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.background,
   },
-
   center: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#000',
+    backgroundColor: COLORS.background,
   },
-
   listContent: {
-    paddingHorizontal: 14,
-    paddingBottom: 30,
+    paddingHorizontal: SPACING.md,
   },
 
   header: {
-    paddingTop: 22,
-    paddingBottom: 16,
+    paddingBottom: 8,
   },
-
   title: {
-    color: '#fff',
-    fontSize: 25,
+    color: COLORS.accent,
+    fontSize: 32,
     fontWeight: '900',
+    letterSpacing: -0.5,
   },
-
   subtitle: {
-    color: '#666',
-    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontSize: 14,
     marginTop: 4,
+    marginBottom: SPACING.md,
   },
 
   createCard: {
-    backgroundColor: '#111',
+    backgroundColor: COLORS.surface,
+    borderRadius: 20,
+    padding: SPACING.md,
     borderWidth: 1,
-    borderColor: '#222',
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 14,
+    borderColor: COLORS.border,
+    marginBottom: SPACING.md,
   },
-
   postInput: {
-    minHeight: 85,
-    color: '#fff',
-    fontSize: 14,
+    color: COLORS.text,
+    fontSize: 15,
+    minHeight: 70,
     textAlignVertical: 'top',
   },
-
   createFooter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 10,
-    paddingTop: 10,
+    marginTop: 12,
+    paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#222',
+    borderTopColor: COLORS.border,
   },
-
   characterCount: {
-    color: '#555',
-    fontSize: 10,
+    color: COLORS.textMuted,
+    fontSize: 11,
   },
-
   postButton: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    minWidth: 70,
+    backgroundColor: COLORS.accent,
+    borderRadius: 14,
+    minWidth: 72,
     alignItems: 'center',
-    paddingVertical: 9,
-    paddingHorizontal: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
   },
-
   postButtonDisabled: {
-    backgroundColor: '#333',
+    backgroundColor: '#2A2A2A',
   },
-
   postButtonText: {
-    color: '#000',
-    fontSize: 10,
+    color: COLORS.background,
+    fontSize: 12,
     fontWeight: '900',
+    letterSpacing: 0.5,
   },
 
   errorBox: {
-    backgroundColor: '#151515',
+    backgroundColor: 'rgba(255,77,77,0.12)',
     borderWidth: 1,
-    borderColor: '#333',
-    borderRadius: 12,
+    borderColor: 'rgba(255,77,77,0.3)',
+    borderRadius: 14,
     padding: 12,
     marginBottom: 12,
   },
-
   errorText: {
-    color: '#aaa',
-    fontSize: 12,
+    color: COLORS.danger,
+    fontSize: 13,
   },
 
   postCard: {
-    backgroundColor: '#111',
+    backgroundColor: COLORS.surface,
+    borderRadius: 22,
+    padding: SPACING.lg,
+    marginBottom: 14,
     borderWidth: 1,
-    borderColor: '#222',
-    borderRadius: 16,
-    padding: 15,
-    marginBottom: 12,
+    borderColor: COLORS.border,
   },
-
   userRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#fff',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   avatarText: {
-    color: '#000',
-    fontSize: 17,
+    color: COLORS.background,
+    fontSize: 18,
     fontWeight: '900',
   },
-
   userInfo: {
-    marginLeft: 11,
+    flex: 1,
+    marginLeft: 12,
   },
-
   displayName: {
-    color: '#fff',
-    fontSize: 14,
+    color: COLORS.text,
+    fontSize: 15,
     fontWeight: '800',
   },
-
   username: {
-    color: '#666',
-    fontSize: 11,
+    color: COLORS.textMuted,
+    fontSize: 12,
     marginTop: 2,
   },
-
+  timestamp: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+  },
   content: {
-    color: '#ddd',
-    fontSize: 14,
-    lineHeight: 21,
+    color: COLORS.text,
+    fontSize: 15,
+    lineHeight: 22,
     marginTop: 14,
   },
 
   activityCard: {
-    backgroundColor: '#171717',
-    borderRadius: 13,
-    padding: 13,
-    marginTop: 13,
+    backgroundColor: COLORS.surfaceLight,
+    borderRadius: 16,
+    padding: 14,
+    marginTop: 14,
     borderWidth: 1,
-    borderColor: '#292929',
+    borderColor: COLORS.border,
   },
-
   activityHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 12,
   },
-
   activityType: {
-    color: '#fff',
-    fontSize: 14,
+    color: COLORS.accent,
+    fontSize: 13,
     fontWeight: '900',
+    letterSpacing: 0.5,
   },
-
   activityLabel: {
-    color: '#666',
-    fontSize: 9,
-    fontWeight: '800',
+    color: COLORS.textMuted,
+    fontSize: 10,
+    fontWeight: '700',
   },
-
   activityStats: {
     flexDirection: 'row',
-    marginTop: 14,
+    alignItems: 'center',
   },
-
   stat: {
     flex: 1,
     alignItems: 'center',
   },
-
   statValue: {
-    color: '#fff',
-    fontSize: 13,
+    color: COLORS.text,
+    fontSize: 18,
     fontWeight: '800',
   },
-
   statLabel: {
-    color: '#555',
-    fontSize: 8,
+    color: COLORS.textMuted,
+    fontSize: 9,
     fontWeight: '700',
     marginTop: 4,
+    letterSpacing: 0.5,
   },
-
   statDivider: {
     width: 1,
-    backgroundColor: '#292929',
-  },
-
-  timestamp: {
-    color: '#555',
-    fontSize: 10,
-    marginTop: 13,
+    height: 28,
+    backgroundColor: COLORS.border,
   },
 
   actions: {
     flexDirection: 'row',
-    marginTop: 14,
-    paddingTop: 12,
+    marginTop: 16,
+    paddingTop: 14,
     borderTopWidth: 1,
-    borderTopColor: '#222',
+    borderTopColor: COLORS.border,
   },
-
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 25,
+    marginRight: 28,
   },
-
   actionText: {
-    color: '#888',
-    fontSize: 10,
-    fontWeight: '900',
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    fontWeight: '600',
   },
-
   likedText: {
-    color: '#fff',
-  },
-
-  actionCount: {
-    color: '#555',
-    fontSize: 10,
-    marginLeft: 5,
+    color: COLORS.danger,
   },
 
   commentsSection: {
-    marginTop: 12,
-    paddingTop: 12,
+    marginTop: 14,
+    paddingTop: 14,
     borderTopWidth: 1,
-    borderTopColor: '#222',
+    borderTopColor: COLORS.border,
   },
-
   noComments: {
-    color: '#555',
-    fontSize: 11,
+    color: COLORS.textMuted,
+    fontSize: 13,
     marginBottom: 10,
   },
-
   commentRow: {
-    marginBottom: 9,
+    marginBottom: 10,
   },
-
   commentName: {
-    color: '#fff',
-    fontSize: 11,
+    color: COLORS.text,
+    fontSize: 13,
     fontWeight: '800',
   },
-
   commentText: {
-    color: '#999',
-    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontSize: 13,
     marginTop: 2,
-    lineHeight: 17,
+    lineHeight: 18,
   },
-
   commentInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 7,
+    marginTop: 8,
   },
-
   commentInput: {
     flex: 1,
-    backgroundColor: '#171717',
+    backgroundColor: COLORS.surfaceLight,
     borderWidth: 1,
-    borderColor: '#292929',
-    borderRadius: 10,
-    color: '#fff',
-    minHeight: 40,
-    paddingHorizontal: 11,
-    fontSize: 12,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    color: COLORS.text,
+    minHeight: 42,
+    paddingHorizontal: 14,
+    fontSize: 13,
   },
-
   commentButton: {
-    marginLeft: 7,
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
+    marginLeft: 8,
+    backgroundColor: COLORS.accent,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
-
   commentButtonText: {
-    color: '#000',
-    fontSize: 9,
+    color: COLORS.background,
+    fontSize: 11,
     fontWeight: '900',
   },
 
   empty: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 70,
+    paddingVertical: 80,
     paddingHorizontal: 30,
   },
-
   emptyTitle: {
-    color: '#fff',
+    color: COLORS.text,
     fontSize: 20,
     fontWeight: '900',
   },
-
   emptyText: {
-    color: '#666',
+    color: COLORS.textMuted,
     textAlign: 'center',
     lineHeight: 20,
     marginTop: 8,
+    fontSize: 14,
   },
 });
-
-export default SocialFeedScreen;

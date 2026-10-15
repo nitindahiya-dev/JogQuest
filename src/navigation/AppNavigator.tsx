@@ -1,38 +1,37 @@
 import React from 'react';
-import AuthProvider, { useAuth } from '../auth/AuthContext';
 import {
-  NavigationContainer,
-} from '@react-navigation/native';
-
-import {
-  createBottomTabNavigator,
-} from '@react-navigation/bottom-tabs';
-
-import {
-  createNativeStackNavigator,
-} from '@react-navigation/native-stack';
-
-import {
-  SafeAreaView,
-} from 'react-native-safe-area-context';
-
-import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  Text,
   View,
+  Text,
+  StyleSheet,
+  Pressable,
 } from 'react-native';
 
+import {NavigationContainer} from '@react-navigation/native';
+import {
+  createBottomTabNavigator,
+  BottomTabBarProps,
+} from '@react-navigation/bottom-tabs';
+import {createNativeStackNavigator} from '@react-navigation/native-stack';
+import {
+  SafeAreaProvider,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
+
+import AuthProvider, {useAuth} from '../auth/AuthContext';
+
+// Screens
 import MapScreen from '../screens/Map/MapScreen';
 import ActivityScreen from '../screens/Activity/ActivityScreen';
 import ActivityResultScreen from '../screens/Activity/ActivityResultScreen';
 import LeaderboardScreen from '../screens/Leaderboard/LeaderboardScreen';
 import ProfileScreen from '../screens/Profile/ProfileScreen';
+import SocialFeedScreen from '../screens/Social/SocialFeedScreen';
+import LoginScreen from '../screens/Auth/LoginScreen';
+import SignupScreen from '../screens/Auth/SignupScreen';
+import RoutePlannerScreen from '../screens/RoutePlanner/RoutePlannerScreen';
 import TerritoryDetailsScreen from '../screens/Territory/TerritoryDetailsScreen';
 import ActivityHistoryScreen from '../screens/History/ActivityHistoryScreen';
 import NotificationsScreen from '../screens/Notifications/NotificationsScreen';
-import SocialFeedScreen from '../screens/Social/SocialFeedScreen';
 import PublicProfileScreen from '../screens/Social/PublicProfileScreen';
 import FollowListScreen from '../screens/Social/FollowListScreen';
 import ClubsScreen from '../screens/Clubs/ClubsScreen';
@@ -42,218 +41,113 @@ import CompetitionsScreen from '../screens/Competitions/CompetitionsScreen';
 import CreateCompetitionScreen from '../screens/Competitions/CreateCompetitionScreen';
 import CompetitionDetailsScreen from '../screens/Competitions/CompetitionDetailsScreen';
 import IntegrationsScreen from '../screens/Integrations/IntegrationsScreen';
-import LoginScreen from '../screens/Auth/LoginScreen';
-import SignupScreen from '../screens/Auth/SignupScreen';
 
-import type {
-  RootStackParamList,
-  MainTabParamList,
-} from './types';
-import RoutePlannerScreen from '../screens/RoutePlanner/RoutePlannerScreen';
+import type {RootStackParamList, MainTabParamList} from './types';
 
-const Tab =
-  createBottomTabNavigator<MainTabParamList>();
+const Tab = createBottomTabNavigator<MainTabParamList>();
+const Stack = createNativeStackNavigator<RootStackParamList>();
 
-const Stack =
-  createNativeStackNavigator<RootStackParamList>();
+// ─── Design tokens ───
+const COLORS = {
+  background: '#0A0A0A',
+  surface: 'rgba(18, 18, 18, 0.95)',
+  accent: '#D4FF00',
+  text: '#FFFFFF',
+  textMuted: '#666666',
+  border: 'rgba(255,255,255,0.10)',
+};
 
-const TabIcon = ({
-  symbol,
-  focused,
-  color,
-}: {
-  symbol: string;
-  focused: boolean;
-  color: string;
-}) => {
+// Custom Floating Tab Bar
+const CustomTabBar = ({state, descriptors, navigation}: BottomTabBarProps) => {
+  const insets = useSafeAreaInsets();
+
   return (
     <View
       style={[
-        styles.iconContainer,
-        focused &&
-        styles.iconContainerActive,
+        styles.tabBarContainer,
+        {bottom: Math.max(insets.bottom, 12) + 8},
       ]}>
+      <View style={styles.tabBar}>
+        {state.routes.map((route, index) => {
+          const {options} = descriptors[route.key];
+          const isFocused = state.index === index;
+          const label =
+            options.tabBarLabel !== undefined
+              ? options.tabBarLabel
+              : route.name;
 
-      <Text
-        style={[
-          styles.icon,
-          {
-            color: focused
-              ? '#000'
-              : color,
-          },
-        ]}>
-        {symbol}
-      </Text>
+          const onPress = () => {
+            const event = navigation.emit({
+              type: 'tabPress',
+              target: route.key,
+              canPreventDefault: true,
+            });
 
+            if (!isFocused && !event.defaultPrevented) {
+              navigation.navigate(route.name);
+            }
+          };
+
+          return (
+            <Pressable
+              key={route.key}
+              onPress={onPress}
+              style={[styles.tabItem, isFocused && styles.tabItemActive]}>
+              <Text
+                style={[styles.tabLabel, isFocused && styles.tabLabelActive]}>
+                {label as string}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 };
 
 const MainTabs = () => {
   return (
-    <SafeAreaView
-      style={styles.safeArea}
-      edges={['top']}>
-
-      <Tab.Navigator
-        screenOptions={{
-          headerShown: false,
-
-          tabBarStyle: {
-            height: 68,
-            width: '100%',
-            backgroundColor: '#050505',
-            borderTopWidth: 1,
-            borderTopColor: '#222',
-            paddingTop: 6,
-            paddingBottom: 7,
-            paddingHorizontal: 0,
-          },
-
-          tabBarActiveTintColor: '#fff',
-          tabBarInactiveTintColor: '#666',
-
-          tabBarLabelStyle: {
-            fontSize: 9,
-            fontWeight: '700',
-            marginTop: 2,
-          },
-
-          tabBarItemStyle: {
-            width: '20%',
-          },
-        }}>
-
-        <Tab.Screen
-          name="Map"
-          component={MapScreen}
-          options={{
-            tabBarLabel: 'Map',
-
-            tabBarIcon: ({
-              color,
-              focused,
-            }) => (
-              <TabIcon
-                symbol="M"
-                color={color}
-                focused={focused}
-              />
-            ),
-          }}
-        />
-
-        <Tab.Screen
-          name="Feed"
-          component={SocialFeedScreen}
-          options={{
-            tabBarLabel: 'Feed',
-
-            tabBarIcon: ({
-              color,
-              focused,
-            }) => (
-              <TabIcon
-                symbol="F"
-                color={color}
-                focused={focused}
-              />
-            ),
-          }}
-        />
-
-        <Tab.Screen
-          name="Activity"
-          component={ActivityScreen}
-          options={{
-            tabBarLabel: 'Activity',
-
-            tabBarIcon: ({
-              color,
-              focused,
-            }) => (
-              <TabIcon
-                symbol="A"
-                color={color}
-                focused={focused}
-              />
-            ),
-          }}
-        />
-
-        <Tab.Screen
-          name="Leaderboard"
-          component={LeaderboardScreen}
-          options={{
-            tabBarLabel: 'Ranks',
-
-            tabBarIcon: ({
-              color,
-              focused,
-            }) => (
-              <TabIcon
-                symbol="R"
-                color={color}
-                focused={focused}
-              />
-            ),
-          }}
-        />
-
-        <Tab.Screen
-          name="Profile"
-          component={ProfileScreen}
-          options={{
-            tabBarLabel: 'Profile',
-
-            tabBarIcon: ({
-              color,
-              focused,
-            }) => (
-              <TabIcon
-                symbol="P"
-                color={color}
-                focused={focused}
-              />
-            ),
-          }}
-        />
-
-      </Tab.Navigator>
-
-    </SafeAreaView>
+    <Tab.Navigator
+      tabBar={props => <CustomTabBar {...props} />}
+      screenOptions={{
+        headerShown: false,
+      }}>
+      <Tab.Screen
+        name="Map"
+        component={MapScreen}
+        options={{tabBarLabel: 'MAP'}}
+      />
+      <Tab.Screen
+        name="Feed"
+        component={SocialFeedScreen}
+        options={{tabBarLabel: 'FEED'}}
+      />
+      <Tab.Screen
+        name="Activity"
+        component={ActivityScreen}
+        options={{tabBarLabel: 'START'}}
+      />
+      <Tab.Screen
+        name="Leaderboard"
+        component={LeaderboardScreen}
+        options={{tabBarLabel: 'RANKS'}}
+      />
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{tabBarLabel: 'PROFILE'}}
+      />
+    </Tab.Navigator>
   );
 };
 
 const RootNavigator = () => {
-  const {
-    user,
-    loading,
-  } = useAuth();
+  const {user, loading} = useAuth();
 
   if (loading) {
     return (
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: '#000',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}>
-        <ActivityIndicator
-          size="small"
-          color="#fff"
-        />
-
-        <Text
-          style={{
-            color: '#777',
-            marginTop: 10,
-            fontSize: 11,
-          }}>
-          Restoring session...
-        </Text>
+      <View style={styles.loadingContainer}>
+        <Text style={styles.loadingText}>Loading...</Text>
       </View>
     );
   }
@@ -261,206 +155,107 @@ const RootNavigator = () => {
   return (
     <Stack.Navigator
       screenOptions={{
-        headerStyle: {
-          backgroundColor: '#000',
-        },
-
-        headerTintColor: '#fff',
-
-        headerTitleStyle: {
-          fontWeight: '700',
-        },
-
-        contentStyle: {
-          backgroundColor: '#000',
-        },
+        headerStyle: {backgroundColor: COLORS.background},
+        headerTintColor: COLORS.text,
+        headerTitleStyle: {fontWeight: '800', fontSize: 18},
+        contentStyle: {backgroundColor: COLORS.background},
+        headerShadowVisible: false,
       }}>
-
       {!user ? (
         <>
           <Stack.Screen
             name="Login"
             component={LoginScreen}
-            options={{
-              headerShown: false,
-            }}
+            options={{headerShown: false}}
           />
-
           <Stack.Screen
             name="Signup"
             component={SignupScreen}
-            options={{
-              headerShown: false,
-            }}
+            options={{headerShown: false}}
           />
         </>
       ) : (
         <>
           <Stack.Screen
             name="MainTabs"
-            component={
-              MainTabs
-            }
-            options={{
-              headerShown: false,
-            }}
+            component={MainTabs}
+            options={{headerShown: false}}
           />
-
           <Stack.Screen
             name="ActivityHistory"
-            component={
-              ActivityHistoryScreen
-            }
-            options={{
-              title:
-                'Activity History',
-            }}
+            component={ActivityHistoryScreen}
+            options={{title: 'Activity History'}}
           />
-
           <Stack.Screen
             name="Notifications"
-            component={
-              NotificationsScreen
-            }
-            options={{
-              title:
-                'Notifications',
-            }}
+            component={NotificationsScreen}
+            options={{title: 'Notifications'}}
           />
-
           <Stack.Screen
             name="PublicProfile"
-            component={
-              PublicProfileScreen
-            }
-            options={{
-              title: 'Profile',
-            }}
+            component={PublicProfileScreen}
+            options={{title: 'Profile'}}
           />
-
           <Stack.Screen
             name="FollowList"
-            component={
-              FollowListScreen
-            }
-            options={({ route }) => ({
+            component={FollowListScreen}
+            options={({route}) => ({
               title:
-                route.params.mode ===
-                  'followers'
-                  ? 'Followers'
-                  : 'Following',
+                route.params.mode === 'followers' ? 'Followers' : 'Following',
             })}
           />
-
           <Stack.Screen
             name="Clubs"
-            component={
-              ClubsScreen
-            }
-            options={{
-              title: 'Clubs',
-            }}
+            component={ClubsScreen}
+            options={{title: 'Clubs'}}
           />
-
           <Stack.Screen
             name="CreateClub"
-            component={
-              CreateClubScreen
-            }
-            options={{
-              title:
-                'Create Club',
-            }}
+            component={CreateClubScreen}
+            options={{title: 'Create Club'}}
           />
-
           <Stack.Screen
             name="ClubDetails"
-            component={
-              ClubDetailsScreen
-            }
-            options={{
-              title: 'Club',
-            }}
+            component={ClubDetailsScreen}
+            options={{title: 'Club'}}
           />
-
           <Stack.Screen
             name="Competitions"
-            component={
-              CompetitionsScreen
-            }
-            options={{
-              title:
-                'Competitions',
-            }}
+            component={CompetitionsScreen}
+            options={{title: 'Competitions'}}
           />
-
           <Stack.Screen
             name="CreateCompetition"
-            component={
-              CreateCompetitionScreen
-            }
-            options={{
-              title:
-                'Create Competition',
-            }}
+            component={CreateCompetitionScreen}
+            options={{title: 'Create Competition'}}
           />
-
           <Stack.Screen
             name="CompetitionDetails"
-            component={
-              CompetitionDetailsScreen
-            }
-            options={{
-              title:
-                'Competition',
-            }}
+            component={CompetitionDetailsScreen}
+            options={{title: 'Competition'}}
           />
-
           <Stack.Screen
             name="RoutePlanner"
-            component={
-              RoutePlannerScreen
-            }
-            options={{
-              title:
-                'Route Planner',
-            }}
+            component={RoutePlannerScreen}
+            options={{title: 'Route Planner'}}
           />
-
           <Stack.Screen
             name="Integrations"
-            component={
-              IntegrationsScreen
-            }
-            options={{
-              title:
-                'Integrations',
-            }}
+            component={IntegrationsScreen}
+            options={{title: 'Integrations'}}
           />
-
           <Stack.Screen
             name="ActivityResult"
-            component={
-              ActivityResultScreen
-            }
-            options={{
-              title:
-                'Activity Result',
-            }}
+            component={ActivityResultScreen}
+            options={{title: 'Result'}}
           />
-
           <Stack.Screen
             name="TerritoryDetails"
-            component={
-              TerritoryDetailsScreen
-            }
-            options={{
-              title: 'Territory',
-            }}
+            component={TerritoryDetailsScreen}
+            options={{title: 'Territory'}}
           />
         </>
       )}
-
     </Stack.Navigator>
   );
 };
@@ -468,39 +263,60 @@ const RootNavigator = () => {
 const AppNavigator = () => {
   return (
     <AuthProvider>
-      <NavigationContainer>
-        <RootNavigator />
-      </NavigationContainer>
+      <SafeAreaProvider>
+        <NavigationContainer>
+          <RootNavigator />
+        </NavigationContainer>
+      </SafeAreaProvider>
     </AuthProvider>
   );
 };
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
+export default AppNavigator;
 
-  iconContainer: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#141414',
+  },
+  loadingText: {
+    color: COLORS.textMuted,
+    fontSize: 15,
+  },
+
+  // Floating tab bar
+  tabBarContainer: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    alignItems: 'center',
+  },
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.surface,
+    borderRadius: 40,
+    paddingHorizontal: 6,
+    paddingVertical: 6,
     borderWidth: 1,
-    borderColor: '#292929',
+    borderColor: COLORS.border,
   },
-
-  iconContainerActive: {
-    backgroundColor: '#fff',
-    borderColor: '#fff',
+  tabItem: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 30,
   },
-
-  icon: {
-    fontSize: 11,
-    fontWeight: '900',
+  tabItemActive: {
+    backgroundColor: COLORS.accent,
+  },
+  tabLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    color: COLORS.textMuted,
+  },
+  tabLabelActive: {
+    color: COLORS.background,
   },
 });
-
-export default AppNavigator;

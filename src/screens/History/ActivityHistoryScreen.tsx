@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   FlatList,
   RefreshControl,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
@@ -17,6 +16,7 @@ import {
   useFocusEffect,
 } from '@react-navigation/native';
 
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../auth/AuthContext';
 
 type Activity = {
@@ -35,71 +35,66 @@ type Activity = {
 
 const API_BASE_URL = 'http://127.0.0.1:4000';
 
-const formatDuration = (
-  seconds: number,
-) => {
-  const hours = Math.floor(seconds / 3600);
-
-  const minutes = Math.floor(
-    (seconds % 3600) / 60,
-  );
-
-  const remainingSeconds =
-    seconds % 60;
-
-  if (hours > 0) {
-    return `${hours}:${String(minutes).padStart(
-      2,
-      '0',
-    )}:${String(remainingSeconds).padStart(
-      2,
-      '0',
-    )}`;
-  }
-
-  return `${minutes}:${String(
-    remainingSeconds,
-  ).padStart(2, '0')}`;
+// ─── Design tokens ───
+const COLORS = {
+  background: '#0A0A0A',
+  surface: 'rgba(18, 18, 18, 0.95)',
+  surfaceLight: '#171717',
+  accent: '#D4FF00',
+  text: '#FFFFFF',
+  textSecondary: '#A0A0A0',
+  textMuted: '#666666',
+  border: 'rgba(255,255,255,0.10)',
+  danger: '#FF4D4D',
 };
 
-const formatDate = (
-  value: string,
-) => {
-  return new Date(value).toLocaleDateString(
-    'en-IN',
-    {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    },
-  );
+const SPACING = {
+  sm: 8,
+  md: 16,
+  lg: 24,
+};
+
+const formatDuration = (seconds: number) => {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = seconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(
+      remainingSeconds,
+    ).padStart(2, '0')}`;
+  }
+
+  return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
+};
+
+const formatDate = (value: string) => {
+  return new Date(value).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
 };
 
 const ActivityHistoryScreen = () => {
-  const [activities, setActivities] =
-    useState<Activity[]>([]);
+  const insets = useSafeAreaInsets();
 
-  const [loading, setLoading] =
-    useState(true);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const [refreshing, setRefreshing] =
-    useState(false);
-
-  const [error, setError] =
-    useState<string | null>(null);
   const { user } = useAuth();
 
-  if (!user) {
-    return (
-      <View style={styles.center}>
-        <Text style={styles.errorText}>
-          Authentication required.
-        </Text>
-      </View>
-    );
-  }
   const loadActivities = useCallback(
     async (isRefresh = false) => {
+      if (!user) {
+        setActivities([]);
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
+
       try {
         if (isRefresh) {
           setRefreshing(true);
@@ -114,30 +109,20 @@ const ActivityHistoryScreen = () => {
         );
 
         if (!response.ok) {
-          throw new Error(
-            `Server returned ${response.status}`,
-          );
+          throw new Error(`Server returned ${response.status}`);
         }
 
-        const data =
-          (await response.json()) as Activity[];
-
+        const data = (await response.json()) as Activity[];
         setActivities(data);
       } catch (err) {
-        console.error(
-          'Failed to load activities:',
-          err,
-        );
-
-        setError(
-          'Could not load activity history.',
-        );
+        console.error('Failed to load activities:', err);
+        setError('Could not load activity history.');
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [user.id],
+    [user],
   );
 
   useFocusEffect(
@@ -146,35 +131,18 @@ const ActivityHistoryScreen = () => {
     }, [loadActivities]),
   );
 
-  const totalDistance =
-    activities.reduce(
-      (total, activity) =>
-        total + Number(activity.distance_km),
-      0,
-    );
+  const totalDistance = activities.reduce(
+    (total, activity) => total + Number(activity.distance_km),
+    0,
+  );
 
-  const totalTime =
-    activities.reduce(
-      (total, activity) =>
-        total + Number(activity.elapsed_seconds),
-      0,
-    );
+  const totalTerritory = activities.reduce(
+    (total, activity) =>
+      total + Number(activity.territory_area_km2 ?? 0),
+    0,
+  );
 
-  const totalTerritory =
-    activities.reduce(
-      (total, activity) =>
-        total +
-        Number(
-          activity.territory_area_km2 ?? 0,
-        ),
-      0,
-    );
-
-  const renderActivity = ({
-    item,
-  }: {
-    item: Activity;
-  }) => {
+  const renderActivity = ({ item }: { item: Activity }) => {
     return (
       <View style={styles.card}>
         <View style={styles.cardTop}>
@@ -190,11 +158,8 @@ const ActivityHistoryScreen = () => {
 
           {item.territory_id && (
             <View style={styles.territoryBadge}>
-              <Text
-                style={
-                  styles.territoryBadgeText
-                }>
-                TERRITORY
+              <Text style={styles.territoryBadgeText}>
+                🏆 CAPTURED
               </Text>
             </View>
           )}
@@ -203,42 +168,27 @@ const ActivityHistoryScreen = () => {
         <View style={styles.statsRow}>
           <View style={styles.stat}>
             <Text style={styles.value}>
-              {Number(
-                item.distance_km,
-              ).toFixed(2)}
+              {Number(item.distance_km).toFixed(2)}
             </Text>
 
-            <Text style={styles.label}>
-              KM
-            </Text>
+            <Text style={styles.label}>KM</Text>
           </View>
 
           <View style={styles.divider} />
 
           <View style={styles.stat}>
             <Text style={styles.value}>
-              {formatDuration(
-                Number(
-                  item.elapsed_seconds,
-                ),
-              )}
+              {formatDuration(Number(item.elapsed_seconds))}
             </Text>
 
-            <Text style={styles.label}>
-              TIME
-            </Text>
+            <Text style={styles.label}>TIME</Text>
           </View>
 
           <View style={styles.divider} />
 
           <View style={styles.stat}>
-            <Text style={styles.value}>
-              {item.pace}
-            </Text>
-
-            <Text style={styles.label}>
-              PACE
-            </Text>
+            <Text style={styles.value}>{item.pace}</Text>
+            <Text style={styles.label}>PACE</Text>
           </View>
         </View>
 
@@ -248,14 +198,8 @@ const ActivityHistoryScreen = () => {
               Territory captured
             </Text>
 
-            <Text
-              style={
-                styles.territoryArea
-              }>
-              {Number(
-                item.territory_area_km2 ?? 0,
-              ).toFixed(3)}{' '}
-              km²
+            <Text style={styles.territoryArea}>
+              {Number(item.territory_area_km2 ?? 0).toFixed(3)} km²
             </Text>
           </View>
         )}
@@ -263,102 +207,116 @@ const ActivityHistoryScreen = () => {
     );
   };
 
+  if (!user) {
+    return (
+      <View
+        style={[
+          styles.center,
+          {
+            paddingBottom: insets.bottom + 40,
+          },
+        ]}
+      >
+        <Text style={styles.errorText}>
+          Authentication required.
+        </Text>
+      </View>
+    );
+  }
+
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.center}>
-          <ActivityIndicator
-            size="large"
-          />
+      <View
+        style={[
+          styles.center,
+          {
+            paddingBottom: insets.bottom + 40,
+          },
+        ]}
+      >
+        <ActivityIndicator size="large" color={COLORS.accent} />
 
-          <Text style={styles.loadingText}>
-            Loading activities...
-          </Text>
-        </View>
-      </SafeAreaView>
+        <Text style={styles.loadingText}>
+          Loading activities...
+        </Text>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <FlatList
         data={activities}
         keyExtractor={item => item.id}
         renderItem={renderActivity}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() =>
-              loadActivities(true)
-            }
-            tintColor="#fff"
+            onRefresh={() => loadActivities(true)}
+            tintColor={COLORS.accent}
           />
         }
-        contentContainerStyle={
+        contentContainerStyle={[
           activities.length === 0
             ? styles.emptyContent
-            : styles.listContent
-        }
+            : styles.listContent,
+          {
+            paddingBottom: insets.bottom + 40,
+          },
+        ]}
         ListHeaderComponent={
           <View>
-            <Text style={styles.title}>
-              Activity History
-            </Text>
+            <Text style={styles.title}>QUEST LOG</Text>
 
             <Text style={styles.subtitle}>
-              Your completed quests
+              Your completed missions
             </Text>
 
-            <View style={styles.summaryCard}>
-              <View style={styles.summaryStat}>
-                <Text
-                  style={
-                    styles.summaryValue
-                  }>
+            {/* Summary cards */}
+            <View style={styles.summaryGrid}>
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryValue}>
                   {activities.length}
                 </Text>
 
-                <Text
-                  style={
-                    styles.summaryLabel
-                  }>
-                  ACTIVITIES
+                <Text style={styles.summaryLabel}>
+                  MISSIONS
                 </Text>
               </View>
 
-              <View style={styles.summaryDivider} />
-
-              <View style={styles.summaryStat}>
-                <Text
-                  style={
-                    styles.summaryValue
-                  }>
-                  {totalDistance.toFixed(2)}
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryValue}>
+                  {totalDistance.toFixed(1)}
                 </Text>
 
-                <Text
-                  style={
-                    styles.summaryLabel
-                  }>
-                  KM
+                <Text style={styles.summaryLabel}>
+                  TOTAL KM
                 </Text>
               </View>
 
-              <View style={styles.summaryDivider} />
-
-              <View style={styles.summaryStat}>
+              <View
+                style={[
+                  styles.summaryCard,
+                  styles.summaryCardAccent,
+                ]}
+              >
                 <Text
-                  style={
-                    styles.summaryValue
-                  }>
-                  {totalTerritory.toFixed(3)}
+                  style={[
+                    styles.summaryValue,
+                    { color: COLORS.background },
+                  ]}
+                >
+                  {totalTerritory.toFixed(2)}
                 </Text>
 
                 <Text
-                  style={
-                    styles.summaryLabel
-                  }>
-                  TERRITORY KM²
+                  style={[
+                    styles.summaryLabel,
+                    { color: 'rgba(0,0,0,0.55)' },
+                  ]}
+                >
+                  KM² CAPTURED
                 </Text>
               </View>
             </View>
@@ -370,22 +328,25 @@ const ActivityHistoryScreen = () => {
                 </Text>
               </View>
             )}
+
+            <Text style={styles.sectionLabel}>
+              RECENT ACTIVITIES
+            </Text>
           </View>
         }
         ListEmptyComponent={
           <View style={styles.emptyBox}>
             <Text style={styles.emptyTitle}>
-              No Activities Yet
+              No Missions Yet
             </Text>
 
             <Text style={styles.emptyText}>
-              Complete your first run, walk,
-              or cycle to see it here.
+              Complete your first run, walk, or cycle to see it here.
             </Text>
           </View>
         }
       />
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -394,121 +355,147 @@ export default ActivityHistoryScreen;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.background,
   },
 
   listContent: {
-    padding: 15,
-    paddingBottom: 30,
+    padding: SPACING.md,
   },
 
   emptyContent: {
     flexGrow: 1,
-    padding: 15,
+    padding: SPACING.md,
   },
 
   center: {
     flex: 1,
+    backgroundColor: COLORS.background,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   loadingText: {
-    color: '#888',
+    color: COLORS.textMuted,
     marginTop: 12,
+    fontSize: 14,
   },
 
+  errorText: {
+    color: COLORS.textSecondary,
+    fontSize: 15,
+  },
+
+  // Header
   title: {
-    color: '#fff',
-    fontSize: 28,
+    color: COLORS.text,
+    fontSize: 30,
     fontWeight: '900',
-    marginTop: 10,
+    letterSpacing: -0.5,
+    marginTop: 8,
   },
 
   subtitle: {
-    color: '#777',
+    color: COLORS.textSecondary,
     fontSize: 14,
     marginTop: 4,
-    marginBottom: 18,
+    marginBottom: 20,
+  },
+
+  // Summary
+  summaryGrid: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 22,
   },
 
   summaryCard: {
-    flexDirection: 'row',
-    backgroundColor: '#111',
-    borderRadius: 20,
-    paddingVertical: 18,
-    marginBottom: 18,
-    borderWidth: 1,
-    borderColor: '#222',
-  },
-
-  summaryStat: {
     flex: 1,
+    backgroundColor: COLORS.surface,
+    borderRadius: 18,
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
     alignItems: 'center',
   },
 
+  summaryCardAccent: {
+    backgroundColor: COLORS.accent,
+    borderColor: COLORS.accent,
+  },
+
   summaryValue: {
-    color: '#fff',
-    fontSize: 18,
+    color: COLORS.accent,
+    fontSize: 20,
     fontWeight: '900',
   },
 
   summaryLabel: {
-    color: '#666',
-    fontSize: 8,
+    color: COLORS.textMuted,
+    fontSize: 9,
     fontWeight: '800',
-    marginTop: 5,
+    marginTop: 4,
+    textAlign: 'center',
+    letterSpacing: 0.3,
   },
 
-  summaryDivider: {
-    width: 1,
-    backgroundColor: '#292929',
+  sectionLabel: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    marginBottom: 12,
   },
 
+  // Activity card
   card: {
-    backgroundColor: '#111',
-    borderRadius: 20,
+    backgroundColor: COLORS.surface,
+    borderRadius: 22,
     padding: 18,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#222',
+    borderColor: COLORS.border,
   },
 
   cardTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
 
   activityType: {
-    color: '#fff',
-    fontSize: 16,
+    color: COLORS.accent,
+    fontSize: 17,
     fontWeight: '900',
   },
 
   date: {
-    color: '#666',
+    color: COLORS.textMuted,
     fontSize: 12,
     marginTop: 4,
   },
 
   territoryBadge: {
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    backgroundColor: 'rgba(212, 255, 0, 0.12)',
     borderWidth: 1,
-    borderColor: '#444',
+    borderColor: COLORS.accent,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
 
   territoryBadgeText: {
-    color: '#fff',
-    fontSize: 8,
+    color: COLORS.accent,
+    fontSize: 9,
     fontWeight: '900',
   },
 
   statsRow: {
     flexDirection: 'row',
-    marginTop: 20,
+    marginTop: 18,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
   },
 
   stat: {
@@ -517,76 +504,73 @@ const styles = StyleSheet.create({
   },
 
   value: {
-    color: '#fff',
+    color: COLORS.text,
     fontSize: 16,
     fontWeight: '800',
   },
 
   label: {
-    color: '#666',
-    fontSize: 8,
+    color: COLORS.textMuted,
+    fontSize: 9,
     fontWeight: '700',
     marginTop: 4,
+    letterSpacing: 0.3,
   },
 
   divider: {
     width: 1,
-    backgroundColor: '#292929',
+    backgroundColor: COLORS.border,
   },
 
   territoryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 18,
+    marginTop: 16,
     paddingTop: 14,
     borderTopWidth: 1,
-    borderTopColor: '#222',
+    borderTopColor: COLORS.border,
   },
 
   territoryText: {
-    color: '#888',
-    fontSize: 12,
-  },
-
-  territoryArea: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-
-  errorBox: {
-    backgroundColor: '#171717',
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#333',
-  },
-
-  errorText: {
-    color: '#aaa',
+    color: COLORS.textSecondary,
     fontSize: 13,
   },
 
+  territoryArea: {
+    color: COLORS.accent,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+
+  // Error / Empty
+  errorBox: {
+    backgroundColor: COLORS.surfaceLight,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+
   emptyBox: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 30,
-    paddingVertical: 80,
+    paddingVertical: 70,
   },
 
   emptyTitle: {
-    color: '#fff',
+    color: COLORS.text,
     fontSize: 20,
     fontWeight: '900',
   },
 
   emptyText: {
-    color: '#666',
+    color: COLORS.textMuted,
     textAlign: 'center',
     marginTop: 8,
     lineHeight: 20,
+    fontSize: 14,
   },
 });

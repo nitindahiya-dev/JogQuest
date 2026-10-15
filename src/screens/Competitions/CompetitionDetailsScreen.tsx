@@ -1,8 +1,4 @@
-import React, {
-  useCallback,
-  useEffect,
-  useState,
-} from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 
 import {
   ActivityIndicator,
@@ -18,470 +14,269 @@ import {
   useFocusEffect,
   useNavigation,
   useRoute,
-  type RouteProp,
 } from '@react-navigation/native';
 
-import {useAuth} from '../../auth/AuthContext';
+import { useAuth } from '../../auth/AuthContext';
+import { COLORS, SPACING, TYPOGRAPHY, SHADOWS } from '../../theme';
 
-import type {
-  NativeStackNavigationProp,
-} from '@react-navigation/native-stack';
+const API_BASE_URL = 'http://127.0.0.1:4000';
 
-import type {
-  RootStackParamList,
-} from '../../navigation/types';
-
-type Route =
-  RouteProp<
-    RootStackParamList,
-    'CompetitionDetails'
-  >;
-
-type Navigation =
-  NativeStackNavigationProp<
-    RootStackParamList,
-    'CompetitionDetails'
-  >;
+type Metric = 'DISTANCE' | 'TERRITORY' | 'ACTIVITIES';
 
 type Competition = {
   id: string;
   name: string;
-  description: string;
-  creator_id: string;
-  metric:
-    | 'DISTANCE'
-    | 'TERRITORY'
-    | 'ACTIVITIES';
+  description: string | null;
+  status: string;
+  metric: Metric;
   start_at: string;
   end_at: string;
-  is_public: boolean;
-  created_at: string;
-  creator_username: string;
-  creator_display_name: string;
   participants_count: number;
-  status:
-    | 'UPCOMING'
-    | 'ACTIVE'
-    | 'ENDED';
 };
 
-type LeaderboardRow = {
-  rank: number;
+type LeaderboardEntry = {
   user_id: string;
-  username: string;
-  display_name: string;
-  avatar_url: string | null;
+  rank: number;
   score: number;
+  display_name: string;
+  username: string;
 };
 
-const API_BASE_URL =
-  'http://127.0.0.1:4000';
+type Membership = {
+  joined?: boolean;
+  error?: string;
+};
 
 const CompetitionDetailsScreen = () => {
-  const route =
-    useRoute<Route>();
+  const route = useRoute<any>();
+  const navigation = useNavigation<any>();
+  const { user, token } = useAuth();
 
-  const navigation =
-    useNavigation<Navigation>();
-
-  const {user, token} = useAuth();
   const userId = user?.id;
+  const { competitionId } = route.params;
 
-  const {
-    competitionId,
-  } = route.params;
+  const [competition, setCompetition] = useState<Competition | null>(null);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [joined, setJoined] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  const [actionLoading, setActionLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const [
-    competition,
-    setCompetition,
-  ] = useState<Competition | null>(
-    null,
-  );
+  const loadCompetition = useCallback(async () => {
+    if (!userId) {
+      setError('Please log in to view competition details.');
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
 
-  const [
-    leaderboard,
-    setLeaderboard,
-  ] = useState<
-    LeaderboardRow[]
-  >([]);
+    try {
+      setError(null);
 
-  const [
-    joined,
-    setJoined,
-  ] = useState(false);
+      const [
+        competitionResponse,
+        leaderboardResponse,
+        membershipResponse,
+      ] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/competitions/${competitionId}`),
+        fetch(
+          `${API_BASE_URL}/api/competitions/${competitionId}/leaderboard`,
+        ),
+        fetch(
+          `${API_BASE_URL}/api/competitions/${competitionId}/membership/${userId}`,
+        ),
+      ]);
 
-  const [
-    loading,
-    setLoading,
-  ] = useState(true);
+      const competitionData = await competitionResponse.json();
+      const leaderboardData = await leaderboardResponse.json();
+      const membershipData = (await membershipResponse.json()) as Membership;
 
-  const [
-    refreshing,
-    setRefreshing,
-  ] = useState(false);
-
-  const [
-    actionLoading,
-    setActionLoading,
-  ] = useState(false);
-
-  const [
-    error,
-    setError,
-  ] = useState<string | null>(null);
-
-  const [
-    now,
-    setNow,
-  ] = useState(
-    Date.now(),
-  );
-
-  const loadCompetition =
-    useCallback(async (
-      isRefresh = false,
-    ) => {
-      if (!userId) {
-        setError('Please log in to view this competition.');
-        setLoading(false);
-        setRefreshing(false);
-        return;
+      if (!competitionResponse.ok) {
+        throw new Error(
+          competitionData?.error ?? 'Failed to load competition.',
+        );
       }
 
-      try {
-        if (isRefresh) {
-          setRefreshing(true);
-        } else {
-          setLoading(true);
-        }
-
-        setError(null);
-
-        const [
-          competitionResponse,
-          leaderboardResponse,
-          membershipResponse,
-        ] = await Promise.all([
-          fetch(
-            `${API_BASE_URL}/api/competitions/${competitionId}`,
-          ),
-
-          fetch(
-            `${API_BASE_URL}/api/competitions/${competitionId}/leaderboard`,
-          ),
-
-          fetch(
-            `${API_BASE_URL}/api/competitions/${competitionId}/membership/${userId}`,
-          ),
-        ]);
-
-        const competitionData =
-          (await competitionResponse.json()) as
-            | Competition
-            | { error?: string };
-
-        const leaderboardData =
-          (await leaderboardResponse.json()) as
-            | LeaderboardRow[]
-            | { error?: string };
-
-        const membershipData =
-          (await membershipResponse.json()) as {
-            joined?: boolean;
-            error?: string;
-          };
-
-        if (!competitionResponse.ok) {
-          throw new Error(
-            'error' in competitionData &&
-            competitionData.error
-              ? competitionData.error
-              : 'Failed to load competition',
-          );
-        }
-
-        if (!leaderboardResponse.ok) {
-          throw new Error(
-            'error' in leaderboardData &&
-            leaderboardData.error
-              ? leaderboardData.error
-              : 'Failed to load leaderboard',
-          );
-        }
-
-        if (!membershipResponse.ok) {
-          throw new Error(
-            membershipData.error ??
-              'Failed to load membership',
-          );
-        }
-
-        setCompetition(
-          competitionData as Competition,
+      if (!leaderboardResponse.ok) {
+        throw new Error(
+          leaderboardData?.error ?? 'Failed to load leaderboard.',
         );
-
-        setLeaderboard(
-          leaderboardData as LeaderboardRow[],
-        );
-
-        setJoined(
-          membershipData.joined ??
-            false,
-        );
-      } catch (error) {
-        setError(
-          error instanceof Error
-            ? error.message
-            : 'Failed to load competition',
-        );
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
       }
-    }, [competitionId, userId]);
+
+      if (!membershipResponse.ok) {
+        throw new Error(
+          membershipData.error ?? 'Failed to load membership.',
+        );
+      }
+
+      setCompetition(competitionData as Competition);
+      setLeaderboard(
+        Array.isArray(leaderboardData) ? leaderboardData : [],
+      );
+      setJoined(membershipData.joined ?? false);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to load competition.',
+      );
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [competitionId, userId]);
 
   useFocusEffect(
     useCallback(() => {
       loadCompetition();
 
-      const interval =
-        setInterval(() => {
-          loadCompetition(true);
-        }, 30000);
+      const interval = setInterval(loadCompetition, 30000);
 
-      return () => {
-        clearInterval(interval);
-      };
+      return () => clearInterval(interval);
     }, [loadCompetition]),
   );
 
   useEffect(() => {
-    const timer =
-      setInterval(() => {
-        setNow(Date.now());
-      }, 1000);
+    const interval = setInterval(() => setNow(Date.now()), 1000);
 
-    return () => {
-      clearInterval(timer);
-    };
+    return () => clearInterval(interval);
   }, []);
 
-  const toggleJoin =
-    async () => {
-      if (
-        !userId ||
-        !competition ||
-        actionLoading
-      ) {
-        return;
-      }
+  const toggleJoin = async () => {
+    if (!userId || !competition || actionLoading) return;
 
-      if (
-        competition.status ===
-        'ENDED'
-      ) {
-        return;
-      }
+    if (competition.status === 'ENDED') return;
 
-      try {
-        setActionLoading(true);
-        setError(null);
+    try {
+      setActionLoading(true);
+      setError(null);
 
-        const response =
-          await fetch(
-            `${API_BASE_URL}/api/competitions/${competition.id}/join/${userId}`,
-            {
-              method:
-                joined
-                  ? 'DELETE'
-                  : 'POST',
-              headers: {Authorization: `Bearer ${token}`},
-            },
-          );
+      const response = await fetch(
+        `${API_BASE_URL}/api/competitions/${competition.id}/join/${userId}`,
+        {
+          method: joined ? 'DELETE' : 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
 
-        const data =
-          (await response.json()) as {
-            error?: string;
-          };
+      const data = await response.json();
 
-        if (!response.ok) {
-          throw new Error(
-            data.error ??
-              'Failed to update competition membership',
-          );
-        }
-
-        await loadCompetition();
-      } catch (error) {
-        setError(
-          error instanceof Error
-            ? error.message
-            : 'Failed to update competition',
+      if (!response.ok) {
+        throw new Error(
+          data?.error ?? 'Failed to update competition membership.',
         );
-      } finally {
-        setActionLoading(false);
       }
-    };
 
-  const formatDate = (
-    value: string,
-  ) => {
-    return new Date(
-      value,
-    ).toLocaleString(
-      'en-IN',
-      {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-      },
-    );
+      await loadCompetition();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to update competition membership.',
+      );
+    } finally {
+      setActionLoading(false);
+    }
   };
 
-const formatRemaining = (): {
-  label: string;
-  value: string;
-} | null => {
-  if (!competition) {
-    return null;
-  }
-
-  const start =
-    new Date(
-      competition.start_at,
-    ).getTime();
-
-  const end =
-    new Date(
-      competition.end_at,
-    ).getTime();
-
-  if (now < start) {
-    return {
-      label: 'STARTS IN',
-      value: formatDuration(
-        start - now,
-      ),
-    };
-  }
-
-  if (now >= end) {
-    return {
-      label: 'ENDED',
-      value: '00:00:00',
-    };
-  }
-
-  return {
-    label: 'TIME LEFT',
-    value: formatDuration(
-      end - now,
-    ),
-  };
-};
-
-  const formatDuration = (
-    milliseconds: number,
-  ) => {
-    const totalSeconds =
-      Math.max(
-        0,
-        Math.floor(
-          milliseconds / 1000,
-        ),
-      );
-
-    const days =
-      Math.floor(
-        totalSeconds / 86400,
-      );
-
-    const hours =
-      Math.floor(
-        (totalSeconds % 86400) / 3600,
-      );
-
-    const minutes =
-      Math.floor(
-        (totalSeconds % 3600) / 60,
-      );
-
-    const seconds =
-      totalSeconds % 60;
+  const formatDuration = (milliseconds: number) => {
+    const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainingSeconds = seconds % 60;
 
     if (days > 0) {
-      return `${days}d ${String(
-        hours,
-      ).padStart(2, '0')}h ${String(
+      return `${days}d ${String(hours).padStart(2, '0')}h ${String(
         minutes,
       ).padStart(2, '0')}m`;
     }
 
-    return `${String(
-      hours,
-    ).padStart(2, '0')}:${String(
-      minutes,
-    ).padStart(2, '0')}:${String(
-      seconds,
-    ).padStart(2, '0')}`;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(
+      2,
+      '0',
+    )}:${String(remainingSeconds).padStart(2, '0')}`;
   };
 
-  const metricLabel =
-    competition?.metric ===
-    'DISTANCE'
-      ? 'DISTANCE'
-      : competition?.metric ===
-          'TERRITORY'
-        ? 'TERRITORY'
-        : 'ACTIVITIES';
+  const getRemaining = () => {
+    if (!competition) return null;
 
-  const formatScore = (
-    score: number,
-  ) => {
-    if (
-      competition?.metric ===
-      'DISTANCE'
-    ) {
-      return `${Number(
-        score,
-      ).toFixed(2)} km`;
+    const start = new Date(competition.start_at).getTime();
+    const end = new Date(competition.end_at).getTime();
+
+    if (!Number.isFinite(start) || !Number.isFinite(end)) {
+      return { label: 'SCHEDULE', value: 'Awaiting dates' };
     }
 
-    if (
-      competition?.metric ===
-      'TERRITORY'
-    ) {
-      return `${Number(
-        score,
-      ).toFixed(3)} km²`;
+    if (now < start) {
+      return {
+        label: 'STARTS IN',
+        value: formatDuration(start - now),
+      };
     }
 
-    return String(
-      Math.round(
-        Number(score),
-      ),
-    );
+    if (now >= end) {
+      return { label: 'CHALLENGE ENDED', value: '00:00:00' };
+    }
+
+    return {
+      label: 'TIME REMAINING',
+      value: formatDuration(end - now),
+    };
   };
 
-  const currentUser =
-    userId
-      ? leaderboard.find(
-          item => item.user_id === userId,
-        )
-      : undefined;
+  const formatScore = (score: number) => {
+    const value = Number(score);
 
-  const remaining =
-    formatRemaining();
+    if (!Number.isFinite(value)) return '0';
+
+    if (competition?.metric === 'DISTANCE') {
+      return `${value.toFixed(2)} km`;
+    }
+
+    if (competition?.metric === 'TERRITORY') {
+      return `${value.toFixed(3)} km²`;
+    }
+
+    return String(Math.round(value));
+  };
+
+  const formatDate = (value: string) => {
+    const date = new Date(value);
+
+    if (!value || Number.isNaN(date.getTime())) return 'Not scheduled';
+
+    return date.toLocaleDateString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+  };
+
+  const isEnded = competition?.status === 'ENDED';
+  const remaining = getRemaining();
+  const currentUser = leaderboard.find(
+    item => item.user_id === userId,
+  );
+
+  const statusColor =
+    competition?.status === 'ACTIVE'
+      ? COLORS.accent
+      : competition?.status === 'ENDED'
+        ? COLORS.danger
+        : COLORS.textSecondary;
 
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator
-          size="large"
-          color="#fff"
-        />
+        <ActivityIndicator size="large" color={COLORS.accent} />
+        <Text style={styles.loadingText}>
+          Loading competition...
+        </Text>
       </View>
     );
   }
@@ -489,681 +284,1058 @@ const formatRemaining = (): {
   if (!competition) {
     return (
       <View style={styles.center}>
-        <Text style={styles.errorText}>
-          {error ??
-            'Competition unavailable.'}
+        <View style={styles.emptyIcon}>
+          <Text style={styles.emptyIconText}>!</Text>
+        </View>
+
+        <Text style={styles.emptyTitle}>
+          Competition unavailable
         </Text>
+
+        <Text style={styles.emptyDescription}>
+          {error ?? 'This competition could not be found.'}
+        </Text>
+
+        <TouchableOpacity
+          style={styles.retryButton}
+          onPress={() => {
+            setLoading(true);
+            loadCompetition();
+          }}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.retryButtonText}>TRY AGAIN</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-
       <FlatList
         data={leaderboard}
-        keyExtractor={item =>
-          item.user_id
-        }
+        keyExtractor={item => item.user_id}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            tintColor="#fff"
-            onRefresh={() =>
-              loadCompetition(true)
-            }
+            tintColor={COLORS.accent}
+            onRefresh={() => {
+              setRefreshing(true);
+              loadCompetition();
+            }}
           />
         }
-        contentContainerStyle={
-          styles.list
-        }
-
+        contentContainerStyle={styles.listContent}
         ListHeaderComponent={
           <View>
-
+            {/* Hero */}
             <View style={styles.hero}>
+              <View style={styles.heroTop}>
+                <View style={styles.eyebrowRow}>
+                  <View
+                    style={[
+                      styles.statusDot,
+                      { backgroundColor: statusColor },
+                    ]}
+                  />
 
-              <View style={styles.icon}>
-                <Text style={styles.iconText}>
-                  C
-                </Text>
+                  <Text style={styles.eyebrow}>
+                    COMMUNITY CHALLENGE
+                  </Text>
+                </View>
+
+                <View
+                  style={[
+                    styles.statusBadge,
+                    { borderColor: statusColor },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.statusText,
+                      { color: statusColor },
+                    ]}
+                  >
+                    {competition.status}
+                  </Text>
+                </View>
               </View>
 
-              <Text style={styles.name}>
+              <Text style={styles.heroName}>
                 {competition.name}
               </Text>
 
-              <Text style={styles.description}>
-                {competition.description ||
-                  'No description'}
+              <Text style={styles.heroDescription}>
+                {competition.description?.trim() ||
+                  'No description available for this challenge.'}
               </Text>
 
-              <View
-                style={[
-                  styles.statusBadge,
-                  competition.status ===
-                    'ENDED' &&
-                    styles.statusBadgeEnded,
-                ]}>
+              <View style={styles.heroDivider} />
 
-                <Text style={styles.statusText}>
-                  {competition.status}
-                </Text>
+              <View style={styles.heroDates}>
+                <View style={styles.dateBlock}>
+                  <Text style={styles.dateLabel}>START DATE</Text>
+                  <Text style={styles.dateValue}>
+                    {formatDate(competition.start_at)}
+                  </Text>
+                </View>
 
+                <View style={styles.dateDivider} />
+
+                <View style={styles.dateBlock}>
+                  <Text style={styles.dateLabel}>END DATE</Text>
+                  <Text style={styles.dateValue}>
+                    {formatDate(competition.end_at)}
+                  </Text>
+                </View>
               </View>
-
             </View>
 
-            {error && (
-              <View style={styles.errorBox}>
-                <Text style={styles.errorText}>
-                  {error}
+            {/* Countdown */}
+            <View style={styles.timerCard}>
+              <View style={styles.timerTop}>
+                <View style={styles.timerIndicator} />
+                <Text style={styles.timerLabel}>
+                  {remaining?.label}
                 </Text>
               </View>
-            )}
 
-            <View style={styles.timerCard}>
-
-              <Text style={styles.timerLabel}>
-                {remaining?.label}
-              </Text>
-
-              <Text style={styles.timerValue}>
+              <Text
+                style={[
+                  styles.timerValue,
+                  remaining?.value === 'Awaiting dates' &&
+                    styles.timerValueSmall,
+                ]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
                 {remaining?.value}
               </Text>
 
-              {competition.status ===
-                'ACTIVE' && (
-                <View
-                  style={
-                    styles.liveIndicator
-                  }>
-                  <View
-                    style={
-                      styles.liveDot
-                    }
-                  />
-
-                  <Text
-                    style={
-                      styles.liveText
-                    }>
-                    LIVE
-                  </Text>
-                </View>
-              )}
-
+              <Text style={styles.timerCaption}>
+                {competition.status === 'ACTIVE'
+                  ? 'Every effort counts. Keep moving.'
+                  : competition.status === 'ENDED'
+                    ? 'This challenge has finished.'
+                    : 'Get ready for the challenge.'}
+              </Text>
             </View>
 
+            {/* Personal ranking */}
             {currentUser && (
               <View style={styles.youCard}>
-
-                <View>
-                  <Text style={styles.youLabel}>
-                    YOUR POSITION
+                <View style={styles.youCardTop}>
+                  <Text style={styles.youEyebrow}>
+                    YOUR PERFORMANCE
                   </Text>
-
-                  <Text style={styles.youRank}>
-                    #{currentUser.rank}
-                  </Text>
+                  <Text style={styles.youBadge}>YOU</Text>
                 </View>
 
-                <View
-                  style={
-                    styles.youScoreBlock
-                  }>
-                  <Text
-                    style={
-                      styles.youScore
-                    }>
-                    {formatScore(
-                      Number(
-                        currentUser.score,
-                      ),
-                    )}
-                  </Text>
+                <View style={styles.youStats}>
+                  <View style={styles.youStat}>
+                    <Text style={styles.youLabel}>YOUR RANK</Text>
+                    <Text style={styles.youRank}>
+                      #{currentUser.rank}
+                    </Text>
+                  </View>
 
-                  <Text
-                    style={
-                      styles.youScoreLabel
-                    }>
-                    CURRENT SCORE
-                  </Text>
+                  <View style={styles.youDivider} />
+
+                  <View style={styles.youStat}>
+                    <Text style={styles.youLabel}>YOUR SCORE</Text>
+                    <Text
+                      style={styles.youScore}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                    >
+                      {formatScore(Number(currentUser.score))}
+                    </Text>
+                  </View>
                 </View>
-
               </View>
             )}
 
-            {competition.status !==
-              'ENDED' && (
+            {/* Join / leave */}
+            {!isEnded && (
               <TouchableOpacity
-                style={
-                  joined
-                    ? styles.leaveButton
-                    : styles.joinButton
-                }
-                onPress={
-                  toggleJoin
-                }
-                disabled={
-                  actionLoading
-                }>
-
+                style={[
+                  styles.joinButton,
+                  joined && styles.leaveButton,
+                ]}
+                onPress={toggleJoin}
+                disabled={actionLoading}
+                activeOpacity={0.85}
+              >
                 {actionLoading ? (
                   <ActivityIndicator
-                    size="small"
                     color={
-                      joined
-                        ? '#fff'
-                        : '#000'
+                      joined ? COLORS.danger : COLORS.background
                     }
                   />
                 ) : (
-                  <Text
-                    style={
-                      joined
-                        ? styles.leaveText
-                        : styles.joinText
-                    }>
-                    {joined
-                      ? 'LEAVE COMPETITION'
-                      : 'JOIN COMPETITION'}
-                  </Text>
-                )}
+                  <>
+                    <Text
+                      style={[
+                        styles.joinButtonText,
+                        joined && styles.leaveButtonText,
+                      ]}
+                    >
+                      {joined
+                        ? 'LEAVE CHALLENGE'
+                        : 'JOIN CHALLENGE'}
+                    </Text>
 
+                    <Text
+                      style={[
+                        styles.joinButtonArrow,
+                        joined && styles.leaveButtonText,
+                      ]}
+                    >
+                      {joined ? '−' : '↗'}
+                    </Text>
+                  </>
+                )}
               </TouchableOpacity>
             )}
 
-            <View style={styles.infoCard}>
+            {/* Error */}
+            {error && (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorTitle}>
+                  Action unsuccessful
+                </Text>
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            )}
 
-              <View style={styles.infoItem}>
-                <Text style={styles.infoValue}>
-                  {metricLabel}
+            {/* Stats */}
+            <View style={styles.statsRow}>
+              <View style={styles.statCard}>
+                <Text style={styles.statIcon}>◎</Text>
+                <Text style={styles.statValue}>
+                  {competition.participants_count ?? leaderboard.length}
+                </Text>
+                <Text style={styles.statLabel}>PARTICIPANTS</Text>
+              </View>
+
+              <View style={styles.statCard}>
+                <Text style={styles.statIcon}>↗</Text>
+                <Text style={styles.statValue}>
+                  {competition.metric === 'DISTANCE'
+                    ? 'KM'
+                    : competition.metric === 'TERRITORY'
+                      ? 'KM²'
+                      : 'COUNT'}
+                </Text>
+                <Text style={styles.statLabel}>SCORING UNIT</Text>
+              </View>
+            </View>
+
+            {/* Leaderboard heading */}
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionHeadingLeft}>
+                <Text style={styles.sectionEyebrow}>
+                  THE RACE
                 </Text>
 
-                <Text style={styles.infoLabel}>
-                  METRIC
+                <Text style={styles.sectionTitle}>
+                  Leaderboard
+                </Text>
+
+                <Text style={styles.sectionSubtitle}>
+                  See who's leading the challenge.
                 </Text>
               </View>
 
-              <View style={styles.divider} />
-
-              <View style={styles.infoItem}>
-                <Text style={styles.infoValue}>
-                  {competition.participants_count}
-                </Text>
-
-                <Text style={styles.infoLabel}>
-                  PARTICIPANTS
+              <View style={styles.countBadge}>
+                <Text style={styles.countBadgeText}>
+                  {leaderboard.length}
                 </Text>
               </View>
-
             </View>
 
-            <View style={styles.dateCard}>
-
-              <Text style={styles.dateLabel}>
-                START
-              </Text>
-
-              <Text style={styles.dateValue}>
-                {formatDate(
-                  competition.start_at,
-                )}
-              </Text>
-
-              <View
-                style={
-                  styles.dateDivider
-                }
-              />
-
-              <Text style={styles.dateLabel}>
-                END
-              </Text>
-
-              <Text style={styles.dateValue}>
-                {formatDate(
-                  competition.end_at,
-                )}
-              </Text>
-
-            </View>
-
-            <View style={styles.leaderboardHeader}>
-
-              <Text
-                style={
-                  styles.leaderboardTitle
-                }>
-                Leaderboard
-              </Text>
-
-              <Text style={styles.refreshText}>
-                AUTO • 30S
-              </Text>
-
-            </View>
-
+            {/* Table header */}
+            {leaderboard.length > 0 && (
+              <View style={styles.tableHeader}>
+                <Text style={styles.tableHeaderRank}>RANK</Text>
+                <Text style={styles.tableHeaderAthlete}>
+                  ATHLETE
+                </Text>
+                <Text style={styles.tableHeaderScore}>SCORE</Text>
+              </View>
+            )}
           </View>
         }
+        renderItem={({ item }) => {
+          const isCurrentUser = item.user_id === userId;
+          const displayName = item.display_name?.trim() || 'Runner';
+          const initial = displayName.charAt(0).toUpperCase();
 
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[
-              styles.row,
-              item.user_id === userId &&
-                styles.currentUserRow,
-            ]}
-            activeOpacity={0.8}
-            onPress={() =>
-              navigation.navigate(
-                'PublicProfile',
-                {
-                  userId:
-                    item.user_id,
-                },
-              )
-            }>
+          return (
+            <TouchableOpacity
+              style={[
+                styles.leaderboardRow,
+                isCurrentUser && styles.currentUserRow,
+              ]}
+              activeOpacity={0.85}
+              onPress={() =>
+                navigation.navigate('PublicProfile', {
+                  userId: item.user_id,
+                })
+              }
+            >
+              <View style={styles.rankColumn}>
+                {item.rank <= 3 ? (
+                  <View
+                    style={[
+                      styles.medal,
+                      item.rank === 1 && styles.goldMedal,
+                      item.rank === 2 && styles.silverMedal,
+                      item.rank === 3 && styles.bronzeMedal,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.medalText,
+                        item.rank === 1 && styles.goldMedalText,
+                      ]}
+                    >
+                      {item.rank}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text
+                    style={[
+                      styles.rankText,
+                      isCurrentUser && styles.highlightText,
+                    ]}
+                  >
+                    {String(item.rank).padStart(2, '0')}
+                  </Text>
+                )}
+              </View>
 
-            <Text style={styles.rank}>
-              #{item.rank}
-            </Text>
+              <View
+                style={[
+                  styles.avatar,
+                  isCurrentUser && styles.currentUserAvatar,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.avatarText,
+                    isCurrentUser && styles.currentUserAvatarText,
+                  ]}
+                >
+                  {initial}
+                </Text>
+              </View>
 
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {item.display_name
-                  .charAt(0)
-                  .toUpperCase()}
-              </Text>
-            </View>
+              <View style={styles.athleteInfo}>
+                <View style={styles.athleteNameRow}>
+                  <Text
+                    style={[
+                      styles.userName,
+                      isCurrentUser && styles.highlightText,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {displayName}
+                  </Text>
 
-            <View style={styles.userInfo}>
-              <Text style={styles.userName}>
-                {item.display_name}
-              </Text>
+                  {isCurrentUser && (
+                    <View style={styles.youTag}>
+                      <Text style={styles.youTagText}>YOU</Text>
+                    </View>
+                  )}
+                </View>
 
-              <Text style={styles.username}>
-                @{item.username}
-              </Text>
-            </View>
+                <Text style={styles.userUsername} numberOfLines={1}>
+                  @{item.username || 'runner'}
+                </Text>
+              </View>
 
-            <Text style={styles.score}>
-              {formatScore(
-                Number(item.score),
-              )}
-            </Text>
+              <View style={styles.scoreColumn}>
+                <Text
+                  style={[
+                    styles.userScore,
+                    isCurrentUser && styles.highlightText,
+                  ]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                >
+                  {formatScore(Number(item.score))}
+                </Text>
 
-          </TouchableOpacity>
-        )}
-
+                <Text style={styles.scoreCaption}>SCORE</Text>
+              </View>
+            </TouchableOpacity>
+          );
+        }}
         ListEmptyComponent={
-          <Text style={styles.empty}>
-            No participants yet.
+          <View style={styles.emptyLeaderboard}>
+            <View style={styles.emptyIcon}>
+              <Text style={styles.emptyIconText}>🏁</Text>
+            </View>
+
+            <Text style={styles.emptyTitle}>
+              No runners yet
+            </Text>
+
+            <Text style={styles.emptyDescription}>
+              Be the first to join this challenge and claim your place.
+            </Text>
+          </View>
+        }
+        ListFooterComponent={
+          <Text style={styles.footerNote}>
+            Rankings update as competition data changes.
           </Text>
         }
       />
-
     </View>
   );
 };
 
+export default CompetitionDetailsScreen;
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.background,
   },
 
   center: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.background,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 20,
+    padding: SPACING.xl,
   },
 
-  list: {
-    padding: 14,
-    paddingBottom: 30,
+  listContent: {
+    paddingHorizontal: SPACING.md,
+    paddingTop: 12,
+    paddingBottom: 48,
   },
 
+  loadingText: {
+    ...TYPOGRAPHY.caption,
+    marginTop: SPACING.md,
+  },
+
+  // Hero
   hero: {
-    backgroundColor: '#111',
+    backgroundColor: COLORS.surface,
     borderWidth: 1,
-    borderColor: '#222',
-    borderRadius: 18,
-    padding: 20,
+    borderColor: COLORS.border,
+    borderRadius: 24,
+    padding: SPACING.lg,
+    marginBottom: SPACING.md,
+  },
+
+  heroTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+    marginBottom: SPACING.lg,
   },
 
-  icon: {
-    width: 64,
-    height: 64,
-    borderRadius: 18,
-    backgroundColor: '#fff',
+  eyebrowRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 7,
   },
 
-  iconText: {
-    color: '#000',
-    fontSize: 25,
-    fontWeight: '900',
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
   },
 
-  name: {
-    color: '#fff',
-    fontSize: 23,
-    fontWeight: '900',
-    textAlign: 'center',
-    marginTop: 13,
-  },
-
-  description: {
-    color: '#888',
-    fontSize: 12,
-    lineHeight: 19,
-    textAlign: 'center',
-    marginTop: 7,
-  },
-
-  statusBadge: {
-    marginTop: 11,
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-  },
-
-  statusBadgeEnded: {
-    backgroundColor: '#333',
-  },
-
-  statusText: {
-    color: '#000',
-    fontSize: 8,
-    fontWeight: '900',
-  },
-
-  timerCard: {
-    backgroundColor: '#111',
-    borderWidth: 1,
-    borderColor: '#292929',
-    borderRadius: 18,
-    marginTop: 12,
-    paddingVertical: 17,
-    alignItems: 'center',
-  },
-
-  timerLabel: {
-    color: '#666',
-    fontSize: 8,
-    fontWeight: '900',
+  eyebrow: {
+    ...TYPOGRAPHY.label,
+    fontSize: 9,
+    color: COLORS.textSecondary,
     letterSpacing: 1,
   },
 
-  timerValue: {
-    color: '#fff',
-    fontSize: 25,
-    fontWeight: '900',
-    marginTop: 5,
+  statusBadge: {
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
 
-  liveIndicator: {
+  statusText: {
+    ...TYPOGRAPHY.label,
+    fontSize: 9,
+  },
+
+  heroName: {
+    ...TYPOGRAPHY.hero,
+    fontSize: 29,
+    lineHeight: 36,
+    letterSpacing: -0.5,
+  },
+
+  heroDescription: {
+    ...TYPOGRAPHY.body,
+    fontSize: 13,
+    lineHeight: 20,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.md,
+  },
+
+  heroDivider: {
+    height: 1,
+    backgroundColor: COLORS.border,
+    marginVertical: SPACING.lg,
+  },
+
+  heroDates: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 7,
   },
 
-  liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#fff',
-    marginRight: 5,
-  },
-
-  liveText: {
-    color: '#aaa',
-    fontSize: 8,
-    fontWeight: '900',
-  },
-
-  youCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#171717',
-    borderWidth: 1,
-    borderColor: '#333',
-    borderRadius: 16,
-    marginTop: 12,
-    padding: 16,
-  },
-
-  youLabel: {
-    color: '#666',
-    fontSize: 8,
-    fontWeight: '900',
-  },
-
-  youRank: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: '900',
-    marginTop: 3,
-  },
-
-  youScoreBlock: {
-    alignItems: 'flex-end',
-  },
-
-  youScore: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '900',
-  },
-
-  youScoreLabel: {
-    color: '#555',
-    fontSize: 8,
-    fontWeight: '800',
-    marginTop: 3,
-  },
-
-  joinButton: {
-    height: 48,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
-  },
-
-  leaveButton: {
-    height: 48,
-    backgroundColor: '#111',
-    borderWidth: 1,
-    borderColor: '#333',
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
-  },
-
-  joinText: {
-    color: '#000',
-    fontSize: 10,
-    fontWeight: '900',
-  },
-
-  leaveText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '900',
-  },
-
-  infoCard: {
-    flexDirection: 'row',
-    backgroundColor: '#111',
-    borderWidth: 1,
-    borderColor: '#222',
-    borderRadius: 18,
-    marginTop: 12,
-    paddingVertical: 18,
-  },
-
-  infoItem: {
+  dateBlock: {
     flex: 1,
-    alignItems: 'center',
-  },
-
-  infoValue: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '900',
-  },
-
-  infoLabel: {
-    color: '#555',
-    fontSize: 8,
-    fontWeight: '800',
-    marginTop: 5,
-  },
-
-  divider: {
-    width: 1,
-    backgroundColor: '#292929',
-  },
-
-  dateCard: {
-    backgroundColor: '#111',
-    borderWidth: 1,
-    borderColor: '#222',
-    borderRadius: 18,
-    marginTop: 12,
-    padding: 16,
-  },
-
-  dateLabel: {
-    color: '#555',
-    fontSize: 8,
-    fontWeight: '900',
-  },
-
-  dateValue: {
-    color: '#ddd',
-    fontSize: 12,
-    marginTop: 5,
   },
 
   dateDivider: {
-    height: 1,
-    backgroundColor: '#222',
-    marginVertical: 13,
+    width: 1,
+    height: 30,
+    backgroundColor: COLORS.border,
+    marginHorizontal: SPACING.md,
   },
 
-  leaderboardHeader: {
+  dateLabel: {
+    ...TYPOGRAPHY.label,
+    color: COLORS.textMuted,
+    fontSize: 8,
+    letterSpacing: 0.5,
+  },
+
+  dateValue: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 7,
+  },
+
+  // Countdown
+  timerCard: {
+    backgroundColor: COLORS.surfaceHighlight,
+    borderRadius: 22,
+    padding: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: SPACING.md,
+  },
+
+  timerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+  timerIndicator: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: COLORS.accent,
+  },
+
+  timerLabel: {
+    ...TYPOGRAPHY.label,
+    fontSize: 10,
+    color: COLORS.textSecondary,
+    letterSpacing: 0.8,
+  },
+
+  timerValue: {
+    color: COLORS.accent,
+    fontSize: 37,
+    fontWeight: '900',
+    letterSpacing: -1,
+    marginTop: SPACING.md,
+  },
+
+  timerValueSmall: {
+    fontSize: 25,
+    letterSpacing: 0,
+  },
+
+  timerCaption: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.textMuted,
+    marginTop: SPACING.sm,
+  },
+
+  // Personal performance
+  youCard: {
+    backgroundColor: 'rgba(212,255,0,0.07)',
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+    borderRadius: 20,
+    padding: SPACING.lg,
+    marginBottom: SPACING.md,
+    ...SHADOWS.glow,
+  },
+
+  youCardTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 22,
-    marginBottom: 10,
+    marginBottom: SPACING.md,
   },
 
-  leaderboardTitle: {
-    color: '#fff',
-    fontSize: 18,
+  youEyebrow: {
+    ...TYPOGRAPHY.label,
+    fontSize: 9,
+    color: COLORS.textSecondary,
+    letterSpacing: 0.8,
+  },
+
+  youBadge: {
+    color: COLORS.background,
+    backgroundColor: COLORS.accent,
+    overflow: 'hidden',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontSize: 8,
     fontWeight: '900',
   },
 
-  refreshText: {
-    color: '#444',
-    fontSize: 8,
+  youStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  youStat: {
+    flex: 1,
+  },
+
+  youDivider: {
+    width: 1,
+    height: 48,
+    backgroundColor: COLORS.border,
+    marginHorizontal: SPACING.md,
+  },
+
+  youLabel: {
+    ...TYPOGRAPHY.label,
+    color: COLORS.textSecondary,
+    fontSize: 9,
+  },
+
+  youRank: {
+    color: COLORS.accent,
+    fontSize: 34,
+    fontWeight: '900',
+    marginTop: 5,
+  },
+
+  youScore: {
+    color: COLORS.text,
+    fontSize: 22,
+    fontWeight: '900',
+    marginTop: 9,
+  },
+
+  // Join
+  joinButton: {
+    minHeight: 58,
+    backgroundColor: COLORS.accent,
+    borderRadius: 17,
+    paddingHorizontal: SPACING.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING.md,
+    ...SHADOWS.glow,
+  },
+
+  leaveButton: {
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.danger,
+    ...SHADOWS.soft,
+  },
+
+  joinButtonText: {
+    ...TYPOGRAPHY.label,
+    color: COLORS.background,
+    fontSize: 12,
+    letterSpacing: 0.5,
+  },
+
+  leaveButtonText: {
+    color: COLORS.danger,
+  },
+
+  joinButtonArrow: {
+    color: COLORS.background,
+    fontSize: 19,
+    fontWeight: '900',
+    marginLeft: 10,
+  },
+
+  // Stats
+  statsRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    marginBottom: SPACING.xl,
+  },
+
+  statCard: {
+    flex: 1,
+    backgroundColor: COLORS.surface,
+    borderRadius: 18,
+    padding: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+
+  statIcon: {
+    color: COLORS.accent,
+    fontSize: 21,
     fontWeight: '800',
   },
 
-  row: {
+  statValue: {
+    ...TYPOGRAPHY.h2,
+    fontSize: 21,
+    color: COLORS.text,
+    marginTop: SPACING.sm,
+  },
+
+  statLabel: {
+    ...TYPOGRAPHY.label,
+    color: COLORS.textMuted,
+    fontSize: 8,
+    letterSpacing: 0.5,
+    marginTop: 5,
+  },
+
+  // Leaderboard heading
+  sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#111',
+    justifyContent: 'space-between',
+    marginBottom: SPACING.md,
+  },
+
+  sectionHeadingLeft: {
+    flex: 1,
+  },
+
+  sectionEyebrow: {
+    ...TYPOGRAPHY.label,
+    fontSize: 9,
+    color: COLORS.accent,
+    letterSpacing: 1.2,
+  },
+
+  sectionTitle: {
+    ...TYPOGRAPHY.hero,
+    fontSize: 24,
+    marginTop: 5,
+  },
+
+  sectionSubtitle: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.textMuted,
+    marginTop: 5,
+  },
+
+  countBadge: {
+    minWidth: 38,
+    height: 38,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    backgroundColor: COLORS.surface,
     borderWidth: 1,
-    borderColor: '#222',
-    borderRadius: 14,
-    padding: 11,
-    marginBottom: 8,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: SPACING.md,
+  },
+
+  countBadgeText: {
+    color: COLORS.accent,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+
+  // Table header
+  tableHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 12,
+  },
+
+  tableHeaderRank: {
+    width: 36,
+    color: COLORS.textMuted,
+    fontSize: 8,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+  },
+
+  tableHeaderAthlete: {
+    flex: 1,
+    color: COLORS.textMuted,
+    fontSize: 8,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+    marginLeft: 12,
+  },
+
+  tableHeaderScore: {
+    color: COLORS.textMuted,
+    fontSize: 8,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+
+  // Leaderboard rows
+  leaderboardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    borderRadius: 17,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    marginBottom: SPACING.sm,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
 
   currentUserRow: {
-    borderColor: '#444',
-    backgroundColor: '#151515',
+    borderColor: COLORS.accent,
+    backgroundColor: 'rgba(212,255,0,0.06)',
   },
 
-  rank: {
-    color: '#777',
-    width: 34,
+  rankColumn: {
+    width: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 6,
+  },
+
+  rankText: {
+    color: COLORS.textSecondary,
     fontSize: 12,
     fontWeight: '900',
+  },
+
+  medal: {
+    width: 27,
+    height: 27,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.surfaceHighlight,
+  },
+
+  goldMedal: {
+    backgroundColor: COLORS.accent,
+  },
+
+  silverMedal: {
+    backgroundColor: '#D1D5DB',
+  },
+
+  bronzeMedal: {
+    backgroundColor: '#CD9A69',
+  },
+
+  medalText: {
+    color: COLORS.background,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+
+  goldMedalText: {
+    color: COLORS.background,
   },
 
   avatar: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: '#fff',
+    borderRadius: 14,
+    backgroundColor: COLORS.surfaceHighlight,
+    borderWidth: 1,
+    borderColor: COLORS.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
+  currentUserAvatar: {
+    backgroundColor: COLORS.accent,
+    borderColor: COLORS.accent,
+  },
+
   avatarText: {
-    color: '#000',
+    color: COLORS.text,
     fontSize: 15,
     fontWeight: '900',
   },
 
-  userInfo: {
+  currentUserAvatarText: {
+    color: COLORS.background,
+  },
+
+  athleteInfo: {
     flex: 1,
+    minWidth: 0,
     marginLeft: 10,
   },
 
+  athleteNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+
   userName: {
-    color: '#fff',
+    ...TYPOGRAPHY.h3,
     fontSize: 12,
-    fontWeight: '800',
+    flexShrink: 1,
   },
 
-  username: {
-    color: '#666',
-    fontSize: 9,
-    marginTop: 2,
+  highlightText: {
+    color: COLORS.accent,
   },
 
-  score: {
-    color: '#fff',
-    fontSize: 11,
+  youTag: {
+    backgroundColor: 'rgba(212,255,0,0.12)',
+    borderRadius: 5,
+    paddingHorizontal: 5,
+    paddingVertical: 3,
+  },
+
+  youTagText: {
+    color: COLORS.accent,
+    fontSize: 7,
     fontWeight: '900',
   },
 
-  errorBox: {
-    backgroundColor: '#151515',
+  userUsername: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 10,
+    marginTop: 4,
+  },
+
+  scoreColumn: {
+    alignItems: 'flex-end',
+    maxWidth: 100,
+    marginLeft: 8,
+  },
+
+  userScore: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+
+  scoreCaption: {
+    ...TYPOGRAPHY.label,
+    color: COLORS.textMuted,
+    fontSize: 7,
+    marginTop: 4,
+  },
+
+  // Empty / error
+  emptyLeaderboard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#333',
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 12,
+    borderColor: COLORS.border,
+    padding: SPACING.xl,
+    alignItems: 'center',
+    marginTop: SPACING.sm,
+  },
+
+  emptyIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    backgroundColor: COLORS.surfaceHighlight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING.md,
+  },
+
+  emptyIconText: {
+    color: COLORS.accent,
+    fontSize: 25,
+    fontWeight: '900',
+  },
+
+  emptyTitle: {
+    ...TYPOGRAPHY.h2,
+    fontSize: 18,
+    textAlign: 'center',
+  },
+
+  emptyDescription: {
+    ...TYPOGRAPHY.body,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginTop: SPACING.sm,
+  },
+
+  retryButton: {
+    backgroundColor: COLORS.accent,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: 13,
+    borderRadius: 13,
+    marginTop: SPACING.lg,
+  },
+
+  retryButtonText: {
+    color: COLORS.background,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+
+  errorBox: {
+    backgroundColor: 'rgba(255,69,58,0.08)',
+    borderWidth: 1,
+    borderColor: COLORS.danger,
+    borderRadius: 14,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+
+  errorTitle: {
+    color: COLORS.danger,
+    fontSize: 12,
+    fontWeight: '900',
   },
 
   errorText: {
-    color: '#aaa',
+    color: COLORS.textSecondary,
     fontSize: 12,
-    textAlign: 'center',
+    lineHeight: 18,
+    marginTop: 5,
   },
 
-  empty: {
-    color: '#555',
+  footerNote: {
+    ...TYPOGRAPHY.caption,
     textAlign: 'center',
-    paddingVertical: 30,
+    marginTop: SPACING.md,
+    marginBottom: SPACING.md,
   },
 });
-
-export default CompetitionDetailsScreen;

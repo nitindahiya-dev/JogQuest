@@ -1,150 +1,64 @@
-import React, {
-  useCallback,
-  useState,
-} from 'react';
-
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-
 import {
   useFocusEffect,
   useNavigation,
   useRoute,
-  type RouteProp,
 } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '../../auth/AuthContext';
+import { COLORS, SPACING, TYPOGRAPHY, SHADOWS } from '../../theme';
 
-import {useAuth} from '../../auth/AuthContext';
-
-import type {
-  NativeStackNavigationProp,
-} from '@react-navigation/native-stack';
-
-import type {
-  RootStackParamList,
-} from '../../navigation/types';
-
-type Route =
-  RouteProp<
-    RootStackParamList,
-    'PublicProfile'
-  >;
-
-type Navigation =
-  NativeStackNavigationProp<
-    RootStackParamList,
-    'PublicProfile'
-  >;
-
-type SocialProfile = {
-  id: string;
-  username: string;
-  display_name: string;
-  avatar_url: string | null;
-
-  activities_count: number;
-  total_distance_km: number;
-
-  territories_captured: number;
-  territory_km2: number;
-  territories_defended: number;
-
-  followers_count: number;
-  following_count: number;
-
-  rank: number;
-  level: number;
-
-  followed_by_viewer: boolean;
-};
-
-const API_BASE_URL =
-  'http://127.0.0.1:4000';
+const API_BASE_URL = 'http://127.0.0.1:4000';
 
 const PublicProfileScreen = () => {
-  const {user, token} = useAuth();
+  const { user, token } = useAuth();
+  const insets = useSafeAreaInsets();
+
   const viewerId = user?.id;
+  const route = useRoute<any>();
+  const navigation = useNavigation<any>();
+  const { userId } = route.params;
 
-  const route =
-    useRoute<Route>();
+  const [profile, setProfile] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [followLoading, setFollowLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const navigation =
-    useNavigation<Navigation>();
+  const loadProfile = useCallback(async () => {
+    if (!viewerId) {
+      setLoading(false);
+      return;
+    }
 
-  const {
-    userId,
-  } = route.params;
+    try {
+      setLoading(true);
+      setError(null);
 
-  const [
-    profile,
-    setProfile,
-  ] = useState<
-    SocialProfile | null
-  >(null);
+      const response = await fetch(
+        `${API_BASE_URL}/api/users/${userId}/social-profile?viewerId=${viewerId}`,
+      );
 
-  const [
-    loading,
-    setLoading,
-  ] = useState(true);
+      const data = await response.json();
 
-  const [
-    followLoading,
-    setFollowLoading,
-  ] = useState(false);
-
-  const [
-    error,
-    setError,
-  ] = useState<string | null>(null);
-
-  const loadProfile =
-    useCallback(async () => {
-      if (!viewerId) {
-        setError('Please log in to view this profile.');
-        setLoading(false);
-        return;
+      if (!response.ok) {
+        throw new Error(data.error ?? 'Failed to load');
       }
 
-      try {
-        setLoading(true);
-        setError(null);
-
-        const response =
-          await fetch(
-            `${API_BASE_URL}/api/users/${userId}/social-profile?viewerId=${viewerId}`,
-          );
-
-        const data =
-          (await response.json()) as
-            | SocialProfile
-            | { error?: string };
-
-        if (!response.ok) {
-          throw new Error(
-            'error' in data &&
-            data.error
-              ? data.error
-              : 'Failed to load profile',
-          );
-        }
-
-        setProfile(
-          data as SocialProfile,
-        );
-      } catch (error) {
-        setError(
-          error instanceof Error
-            ? error.message
-            : 'Failed to load profile',
-        );
-      } finally {
-        setLoading(false);
-      }
-    }, [userId, viewerId]);
+      setProfile(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed');
+    } finally {
+      setLoading(false);
+    }
+  }, [userId, viewerId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -152,151 +66,98 @@ const PublicProfileScreen = () => {
     }, [loadProfile]),
   );
 
-  const toggleFollow =
-    async () => {
-      if (
-        !viewerId ||
-        !profile ||
-        profile.id === viewerId ||
-        followLoading
-      ) {
-        return;
-      }
+  const toggleFollow = async () => {
+    if (
+      !viewerId ||
+      !profile ||
+      profile.id === viewerId ||
+      followLoading
+    ) {
+      return;
+    }
 
-      try {
-        setFollowLoading(true);
+    try {
+      setFollowLoading(true);
 
-        const method =
-          profile.followed_by_viewer
-            ? 'DELETE'
-            : 'POST';
+      const method = profile.followed_by_viewer ? 'DELETE' : 'POST';
 
-        const response =
-          await fetch(
-            `${API_BASE_URL}/api/users/${viewerId}/follow/${profile.id}`,
-            {
-              method,
-              headers: {Authorization: `Bearer ${token}`},
-            },
-          );
-
-        const data =
-          (await response.json()) as {
-            error?: string;
-          };
-
-        if (!response.ok) {
-          throw new Error(
-            data.error ??
-              'Failed to update follow',
-          );
-        }
-
-        setProfile(
-          current =>
-            current
-              ? {
-                  ...current,
-
-                  followed_by_viewer:
-                    !current.followed_by_viewer,
-
-                  followers_count:
-                    current.followed_by_viewer
-                      ? Math.max(
-                          current.followers_count - 1,
-                          0,
-                        )
-                      : current.followers_count + 1,
-                }
-              : current,
-        );
-      } catch (error) {
-        setError(
-          error instanceof Error
-            ? error.message
-            : 'Failed to update follow',
-        );
-      } finally {
-        setFollowLoading(false);
-      }
-    };
-
-  const openFollowers =
-    () => {
-      navigation.navigate(
-        'FollowList',
+      const response = await fetch(
+        `${API_BASE_URL}/api/users/${viewerId}/follow/${profile.id}`,
         {
-          userId: userId,
-          mode: 'followers',
+          method,
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
         },
       );
-    };
 
-  const openFollowing =
-    () => {
-      navigation.navigate(
-        'FollowList',
-        {
-          userId: userId,
-          mode: 'following',
-        },
-      );
-    };
+      if (!response.ok) {
+        throw new Error('Failed to update follow status.');
+      }
+
+      setProfile((current: any) => ({
+        ...current,
+        followed_by_viewer: !current.followed_by_viewer,
+        followers_count: current.followed_by_viewer
+          ? current.followers_count - 1
+          : current.followers_count + 1,
+      }));
+    } catch (e) {
+      console.error('Failed to update follow status:', e);
+    } finally {
+      setFollowLoading(false);
+    }
+  };
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator
-          size="large"
-          color="#fff"
-        />
+      <View
+        style={[
+          styles.center,
+          { paddingBottom: insets.bottom + 40 },
+        ]}
+      >
+        <ActivityIndicator color={COLORS.accent} size="large" />
       </View>
     );
   }
 
-  if (
-    error ||
-    !profile
-  ) {
+  if (error || !profile) {
     return (
-      <View style={styles.center}>
+      <View
+        style={[
+          styles.center,
+          { paddingBottom: insets.bottom + 40 },
+        ]}
+      >
         <Text style={styles.errorText}>
-          {error ??
-            'Profile unavailable.'}
+          {error || 'Unavailable'}
         </Text>
-
-        <TouchableOpacity
-          style={styles.retryButton}
-          onPress={loadProfile}>
-          <Text style={styles.retryText}>
-            RETRY
-          </Text>
-        </TouchableOpacity>
       </View>
     );
   }
 
-  const isOwnProfile =
-    !!viewerId &&
-    profile.id === viewerId;
+  const isOwnProfile = viewerId === profile.id;
 
   return (
-    <View style={styles.container}>
-
-      <View style={styles.header}>
-
-        <View style={styles.avatar}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[
+        styles.content,
+        {
+          paddingBottom: insets.bottom + 40,
+        },
+      ]}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={styles.profileHeader}>
+        <View style={styles.avatarContainer}>
           <Text style={styles.avatarText}>
-            {profile.display_name
-              .charAt(0)
-              .toUpperCase()}
+            {profile.display_name.charAt(0).toUpperCase()}
           </Text>
         </View>
 
-        <Text style={styles.name}>
-          {profile.display_name}
-        </Text>
+        <Text style={styles.name}>{profile.display_name}</Text>
 
         <Text style={styles.username}>
           @{profile.username}
@@ -307,90 +168,84 @@ const PublicProfileScreen = () => {
             LEVEL {profile.level}
           </Text>
         </View>
-
       </View>
 
       {!isOwnProfile && (
         <TouchableOpacity
-          style={
-            profile.followed_by_viewer
-              ? styles.followButtonFollowing
-              : styles.followButton
-          }
+          style={[
+            styles.followBtn,
+            profile.followed_by_viewer && styles.followBtnFollowing,
+          ]}
           onPress={toggleFollow}
-          disabled={followLoading}>
-
+          disabled={followLoading}
+          activeOpacity={0.8}
+        >
           {followLoading ? (
             <ActivityIndicator
-              size="small"
               color={
                 profile.followed_by_viewer
-                  ? '#fff'
-                  : '#000'
+                  ? COLORS.text
+                  : COLORS.background
               }
             />
           ) : (
             <Text
-              style={
-                profile.followed_by_viewer
-                  ? styles.followingText
-                  : styles.followText
-              }>
-              {profile.followed_by_viewer
-                ? 'FOLLOWING'
-                : 'FOLLOW'}
+              style={[
+                styles.followBtnText,
+                profile.followed_by_viewer &&
+                  styles.followBtnTextFollowing,
+              ]}
+            >
+              {profile.followed_by_viewer ? 'FOLLOWING' : '+ FOLLOW'}
             </Text>
           )}
-
         </TouchableOpacity>
       )}
 
       <View style={styles.socialStats}>
-
         <TouchableOpacity
           style={styles.socialStat}
-          onPress={openFollowers}>
-
+          onPress={() =>
+            navigation.navigate('FollowList', {
+              userId,
+              mode: 'followers',
+            })
+          }
+          activeOpacity={0.7}
+        >
           <Text style={styles.socialValue}>
             {profile.followers_count}
           </Text>
 
-          <Text style={styles.socialLabel}>
-            FOLLOWERS
-          </Text>
-
+          <Text style={styles.socialLabel}>FOLLOWERS</Text>
         </TouchableOpacity>
 
         <View style={styles.divider} />
 
         <TouchableOpacity
           style={styles.socialStat}
-          onPress={openFollowing}>
-
+          onPress={() =>
+            navigation.navigate('FollowList', {
+              userId,
+              mode: 'following',
+            })
+          }
+          activeOpacity={0.7}
+        >
           <Text style={styles.socialValue}>
             {profile.following_count}
           </Text>
 
-          <Text style={styles.socialLabel}>
-            FOLLOWING
-          </Text>
-
+          <Text style={styles.socialLabel}>FOLLOWING</Text>
         </TouchableOpacity>
-
       </View>
 
       <View style={styles.statsCard}>
-
         <View style={styles.stat}>
           <Text style={styles.value}>
-            {Number(
-              profile.territory_km2,
-            ).toFixed(3)}
+            {Number(profile.territory_km2).toFixed(3)}
           </Text>
-
-          <Text style={styles.label}>
-            TERRITORY KM²
-          </Text>
+          <Text style={styles.label}>KM²</Text>
         </View>
 
         <View style={styles.divider} />
@@ -399,188 +254,148 @@ const PublicProfileScreen = () => {
           <Text style={styles.value}>
             {profile.activities_count}
           </Text>
-
-          <Text style={styles.label}>
-            ACTIVITIES
-          </Text>
+          <Text style={styles.label}>ACTIVITIES</Text>
         </View>
 
         <View style={styles.divider} />
 
         <View style={styles.stat}>
-          <Text style={styles.value}>
-            {profile.rank}
-          </Text>
-
-          <Text style={styles.label}>
-            RANK
-          </Text>
+          <Text style={styles.value}>#{profile.rank}</Text>
+          <Text style={styles.label}>RANK</Text>
         </View>
-
       </View>
 
-      <View style={styles.section}>
+      <Text style={styles.sectionTitle}>QUEST STATS</Text>
 
-        <Text style={styles.sectionTitle}>
-          Quest Stats
-        </Text>
-
+      <View style={styles.listCard}>
         <View style={styles.row}>
-          <Text style={styles.rowLabel}>
-            Distance
-          </Text>
-
+          <Text style={styles.rowLabel}>Total Distance</Text>
           <Text style={styles.rowValue}>
-            {Number(
-              profile.total_distance_km,
-            ).toFixed(2)}{' '}
-            km
+            {Number(profile.total_distance_km).toFixed(2)} km
           </Text>
         </View>
 
         <View style={styles.row}>
-          <Text style={styles.rowLabel}>
-            Territories Captured
-          </Text>
-
+          <Text style={styles.rowLabel}>Territories Captured</Text>
           <Text style={styles.rowValue}>
             {profile.territories_captured}
           </Text>
         </View>
 
-        <View style={styles.row}>
-          <Text style={styles.rowLabel}>
-            Territories Defended
-          </Text>
-
+        <View style={[styles.row, styles.lastRow]}>
+          <Text style={styles.rowLabel}>Territories Defended</Text>
           <Text style={styles.rowValue}>
             {profile.territories_defended}
           </Text>
         </View>
-
       </View>
-
-    </View>
+    </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
-    padding: 20,
+    backgroundColor: COLORS.background,
+  },
+
+  content: {
+    padding: SPACING.md,
   },
 
   center: {
     flex: 1,
-    backgroundColor: '#000',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 20,
+    backgroundColor: COLORS.background,
   },
 
   errorText: {
-    color: '#aaa',
-    textAlign: 'center',
+    ...TYPOGRAPHY.body,
+    color: COLORS.danger,
   },
 
-  retryButton: {
-    marginTop: 18,
-    backgroundColor: '#fff',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 14,
-  },
-
-  retryText: {
-    color: '#000',
-    fontWeight: '900',
-  },
-
-  header: {
+  profileHeader: {
     alignItems: 'center',
-    marginTop: 12,
+    marginBottom: SPACING.lg,
   },
 
-  avatar: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: '#fff',
+  avatarContainer: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: COLORS.accent,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: SPACING.md,
+    ...SHADOWS.glow,
   },
 
   avatarText: {
-    color: '#000',
-    fontSize: 34,
+    color: COLORS.background,
+    fontSize: 40,
     fontWeight: '900',
   },
 
   name: {
-    color: '#fff',
-    fontSize: 25,
-    fontWeight: '900',
-    marginTop: 12,
+    ...TYPOGRAPHY.h1,
+    fontSize: 26,
   },
 
   username: {
-    color: '#666',
-    marginTop: 3,
+    ...TYPOGRAPHY.body,
+    marginTop: 4,
   },
 
   levelBadge: {
-    marginTop: 10,
-    backgroundColor: '#111',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    marginTop: SPACING.md,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.xs,
+    backgroundColor: COLORS.surfaceLight,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
 
   levelText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '900',
+    ...TYPOGRAPHY.label,
+    color: COLORS.accent,
   },
 
-  followButton: {
-    height: 44,
-    marginTop: 18,
-    borderRadius: 12,
-    backgroundColor: '#fff',
+  followBtn: {
+    backgroundColor: COLORS.accent,
+    paddingVertical: SPACING.lg,
+    borderRadius: 20,
     alignItems: 'center',
-    justifyContent: 'center',
+    marginBottom: SPACING.md,
+    ...SHADOWS.glow,
   },
 
-  followButtonFollowing: {
-    height: 44,
-    marginTop: 18,
-    borderRadius: 12,
-    backgroundColor: '#111',
+  followBtnFollowing: {
+    backgroundColor: COLORS.surface,
     borderWidth: 1,
-    borderColor: '#333',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderColor: COLORS.border,
+    ...SHADOWS.soft,
   },
 
-  followText: {
-    color: '#000',
-    fontSize: 11,
-    fontWeight: '900',
+  followBtnText: {
+    ...TYPOGRAPHY.label,
+    color: COLORS.background,
+    fontSize: 13,
   },
 
-  followingText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '900',
+  followBtnTextFollowing: {
+    color: COLORS.text,
   },
 
   socialStats: {
     flexDirection: 'row',
-    backgroundColor: '#111',
-    borderRadius: 18,
-    marginTop: 18,
-    paddingVertical: 18,
+    backgroundColor: COLORS.surface,
+    borderRadius: 20,
+    paddingVertical: SPACING.lg,
+    marginBottom: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
 
   socialStat: {
@@ -589,24 +404,29 @@ const styles = StyleSheet.create({
   },
 
   socialValue: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '900',
+    ...TYPOGRAPHY.h2,
+    fontSize: 22,
   },
 
   socialLabel: {
-    color: '#666',
+    ...TYPOGRAPHY.label,
     fontSize: 9,
-    fontWeight: '800',
-    marginTop: 5,
+    marginTop: 4,
+  },
+
+  divider: {
+    width: 1,
+    backgroundColor: COLORS.border,
   },
 
   statsCard: {
     flexDirection: 'row',
-    backgroundColor: '#111',
-    borderRadius: 18,
-    marginTop: 12,
-    paddingVertical: 20,
+    backgroundColor: COLORS.surface,
+    borderRadius: 20,
+    paddingVertical: SPACING.lg,
+    marginBottom: SPACING.xl,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
 
   stat: {
@@ -615,54 +435,58 @@ const styles = StyleSheet.create({
   },
 
   value: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '900',
+    ...TYPOGRAPHY.h3,
+    fontSize: 16,
+    color: COLORS.accent,
   },
 
   label: {
-    color: '#666',
+    ...TYPOGRAPHY.label,
     fontSize: 8,
-    fontWeight: '800',
-    marginTop: 5,
-    textAlign: 'center',
-  },
-
-  divider: {
-    width: 1,
-    backgroundColor: '#292929',
-  },
-
-  section: {
-    marginTop: 22,
+    marginTop: 4,
   },
 
   sectionTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '900',
-    marginBottom: 8,
+    ...TYPOGRAPHY.label,
+    fontSize: 11,
+    color: COLORS.accent,
+    marginBottom: SPACING.md,
+  },
+
+  listCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 20,
+    paddingHorizontal: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
 
   row: {
-    minHeight: 48,
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    paddingVertical: SPACING.md,
     borderBottomWidth: 1,
-    borderBottomColor: '#1d1d1d',
+    borderBottomColor: COLORS.border,
+  },
+
+  lastRow: {
+    borderBottomWidth: 0,
   },
 
   rowLabel: {
-    color: '#777',
-    fontSize: 13,
+    ...TYPOGRAPHY.body,
+    fontSize: 15,
+    flexShrink: 1,
   },
 
   rowValue: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '800',
+    ...TYPOGRAPHY.h3,
+    fontSize: 15,
+    color: COLORS.accent,
+    flexShrink: 0,
   },
 });
 
-export default PublicProfileScreen;
+export default PublicProfileScreen;src/screens/Social/FollowListScreen.tsx

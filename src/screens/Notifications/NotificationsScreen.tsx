@@ -1,8 +1,4 @@
-import React, {
-  useCallback,
-  useState,
-} from 'react';
-
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -12,119 +8,58 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-
-import {
-  useFocusEffect,
-} from '@react-navigation/native';
-
+import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../auth/AuthContext';
+import { COLORS, SPACING, TYPOGRAPHY, SHADOWS } from '../../theme';
 
-type NotificationItem = {
-  id: string;
-
-  type: string;
-
-  title: string;
-
-  message: string;
-
-  territory_id: string | null;
-
-  challenge_id: string | null;
-
-  activity_id: string | null;
-
-  competition_id: string | null;
-
-  created_at: string;
-
-  read_at: string | null;
-};
-
-type NotificationsResponse = {
-  unreadCount: number;
-  notifications: NotificationItem[];
-};
-
-const API_BASE_URL =
-  'http://127.0.0.1:4000';
+const API_BASE_URL = 'http://127.0.0.1:4000';
 
 const NotificationsScreen = () => {
-
   const { user, token } = useAuth();
+  const insets = useSafeAreaInsets();
 
   const userId = user?.id;
 
-  const [
-    notifications,
-    setNotifications,
-  ] = useState<NotificationItem[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const [
-    unreadCount,
-    setUnreadCount,
-  ] = useState(0);
+  const loadNotifications = useCallback(async () => {
+    if (!userId) {
+      setNotifications([]);
+      setUnreadCount(0);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
 
-  const [
-    loading,
-    setLoading,
-  ] = useState(true);
-
-  const [
-    refreshing,
-    setRefreshing,
-  ] = useState(false);
-
-  const [
-    error,
-    setError,
-  ] = useState<string | null>(null);
-
-  const loadNotifications =
-    useCallback(async () => {
-      try {
-        setError(null);
-
-        const response = await fetch(
-          `${API_BASE_URL}/api/users/${userId}/notifications`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/users/${userId}/notifications`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
           },
-        );
+        },
+      );
 
-        const data =
-          (await response.json()) as
-          | NotificationsResponse
-          | { error?: string };
-
-        if (!response.ok) {
-          throw new Error(
-            'error' in data && data.error
-              ? data.error
-              : 'Failed to load notifications',
-          );
-        }
-
-        setNotifications(
-          (data as NotificationsResponse).notifications,
-        );
-
-        setUnreadCount(
-          (data as NotificationsResponse).unreadCount,
-        );
-      } catch (error) {
-        setError(
-          error instanceof Error
-            ? error.message
-            : 'Failed to load notifications',
-        );
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
+      if (!response.ok) {
+        throw new Error(`Failed to load notifications: ${response.status}`);
       }
-    }, [userId, token]);
+
+      const data = await response.json();
+
+      setNotifications(data.notifications || []);
+      setUnreadCount(data.unreadCount || 0);
+    } catch (e) {
+      console.error('Failed to load notifications:', e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [userId, token]);
 
   useFocusEffect(
     useCallback(() => {
@@ -132,247 +67,127 @@ const NotificationsScreen = () => {
     }, [loadNotifications]),
   );
 
-  const markRead = async (
-    notification: NotificationItem,
-  ) => {
-    if (notification.read_at) {
-      return;
-    }
-
-    try {
-      const response =
-        await fetch(
-          `${API_BASE_URL}/api/notifications/${notification.id}/read`,
-          {
-            method: 'PATCH',
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          },
-        );
-
-      if (!response.ok) {
-        throw new Error(
-          'Failed to mark notification as read',
-        );
-      }
-
-      setNotifications(
-        current =>
-          current.map(item =>
-            item.id === notification.id
-              ? {
-                ...item,
-                read_at:
-                  new Date().toISOString(),
-              }
-              : item,
-          ),
-      );
-
-      setUnreadCount(
-        current =>
-          Math.max(current - 1, 0),
-      );
-    } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : 'Failed to mark notification as read',
-      );
-    }
-  };
-
   const markAllRead = async () => {
-    if (unreadCount === 0) {
+    if (unreadCount === 0 || !userId) {
       return;
     }
 
     try {
-      const response =
-        await fetch(
-          `${API_BASE_URL}/api/users/${userId}/notifications/read-all`,
-          {
-            method: 'PATCH',
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
+      const response = await fetch(
+        `${API_BASE_URL}/api/users/${userId}/notifications/read-all`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${token}`,
           },
-        );
-
-      const data =
-        (await response.json()) as {
-          error?: string;
-        };
+        },
+      );
 
       if (!response.ok) {
-        throw new Error(
-          data.error ??
-          'Failed to mark all notifications as read',
-        );
+        throw new Error(`Failed to mark notifications as read: ${response.status}`);
       }
 
-      const now =
-        new Date().toISOString();
-
-      setNotifications(
-        current =>
-          current.map(item => ({
-            ...item,
-            read_at:
-              item.read_at ?? now,
-          })),
+      setNotifications(prev =>
+        prev.map(notification => ({
+          ...notification,
+          read_at: notification.read_at ?? new Date().toISOString(),
+        })),
       );
 
       setUnreadCount(0);
-    } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : 'Failed to mark all notifications as read',
-      );
+    } catch (e) {
+      console.error('Failed to mark notifications as read:', e);
     }
   };
 
-  const formatDate = (
-    value: string,
-  ) => {
-    return new Date(value).toLocaleString();
-  };
-
-  if (!userId) {
+  if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator
-          size="large"
-          color="#fff"
-        />
+      <View
+        style={[
+          styles.center,
+          { paddingBottom: insets.bottom + 40 },
+        ]}
+      >
+        <ActivityIndicator color={COLORS.accent} size="large" />
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-
       <View style={styles.header}>
-
-        <View>
-          <Text style={styles.title}>
-            Notifications
-          </Text>
-
-          <Text style={styles.subtitle}>
-            {unreadCount} unread
-          </Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>NOTIFICATIONS</Text>
+          <Text style={styles.subtitle}>{unreadCount} unread</Text>
         </View>
 
         {unreadCount > 0 && (
           <TouchableOpacity
-            style={styles.readAllButton}
-            onPress={markAllRead}>
-            <Text style={styles.readAllText}>
-              MARK ALL READ
-            </Text>
+            style={styles.readAllBtn}
+            onPress={markAllRead}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.readAllBtnText}>MARK ALL READ</Text>
           </TouchableOpacity>
         )}
-
       </View>
 
-      {error && (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>
-            {error}
-          </Text>
-        </View>
-      )}
+      <FlatList
+        data={notifications}
+        keyExtractor={item => item.id}
+        contentContainerStyle={[
+          styles.listContent,
+          { paddingBottom: insets.bottom + 40 },
+        ]}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              loadNotifications();
+            }}
+            tintColor={COLORS.accent}
+          />
+        }
+        renderItem={({ item }) => (
+          <View
+            style={[
+              styles.card,
+              !item.read_at && styles.unreadCard,
+            ]}
+          >
+            <View style={styles.iconCircle}>
+              <Text style={styles.iconText}>!</Text>
+            </View>
 
-      {notifications.length === 0 ? (
-        <View style={styles.empty}>
-          <Text style={styles.emptyTitle}>
-            No notifications
-          </Text>
+            <View style={{ flex: 1, marginLeft: SPACING.md }}>
+              <View style={styles.titleRow}>
+                <Text style={styles.cardTitle} numberOfLines={1}>
+                  {item.title}
+                </Text>
 
-          <Text style={styles.emptyText}>
-            Territory activity and challenge
-            updates will appear here.
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          data={notifications}
-          keyExtractor={item => item.id}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                loadNotifications();
-              }}
-              tintColor="#fff"
-            />
-          }
-          contentContainerStyle={
-            styles.listContent
-          }
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={() =>
-                markRead(item)
-              }
-              style={[
-                styles.card,
-                !item.read_at &&
-                styles.unreadCard,
-              ]}>
-
-              <View style={styles.cardTop}>
-
-                <View style={styles.icon}>
-                  <Text style={styles.iconText}>
-                    !
-                  </Text>
-                </View>
-
-                <View style={styles.cardBody}>
-
-                  <View style={styles.titleRow}>
-                    <Text
-                      style={styles.cardTitle}
-                      numberOfLines={1}>
-                      {item.title}
-                    </Text>
-
-                    {!item.read_at && (
-                      <View
-                        style={
-                          styles.unreadDot
-                        }
-                      />
-                    )}
-                  </View>
-
-                  <Text
-                    style={styles.message}>
-                    {item.message}
-                  </Text>
-
-                  <Text
-                    style={styles.time}>
-                    {formatDate(
-                      item.created_at,
-                    )}
-                  </Text>
-
-                </View>
-
+                {!item.read_at && <View style={styles.unreadDot} />}
               </View>
 
-            </TouchableOpacity>
-          )}
-        />
-      )}
+              <Text style={styles.message}>{item.message}</Text>
 
+              <Text style={styles.time}>
+                {new Date(item.created_at).toLocaleString()}
+              </Text>
+            </View>
+          </View>
+        )}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Text style={styles.emptyTitle}>No Notifications</Text>
+
+            <Text style={styles.emptyText}>
+              Activity and updates will appear here.
+            </Text>
+          </View>
+        }
+      />
     </View>
   );
 };
@@ -380,92 +195,79 @@ const NotificationsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.background,
   },
 
   center: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#000',
+    backgroundColor: COLORS.background,
   },
 
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 22,
-    paddingBottom: 16,
+    padding: SPACING.md,
+    paddingBottom: SPACING.md,
   },
 
   title: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: '900',
+    ...TYPOGRAPHY.hero,
+    fontSize: 28,
   },
 
   subtitle: {
-    color: '#666',
-    fontSize: 12,
+    ...TYPOGRAPHY.body,
     marginTop: 4,
   },
 
-  readAllButton: {
+  readAllBtn: {
     borderWidth: 1,
-    borderColor: '#333',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
   },
 
-  readAllText: {
-    color: '#fff',
+  readAllBtnText: {
+    ...TYPOGRAPHY.label,
     fontSize: 10,
-    fontWeight: '900',
   },
 
   listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 30,
+    padding: SPACING.md,
+    flexGrow: 1,
   },
 
   card: {
-    backgroundColor: '#111',
+    flexDirection: 'row',
+    backgroundColor: COLORS.surface,
+    borderRadius: 20,
+    padding: SPACING.md,
+    marginBottom: SPACING.sm,
     borderWidth: 1,
-    borderColor: '#222',
-    borderRadius: 16,
-    padding: 15,
-    marginBottom: 10,
+    borderColor: COLORS.border,
   },
 
   unreadCard: {
-    borderColor: '#444',
-    backgroundColor: '#151515',
+    borderColor: COLORS.accent,
+    backgroundColor: 'rgba(212, 255, 0, 0.03)',
   },
 
-  cardTop: {
-    flexDirection: 'row',
-  },
-
-  icon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#fff',
+  iconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.surfaceHighlight,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
   },
 
   iconText: {
-    color: '#000',
-    fontSize: 18,
+    color: COLORS.accent,
+    fontSize: 20,
     fontWeight: '900',
-  },
-
-  cardBody: {
-    flex: 1,
   },
 
   titleRow: {
@@ -475,65 +277,46 @@ const styles = StyleSheet.create({
 
   cardTitle: {
     flex: 1,
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '800',
+    ...TYPOGRAPHY.h3,
+    fontSize: 14,
   },
 
   unreadDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#fff',
-    marginLeft: 8,
+    backgroundColor: COLORS.accent,
+    marginLeft: SPACING.sm,
+    ...SHADOWS.glow,
   },
 
   message: {
-    color: '#aaa',
+    ...TYPOGRAPHY.body,
     fontSize: 13,
-    lineHeight: 19,
-    marginTop: 5,
+    marginTop: 6,
   },
 
   time: {
-    color: '#666',
+    ...TYPOGRAPHY.caption,
     fontSize: 10,
     marginTop: 8,
   },
 
-  errorBox: {
-    marginHorizontal: 16,
-    marginBottom: 10,
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: '#151515',
-    borderWidth: 1,
-    borderColor: '#333',
-  },
-
-  errorText: {
-    color: '#aaa',
-    fontSize: 12,
-  },
-
   empty: {
     flex: 1,
+    paddingVertical: 100,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 40,
   },
 
   emptyTitle: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '900',
+    ...TYPOGRAPHY.h2,
   },
 
   emptyText: {
-    color: '#666',
+    ...TYPOGRAPHY.body,
+    marginTop: SPACING.sm,
     textAlign: 'center',
-    lineHeight: 20,
-    marginTop: 8,
   },
 });
 

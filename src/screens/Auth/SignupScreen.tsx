@@ -3,58 +3,39 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../auth/AuthContext';
-import type { RootStackParamList } from '../../navigation/types';
-
-type NavigationProp =
-  NativeStackNavigationProp<
-    RootStackParamList,
-    'Signup'
-  >;
+import { COLORS, SPACING, TYPOGRAPHY, SHADOWS } from '../../theme';
 
 const API_BASE_URL = 'http://127.0.0.1:4000';
 
 const SignupScreen = () => {
-  const navigation =
-    useNavigation<NavigationProp>();
-
+  const navigation = useNavigation<any>();
   const { login } = useAuth();
+  const insets = useSafeAreaInsets();
 
-  const [displayName, setDisplayName] =
-    useState('');
-  const [username, setUsername] =
-    useState('');
-  const [email, setEmail] =
-    useState('');
-  const [password, setPassword] =
-    useState('');
-  const [confirmPassword, setConfirmPassword] =
-    useState('');
-
-  const [submitting, setSubmitting] =
-    useState(false);
-  const [error, setError] =
-    useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
   const handleSignup = async () => {
     setError('');
 
-    const cleanDisplayName =
-      displayName.trim();
-    const cleanUsername =
-      username.trim();
-    const cleanEmail =
-      email.trim().toLowerCase();
+    const cleanDisplayName = displayName.trim();
+    const cleanUsername = username.trim();
+    const cleanEmail = email.trim().toLowerCase();
 
     if (
       !cleanDisplayName ||
@@ -63,76 +44,45 @@ const SignupScreen = () => {
       !password ||
       !confirmPassword
     ) {
-      setError(
-        'Please fill in all fields.',
-      );
+      setError('Please fill in all fields.');
       return;
     }
 
     if (password.length < 8) {
-      setError(
-        'Password must be at least 8 characters.',
-      );
+      setError('Password must be at least 8 characters.');
       return;
     }
 
     if (password !== confirmPassword) {
-      setError(
-        'Passwords do not match.',
-      );
+      setError('Passwords do not match.');
       return;
     }
 
     try {
       setSubmitting(true);
 
-      const response =
-        await fetch(
-          `${API_BASE_URL}/api/auth/signup`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type':
-                'application/json',
-            },
-            body: JSON.stringify({
-              username: cleanUsername,
-              displayName:
-                cleanDisplayName,
-              email: cleanEmail,
-              password,
-            }),
-          },
-        );
+      const response = await fetch(`${API_BASE_URL}/api/auth/signup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username: cleanUsername,
+          displayName: cleanDisplayName,
+          email: cleanEmail,
+          password,
+        }),
+      });
 
-      const data =
-        (await response.json()) as {
-          error?: string;
-          id?: string;
-          username?: string;
-          display_name?: string;
-          email?: string | null;
-          avatar_url?: string | null;
-        };
+      const data = await response.json();
 
       if (!response.ok || !data.id) {
-        throw new Error(
-          data.error ??
-          'Signup failed.',
-        );
+        throw new Error(data.error ?? 'Signup failed.');
       }
 
-      // Automatically sign the new user in.
-      await login(
-        cleanEmail,
-        password,
-      );
+      await login(cleanEmail, password);
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : 'Signup failed.',
-      );
+      setError(err instanceof Error ? err.message : 'Signup failed.');
     } finally {
       setSubmitting(false);
     }
@@ -141,143 +91,143 @@ const SignupScreen = () => {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={
-        Platform.OS === 'ios'
-          ? 'padding'
-          : undefined
-      }>
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <ScrollView
-        contentContainerStyle={
-          styles.content
-        }
-        keyboardShouldPersistTaps="handled">
-
-        <View style={styles.logoBox}>
-          <Text style={styles.logoText}>
-            J
-          </Text>
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingTop: insets.top + 40,
+            paddingBottom: insets.bottom + 40,
+          },
+        ]}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+      >
+        <View style={styles.logoContainer}>
+          <Text style={styles.logoText}>J</Text>
         </View>
 
-        <Text style={styles.title}>
-          Create Account
-        </Text>
-
+        <Text style={styles.title}>Create Account</Text>
         <Text style={styles.subtitle}>
-          Join JogQuest and start
-          capturing your territory.
+          Join the quest. Capture territory.
         </Text>
 
-        <View style={styles.form}>
-          <Text style={styles.label}>
-            DISPLAY NAME
-          </Text>
-
+        <View style={styles.inputWrapper}>
+          <Text style={styles.label}>DISPLAY NAME</Text>
           <TextInput
             value={displayName}
             onChangeText={setDisplayName}
             placeholder="Full Name"
-            placeholderTextColor="#555"
+            placeholderTextColor={COLORS.textMuted}
             autoCapitalize="words"
+            autoComplete="name"
+            textContentType="name"
+            returnKeyType="next"
             style={styles.input}
           />
+        </View>
 
-          <Text style={styles.label}>
-            USERNAME
-          </Text>
-
+        <View style={styles.inputWrapper}>
+          <Text style={styles.label}>USERNAME</Text>
           <TextInput
             value={username}
             onChangeText={setUsername}
             placeholder="username"
-            placeholderTextColor="#555"
+            placeholderTextColor={COLORS.textMuted}
             autoCapitalize="none"
             autoCorrect={false}
+            autoComplete="username"
+            textContentType="username"
+            returnKeyType="next"
             style={styles.input}
           />
+        </View>
 
-          <Text style={styles.label}>
-            EMAIL
-          </Text>
-
+        <View style={styles.inputWrapper}>
+          <Text style={styles.label}>EMAIL</Text>
           <TextInput
             value={email}
             onChangeText={setEmail}
             placeholder="you@example.com"
-            placeholderTextColor="#555"
+            placeholderTextColor={COLORS.textMuted}
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
+            autoComplete="email"
+            textContentType="emailAddress"
+            returnKeyType="next"
             style={styles.input}
           />
+        </View>
 
-          <Text style={styles.label}>
-            PASSWORD
-          </Text>
-
+        <View style={styles.inputWrapper}>
+          <Text style={styles.label}>PASSWORD</Text>
           <TextInput
             value={password}
             onChangeText={setPassword}
             placeholder="Minimum 8 characters"
-            placeholderTextColor="#555"
+            placeholderTextColor={COLORS.textMuted}
             secureTextEntry
             autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="new-password"
+            textContentType="newPassword"
+            returnKeyType="next"
             style={styles.input}
           />
+        </View>
 
-          <Text style={styles.label}>
-            CONFIRM PASSWORD
-          </Text>
-
+        <View style={styles.inputWrapper}>
+          <Text style={styles.label}>CONFIRM PASSWORD</Text>
           <TextInput
             value={confirmPassword}
             onChangeText={setConfirmPassword}
             placeholder="Repeat your password"
-            placeholderTextColor="#555"
+            placeholderTextColor={COLORS.textMuted}
             secureTextEntry
             autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="done"
+            onSubmitEditing={handleSignup}
             style={styles.input}
           />
+        </View>
 
-          {error ? (
-            <Text style={styles.error}>
-              {error}
-            </Text>
-          ) : null}
-
-          <Pressable
-            style={[
-              styles.button,
-              submitting &&
-              styles.buttonDisabled,
-            ]}
-            onPress={handleSignup}
-            disabled={submitting}>
-
-            {submitting ? (
-              <ActivityIndicator color="#000" />
-            ) : (
-              <Text style={styles.buttonText}>
-                CREATE ACCOUNT
-              </Text>
-            )}
-          </Pressable>
-
-          <View style={styles.loginRow}>
-            <Text style={styles.loginText}>
-              Already have an account?
-            </Text>
-
-            <Pressable
-              onPress={() =>
-                navigation.navigate(
-                  'Login',
-                )
-              }>
-              <Text style={styles.loginLink}>
-                SIGN IN
-              </Text>
-            </Pressable>
+        {error ? (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{error}</Text>
           </View>
+        ) : null}
+
+        <TouchableOpacity
+          style={[
+            styles.signupButton,
+            submitting && styles.disabledButton,
+          ]}
+          onPress={handleSignup}
+          disabled={submitting}
+          activeOpacity={0.8}
+        >
+          {submitting ? (
+            <ActivityIndicator color={COLORS.background} />
+          ) : (
+            <Text style={styles.signupButtonText}>CREATE ACCOUNT</Text>
+          )}
+        </TouchableOpacity>
+
+        <View style={styles.loginRow}>
+          <Text style={styles.loginText}>
+            Already have an account?
+          </Text>
+
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Login')}
+            disabled={submitting}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.loginLink}>SIGN IN</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -287,115 +237,117 @@ const SignupScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.background,
   },
 
   content: {
     flexGrow: 1,
-    paddingHorizontal: 24,
-    paddingTop: 70,
-    paddingBottom: 40,
-    justifyContent: 'center',
+    paddingHorizontal: SPACING.xl,
   },
 
-  logoBox: {
-    width: 58,
-    height: 58,
-    borderRadius: 17,
-    backgroundColor: '#fff',
+  logoContainer: {
+    width: 72,
+    height: 72,
+    borderRadius: 22,
+    backgroundColor: COLORS.accent,
+    alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
-    alignSelf: 'center',
-    marginBottom: 24,
+    marginBottom: SPACING.xl,
+    ...SHADOWS.glow,
   },
 
   logoText: {
-    color: '#000',
-    fontSize: 30,
+    color: COLORS.background,
+    fontSize: 36,
     fontWeight: '900',
   },
 
   title: {
-    color: '#fff',
-    fontSize: 28,
-    fontWeight: '900',
+    ...TYPOGRAPHY.hero,
     textAlign: 'center',
   },
 
   subtitle: {
-    color: '#777',
-    fontSize: 13,
+    ...TYPOGRAPHY.body,
     textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 30,
+    marginTop: SPACING.sm,
+    marginBottom: SPACING.xl,
   },
 
-  form: {
-    width: '100%',
+  inputWrapper: {
+    marginBottom: SPACING.md,
   },
 
   label: {
-    color: '#777',
-    fontSize: 9,
-    fontWeight: '800',
-    marginBottom: 7,
-    marginTop: 12,
+    ...TYPOGRAPHY.label,
+    marginBottom: SPACING.xs,
   },
 
   input: {
-    height: 48,
-    borderRadius: 14,
+    height: 56,
+    backgroundColor: COLORS.surface,
     borderWidth: 1,
-    borderColor: '#292929',
-    backgroundColor: '#111',
-    color: '#fff',
-    paddingHorizontal: 14,
+    borderColor: COLORS.border,
+    borderRadius: 16,
+    paddingHorizontal: SPACING.md,
+    color: COLORS.text,
+    fontSize: 16,
+  },
+
+  errorBox: {
+    backgroundColor: 'rgba(255, 69, 58, 0.1)',
+    borderWidth: 1,
+    borderColor: COLORS.danger,
+    borderRadius: 12,
+    padding: SPACING.md,
+    marginTop: SPACING.sm,
+  },
+
+  errorText: {
+    color: COLORS.danger,
     fontSize: 13,
+    textAlign: 'center',
   },
 
-  error: {
-    color: '#ff6b6b',
-    fontSize: 12,
-    marginTop: 14,
-    lineHeight: 18,
-  },
-
-  button: {
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: '#fff',
+  signupButton: {
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: COLORS.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 22,
+    marginTop: SPACING.lg,
+    ...SHADOWS.glow,
   },
 
-  buttonDisabled: {
-    opacity: 0.7,
+  disabledButton: {
+    opacity: 0.6,
   },
 
-  buttonText: {
-    color: '#000',
-    fontSize: 11,
-    fontWeight: '900',
+  signupButtonText: {
+    ...TYPOGRAPHY.label,
+    color: COLORS.background,
+    fontSize: 14,
   },
 
   loginRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 22,
+    marginTop: SPACING.xl,
     gap: 6,
+    flexWrap: 'wrap',
   },
 
   loginText: {
-    color: '#666',
-    fontSize: 12,
+    ...TYPOGRAPHY.body,
+    fontSize: 13,
   },
 
   loginLink: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '900',
+    ...TYPOGRAPHY.label,
+    color: COLORS.accent,
+    fontSize: 11,
   },
 });
 
