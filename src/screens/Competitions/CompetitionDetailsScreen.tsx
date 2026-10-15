@@ -15,6 +15,7 @@ import {
   useNavigation,
   useRoute,
 } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthContext';
 import { COLORS, SPACING, TYPOGRAPHY, SHADOWS } from '../../theme';
@@ -51,6 +52,7 @@ const CompetitionDetailsScreen = () => {
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
   const { user, token } = useAuth();
+  const insets = useSafeAreaInsets();
 
   const userId = user?.id;
   const { competitionId } = route.params;
@@ -326,7 +328,10 @@ const CompetitionDetailsScreen = () => {
             }}
           />
         }
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[
+          styles.listContent,
+          {paddingBottom: insets.bottom + 40},
+        ]}
         ListHeaderComponent={
           <View>
             {/* Hero */}

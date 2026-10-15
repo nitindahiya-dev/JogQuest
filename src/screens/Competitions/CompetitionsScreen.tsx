@@ -869,5 +869,5 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '900',
   },
-});src/screens/Competitions/CreateCompetitionScreen.tsx
+});
 

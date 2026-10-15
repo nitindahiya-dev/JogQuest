@@ -489,4 +489,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default PublicProfileScreen;src/screens/Social/FollowListScreen.tsx
+export default PublicProfileScreen;
