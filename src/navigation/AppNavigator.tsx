@@ -1,4 +1,5 @@
-import React from 'react';
+import React, {useEffect, useState} from 'react';
+
 import {
   View,
   Text,
@@ -6,20 +7,30 @@ import {
   Pressable,
 } from 'react-native';
 
-import {NavigationContainer} from '@react-navigation/native';
+import {
+  NavigationContainer,
+} from '@react-navigation/native';
+
 import {
   createBottomTabNavigator,
   BottomTabBarProps,
 } from '@react-navigation/bottom-tabs';
-import {createNativeStackNavigator} from '@react-navigation/native-stack';
+
+import {
+  createNativeStackNavigator,
+} from '@react-navigation/native-stack';
+
 import {
   SafeAreaProvider,
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 
-import AuthProvider, {useAuth} from '../auth/AuthContext';
+import AuthProvider, {
+  useAuth,
+} from '../auth/AuthContext';
 
 // Screens
+import SplashScreen from '../screens/Splash/SplashScreen';
 import MapScreen from '../screens/Map/MapScreen';
 import ActivityScreen from '../screens/Activity/ActivityScreen';
 import ActivityResultScreen from '../screens/Activity/ActivityResultScreen';
@@ -42,12 +53,15 @@ import CreateCompetitionScreen from '../screens/Competitions/CreateCompetitionSc
 import CompetitionDetailsScreen from '../screens/Competitions/CompetitionDetailsScreen';
 import IntegrationsScreen from '../screens/Integrations/IntegrationsScreen';
 
-import type {RootStackParamList, MainTabParamList} from './types';
+import type {
+  RootStackParamList,
+  MainTabParamList,
+} from './types';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-// ─── Design tokens ───
+// Design tokens
 const COLORS = {
   background: '#0A0A0A',
   surface: 'rgba(18, 18, 18, 0.95)',
@@ -58,7 +72,11 @@ const COLORS = {
 };
 
 // Custom Floating Tab Bar
-const CustomTabBar = ({state, descriptors, navigation}: BottomTabBarProps) => {
+const CustomTabBar = ({
+  state,
+  descriptors,
+  navigation,
+}: BottomTabBarProps) => {
   const insets = useSafeAreaInsets();
 
   return (
@@ -71,6 +89,7 @@ const CustomTabBar = ({state, descriptors, navigation}: BottomTabBarProps) => {
         {state.routes.map((route, index) => {
           const {options} = descriptors[route.key];
           const isFocused = state.index === index;
+
           const label =
             options.tabBarLabel !== undefined
               ? options.tabBarLabel
@@ -92,9 +111,18 @@ const CustomTabBar = ({state, descriptors, navigation}: BottomTabBarProps) => {
             <Pressable
               key={route.key}
               onPress={onPress}
-              style={[styles.tabItem, isFocused && styles.tabItemActive]}>
+              accessibilityRole="button"
+              accessibilityState={{selected: isFocused}}
+              accessibilityLabel={String(label)}
+              style={[
+                styles.tabItem,
+                isFocused && styles.tabItemActive,
+              ]}>
               <Text
-                style={[styles.tabLabel, isFocused && styles.tabLabelActive]}>
+                style={[
+                  styles.tabLabel,
+                  isFocused && styles.tabLabelActive,
+                ]}>
                 {label as string}
               </Text>
             </Pressable>
@@ -105,6 +133,7 @@ const CustomTabBar = ({state, descriptors, navigation}: BottomTabBarProps) => {
   );
 };
 
+// Main bottom tabs
 const MainTabs = () => {
   return (
     <Tab.Navigator
@@ -117,21 +146,25 @@ const MainTabs = () => {
         component={MapScreen}
         options={{tabBarLabel: 'MAP'}}
       />
+
       <Tab.Screen
         name="Feed"
         component={SocialFeedScreen}
         options={{tabBarLabel: 'FEED'}}
       />
+
       <Tab.Screen
         name="Activity"
         component={ActivityScreen}
         options={{tabBarLabel: 'START'}}
       />
+
       <Tab.Screen
         name="Leaderboard"
         component={LeaderboardScreen}
         options={{tabBarLabel: 'RANKS'}}
       />
+
       <Tab.Screen
         name="Profile"
         component={ProfileScreen}
@@ -141,24 +174,41 @@ const MainTabs = () => {
   );
 };
 
+// Root navigator
 const RootNavigator = () => {
   const {user, loading} = useAuth();
 
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Loading...</Text>
-      </View>
-    );
+  // Keep the splash visible for at least 2.5 seconds.
+  const [showSplash, setShowSplash] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSplash(false);
+    }, 2500);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Wait for both authentication initialization and the
+  // minimum splash-screen duration.
+  if (loading || showSplash) {
+    return <SplashScreen />;
   }
 
   return (
     <Stack.Navigator
       screenOptions={{
-        headerStyle: {backgroundColor: COLORS.background},
+        headerStyle: {
+          backgroundColor: COLORS.background,
+        },
         headerTintColor: COLORS.text,
-        headerTitleStyle: {fontWeight: '800', fontSize: 18},
-        contentStyle: {backgroundColor: COLORS.background},
+        headerTitleStyle: {
+          fontWeight: '800',
+          fontSize: 18,
+        },
+        contentStyle: {
+          backgroundColor: COLORS.background,
+        },
         headerShadowVisible: false,
       }}>
       {!user ? (
@@ -168,6 +218,7 @@ const RootNavigator = () => {
             component={LoginScreen}
             options={{headerShown: false}}
           />
+
           <Stack.Screen
             name="Signup"
             component={SignupScreen}
@@ -181,74 +232,96 @@ const RootNavigator = () => {
             component={MainTabs}
             options={{headerShown: false}}
           />
+
           <Stack.Screen
             name="ActivityHistory"
             component={ActivityHistoryScreen}
             options={{title: 'Activity History'}}
           />
+
           <Stack.Screen
             name="Notifications"
             component={NotificationsScreen}
             options={{title: 'Notifications'}}
           />
+
           <Stack.Screen
             name="PublicProfile"
             component={PublicProfileScreen}
             options={{title: 'Profile'}}
           />
+
           <Stack.Screen
             name="FollowList"
             component={FollowListScreen}
             options={({route}) => ({
               title:
-                route.params.mode === 'followers' ? 'Followers' : 'Following',
+                route.params.mode === 'followers'
+                  ? 'Followers'
+                  : 'Following',
             })}
           />
+
           <Stack.Screen
             name="Clubs"
             component={ClubsScreen}
             options={{title: 'Clubs'}}
           />
+
           <Stack.Screen
             name="CreateClub"
             component={CreateClubScreen}
             options={{title: 'Create Club'}}
           />
+
           <Stack.Screen
             name="ClubDetails"
             component={ClubDetailsScreen}
             options={{title: 'Club'}}
           />
+
           <Stack.Screen
             name="Competitions"
             component={CompetitionsScreen}
             options={{title: 'Competitions'}}
           />
+
           <Stack.Screen
             name="CreateCompetition"
             component={CreateCompetitionScreen}
             options={{title: 'Create Competition'}}
           />
+
           <Stack.Screen
             name="CompetitionDetails"
             component={CompetitionDetailsScreen}
             options={{title: 'Competition'}}
           />
+
           <Stack.Screen
             name="RoutePlanner"
             component={RoutePlannerScreen}
-            options={{title: 'Route Planner'}}
+            options={{
+              title: 'Route Planner',
+              headerShown: false,
+            }}
           />
+
           <Stack.Screen
             name="Integrations"
             component={IntegrationsScreen}
             options={{title: 'Integrations'}}
           />
+
           <Stack.Screen
             name="ActivityResult"
             component={ActivityResultScreen}
-            options={{title: 'Result'}}
+            options={{
+              title: 'Result',
+              headerShown: false,
+            }}
           />
+
           <Stack.Screen
             name="TerritoryDetails"
             component={TerritoryDetailsScreen}
@@ -260,20 +333,22 @@ const RootNavigator = () => {
   );
 };
 
+// App navigator
 const AppNavigator = () => {
   return (
-    <AuthProvider>
-      <SafeAreaProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
         <NavigationContainer>
           <RootNavigator />
         </NavigationContainer>
-      </SafeAreaProvider>
-    </AuthProvider>
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 };
 
 export default AppNavigator;
 
+// Styles
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
@@ -281,6 +356,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+
   loadingText: {
     color: COLORS.textMuted,
     fontSize: 15,
@@ -293,6 +369,7 @@ const styles = StyleSheet.create({
     right: 20,
     alignItems: 'center',
   },
+
   tabBar: {
     flexDirection: 'row',
     backgroundColor: COLORS.surface,
@@ -302,20 +379,24 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
+
   tabItem: {
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 30,
   },
+
   tabItemActive: {
     backgroundColor: COLORS.accent,
   },
+
   tabLabel: {
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0.8,
     color: COLORS.textMuted,
   },
+
   tabLabelActive: {
     color: COLORS.background,
   },
