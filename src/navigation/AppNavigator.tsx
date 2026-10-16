@@ -1,10 +1,10 @@
-import React, { useEffect, useState } from 'react';
-
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
+  Animated,
 } from 'react-native';
 
 import {
@@ -54,7 +54,6 @@ import CompetitionDetailsScreen from '../screens/Competitions/CompetitionDetails
 import IntegrationsScreen from '../screens/Integrations/IntegrationsScreen';
 import ProfileDetailsScreen from '../screens/Profile/ProfileDetailsScreen';
 
-
 import type {
   RootStackParamList,
   MainTabParamList,
@@ -73,13 +72,50 @@ const COLORS = {
   border: 'rgba(255,255,255,0.10)',
 };
 
-// Custom Floating Tab Bar
+// Custom Floating Tab Bar with Sliding Bubble
 const CustomTabBar = ({
   state,
   descriptors,
   navigation,
 }: BottomTabBarProps) => {
   const insets = useSafeAreaInsets();
+
+  // Animated value for the current active tab index
+  const animatedIndex = useRef(new Animated.Value(state.index)).current;
+
+  // Store the measured layout (x position + width) of each tab
+  const [tabLayouts, setTabLayouts] = useState<
+    { x: number; width: number }[]
+  >([]);
+
+  // Animate the pill whenever the active tab changes
+  useEffect(() => {
+    Animated.spring(animatedIndex, {
+      toValue: state.index,
+      useNativeDriver: false, // Required because we animate width
+      tension: 90,
+      friction: 11,
+    }).start();
+  }, [state.index, animatedIndex]);
+
+  // Interpolate translateX and width from the measured layouts
+  const pillTranslateX =
+    tabLayouts.length === state.routes.length
+      ? animatedIndex.interpolate({
+          inputRange: state.routes.map((_, i) => i),
+          outputRange: tabLayouts.map(l => l.x),
+          extrapolate: 'clamp',
+        })
+      : 0;
+
+  const pillWidth =
+    tabLayouts.length === state.routes.length
+      ? animatedIndex.interpolate({
+          inputRange: state.routes.map((_, i) => i),
+          outputRange: tabLayouts.map(l => l.width),
+          extrapolate: 'clamp',
+        })
+      : 0;
 
   return (
     <View
@@ -88,6 +124,21 @@ const CustomTabBar = ({
         { bottom: Math.max(insets.bottom, 12) + 8 },
       ]}>
       <View style={styles.tabBar}>
+        {/* ─── Sliding Bubble Pill ─── */}
+        {tabLayouts.length === state.routes.length && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.slidingPill,
+              {
+                width: pillWidth,
+                transform: [{ translateX: pillTranslateX }],
+              },
+            ]}
+          />
+        )}
+
+        {/* ─── Tab Items ─── */}
         {state.routes.map((route, index) => {
           const { options } = descriptors[route.key];
           const isFocused = state.index === index;
@@ -116,10 +167,15 @@ const CustomTabBar = ({
               accessibilityRole="button"
               accessibilityState={{ selected: isFocused }}
               accessibilityLabel={String(label)}
-              style={[
-                styles.tabItem,
-                isFocused && styles.tabItemActive,
-              ]}>
+              onLayout={event => {
+                const { x, width } = event.nativeEvent.layout;
+                setTabLayouts(prev => {
+                  const next = [...prev];
+                  next[index] = { x, width };
+                  return next;
+                });
+              }}
+              style={styles.tabItem}>
               <Text
                 style={[
                   styles.tabLabel,
@@ -370,7 +426,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
 
-  // Floating tab bar
+  // Floating tab bar container
   tabBarContainer: {
     position: 'absolute',
     left: 20,
@@ -386,16 +442,26 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderWidth: 1,
     borderColor: COLORS.border,
+    position: 'relative', // Needed to position the absolute sliding pill behind items
+  },
+
+  // Sliding Bubble Pill style
+  slidingPill: {
+    position: 'absolute',
+    top: 6,
+    bottom: 6,
+    backgroundColor: COLORS.accent,
+    borderRadius: 30,
+    zIndex: 0,
   },
 
   tabItem: {
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 30,
-  },
-
-  tabItemActive: {
-    backgroundColor: COLORS.accent,
+    zIndex: 1, // Ensure text stays cleanly on top of the sliding pill
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   tabLabel: {
@@ -408,4 +474,4 @@ const styles = StyleSheet.create({
   tabLabelActive: {
     color: COLORS.background,
   },
-});
+}); 
