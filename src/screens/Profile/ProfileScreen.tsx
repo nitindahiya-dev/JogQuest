@@ -33,7 +33,7 @@ const ProfileScreen = () => {
       setLoading(true);
       const response = await fetch(`${API_BASE_URL}/api/users/${user.id}/profile`);
       if (!response.ok) throw new Error('Failed to load');
-      const data = await response.json();
+      const data: any = await response.json();
       setProfile(data);
     } catch (err) {
       setError('Could not load profile data.');
@@ -49,7 +49,7 @@ const ProfileScreen = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!response.ok) return;
-      const data = await response.json();
+      const data: any = await response.json();
       setUnreadCount(Number(data.unreadCount ?? 0));
     } catch (err) {
       console.error('Failed to load notification count:', err);

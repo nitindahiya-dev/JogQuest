@@ -573,7 +573,7 @@ const styles = StyleSheet.create({
   },
 
   map: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
 
   // Top HUD

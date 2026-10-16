@@ -100,18 +100,10 @@ type NormalizedExternalActivity = {
   route: Coordinate[];
 };
 
-const hashPassword = (
-  password: string,
-) => {
-  const salt =
-    randomBytes(16).toString('hex');
+const hashPassword = (password: string) => {
+  const salt = randomBytes(16).toString('hex');
 
-  const hash =
-    scryptSync(
-      password,
-      salt,
-      64,
-    ).toString('hex');
+  const hash = scryptSync(password, salt, 64).toString('hex');
 
   return `${salt}:${hash}`;
 };
@@ -165,6 +157,54 @@ const hashSessionToken = (
     .digest('hex');
 };
 
+const sendTransactionalEmail = async (
+  to: string,
+  subject: string,
+  textContent: string,
+  htmlContent: string,
+) => {
+  const apiKey = process.env.BREVO_API_KEY;
+  const senderEmail = process.env.EMAIL_FROM_ADDRESS;
+
+  if (
+    !apiKey ||
+    !senderEmail ||
+    apiKey === 'your_brevo_api_key' ||
+    senderEmail === 'your_verified_sender@example.com'
+  ) {
+    throw new Error('Email service is not configured');
+  }
+
+  const response = await fetch(
+    'https://api.brevo.com/v3/smtp/email',
+    {
+      method: 'POST',
+      headers: {
+        'api-key': apiKey,
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({
+        sender: {
+          name: process.env.EMAIL_FROM_NAME || 'JogQuest',
+          email: senderEmail,
+        },
+        to: [{ email: to }],
+        subject,
+        textContent,
+        htmlContent,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    console.error(
+      'Brevo delivery failed:',
+      response.status,
+    );
+    throw new Error('Email delivery failed');
+  }
+};
 
 const requireAuth: import('express').RequestHandler =
   async (req, res, next) => {
@@ -285,6 +325,599 @@ type CreateActivityBody = {
     polygon: Coordinate[];
   };
 };
+
+app.patch('/api/me/profile', requireAuth, async (req, res) => {
+  try {
+    const userId = res.locals.authenticatedUserId as string;
+    const { display_name, username } = req.body as {
+      display_name?: unknown;
+      username?: unknown;
+    };
+
+    if (display_name === undefined && username === undefined) {
+      return res.status(400).json({
+        error: 'Provide a display name or username to update',
+      });
+    }
+
+    let cleanName: string | undefined;
+    let cleanUsername: string | undefined;
+
+    if (display_name !== undefined) {
+      if (
+        typeof display_name !== 'string' ||
+        !display_name.trim() ||
+        display_name.trim().length > 100
+      ) {
+        return res.status(400).json({
+          error: 'Display name must be between 1 and 100 characters',
+        });
+      }
+
+      cleanName = display_name.trim();
+    }
+
+    if (username !== undefined) {
+      if (
+        typeof username !== 'string' ||
+        !/^[a-zA-Z0-9_]{3,50}$/.test(username.trim())
+      ) {
+        return res.status(400).json({
+          error: 'Username must contain 3–50 letters, numbers, or underscores',
+        });
+      }
+
+      cleanUsername = username.trim();
+    }
+
+    const result = await query(
+      `UPDATE users
+       SET display_name = COALESCE($1, display_name),
+           username = COALESCE($2, username)
+       WHERE id = $3
+       RETURNING id, username, display_name, email, avatar_url`,
+      [cleanName ?? null, cleanUsername ?? null, userId],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Return the user directly, matching the screen's expected response.
+    return res.json(result.rows[0]);
+  } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === '23505'
+    ) {
+      return res.status(409).json({
+        error: 'That username is already taken',
+      });
+    }
+
+    console.error('Profile update failed:', error);
+    return res.status(500).json({
+      error: 'Failed to update profile',
+    });
+  }
+});
+
+app.post('/api/me/password', requireAuth, async (req, res) => {
+  const userId = res.locals.authenticatedUserId as string;
+  const authorization = req.headers.authorization;
+  const currentToken = authorization?.slice(7).trim();
+
+  const { currentPassword, newPassword } = req.body as {
+    currentPassword?: unknown;
+    newPassword?: unknown;
+  };
+
+  if (
+    typeof currentPassword !== 'string' ||
+    typeof newPassword !== 'string' ||
+    !currentPassword ||
+    newPassword.length < 8
+  ) {
+    return res.status(400).json({
+      error: 'Current password and a new password of at least 8 characters are required',
+    });
+  }
+
+  if (currentPassword === newPassword) {
+    return res.status(400).json({
+      error: 'New password must be different from the current password',
+    });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const userResult = await client.query<{
+      password_hash: string;
+    }>(
+      'SELECT password_hash FROM users WHERE id = $1 FOR UPDATE',
+      [userId],
+    );
+
+    if (
+      !userResult.rows[0] ||
+      !verifyPassword(currentPassword, userResult.rows[0].password_hash)
+    ) {
+      await client.query('ROLLBACK');
+      return res.status(401).json({
+        error: 'Current password is incorrect',
+      });
+    }
+
+    await client.query(
+      'UPDATE users SET password_hash = $1 WHERE id = $2',
+      [hashPassword(newPassword), userId],
+    );
+
+    await client.query(
+      `DELETE FROM user_sessions
+       WHERE user_id = $1 AND token_hash <> $2`,
+      [userId, hashSessionToken(currentToken!)],
+    );
+
+    await client.query('COMMIT');
+
+    return res.json({ message: 'Password changed successfully' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Password change failed:', error);
+    return res.status(500).json({
+      error: 'Could not change password',
+    });
+  } finally {
+    client.release();
+  }
+});
+
+
+// --------------------------------------------------
+// PASSWORD RESET
+// --------------------------------------------------
+
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const email =
+    typeof req.body?.email === 'string'
+      ? req.body.email.trim().toLowerCase()
+      : '';
+
+  // Always return the same message so the endpoint does not
+  // reveal whether an account exists.
+  const genericMessage =
+    'If an account exists for that email, a password reset link will be sent.';
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.json({ message: genericMessage });
+  }
+
+  try {
+    const result = await query<{ id: string }>(
+      'SELECT id FROM users WHERE LOWER(email) = $1 LIMIT 1',
+      [email],
+    );
+
+    if (!result.rows[0]) {
+      return res.json({ message: genericMessage });
+    }
+
+    const publicApiUrl =
+      process.env.PUBLIC_API_URL?.replace(/\/+$/, '');
+
+    if (!publicApiUrl || !publicApiUrl.startsWith('https://')) {
+      console.error('Password reset unavailable: PUBLIC_API_URL must be HTTPS.');
+      return res.json({ message: genericMessage });
+    }
+
+    const userId = result.rows[0].id;
+    const token = randomBytes(32).toString('hex');
+
+    await query(
+      'DELETE FROM password_reset_tokens WHERE user_id = $1',
+      [userId],
+    );
+
+    await query(
+      `INSERT INTO password_reset_tokens
+        (user_id, token_hash, expires_at)
+       VALUES ($1, $2, NOW() + INTERVAL '30 minutes')`,
+      [userId, hashSessionToken(token)],
+    );
+
+    const resetUrl =
+      `${publicApiUrl}/reset-password?token=${token}`;
+
+    try {
+      await sendTransactionalEmail(
+        email,
+        'Reset your JogQuest password',
+        `Use this link to reset your JogQuest password. It expires in 30 minutes:\n${resetUrl}\n\nIf you did not request this, ignore this email.`,
+        `<p>We received a request to reset your JogQuest password.</p>
+         <p><a href="${resetUrl}">Reset password</a></p>
+         <p>This link expires in 30 minutes. If you did not request this, ignore this email.</p>`,
+      );
+    } catch (error) {
+      await query(
+        'DELETE FROM password_reset_tokens WHERE token_hash = $1',
+        [hashSessionToken(token)],
+      );
+      console.error('Could not send password reset email.');
+    }
+
+    return res.json({ message: genericMessage });
+  } catch (error) {
+    console.error('Forgot-password request failed:', error);
+    return res.json({ message: genericMessage });
+  }
+});
+
+// Browser page opened from the reset email.
+app.get('/reset-password', (req, res) => {
+  const token =
+    typeof req.query.token === 'string'
+      ? req.query.token
+      : '';
+
+  if (!/^[a-f0-9]{64}$/.test(token)) {
+    return res.status(400).send('Invalid or missing reset link.');
+  }
+
+  res.type('html').send(`<!doctype html>
+<html lang="en">
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reset JogQuest Password</title>
+<style>
+body{font-family:Arial,sans-serif;background:#101010;color:#fff;max-width:420px;margin:60px auto;padding:20px}
+input,button{box-sizing:border-box;width:100%;padding:13px;margin:8px 0;border-radius:8px}
+input{background:#222;color:#fff;border:1px solid #444}
+button{background:#d4ff00;border:0;font-weight:bold}
+#message{color:#d4ff00}
+</style>
+</head>
+<body>
+<h2>Reset your password</h2>
+<p>Enter a new password of at least 8 characters.</p>
+<form id="resetForm">
+<input id="password" type="password" minlength="8" autocomplete="new-password" placeholder="New password" required>
+<input id="confirm" type="password" minlength="8" autocomplete="new-password" placeholder="Confirm new password" required>
+<button type="submit">Update password</button>
+</form>
+<p id="message" role="status"></p>
+<script>
+const form = document.getElementById('resetForm');
+const message = document.getElementById('message');
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const password = document.getElementById('password').value;
+  const confirm = document.getElementById('confirm').value;
+  if (password.length < 8) {
+    message.textContent = 'Password must be at least 8 characters.';
+    return;
+  }
+  if (password !== confirm) {
+    message.textContent = 'Passwords do not match.';
+    return;
+  }
+  try {
+    const response = await fetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token: ${JSON.stringify(token)}, newPassword: password})
+    });
+    const data = await response.json();
+    message.textContent = response.ok
+      ? 'Password reset successfully. You can return to JogQuest and sign in.'
+      : (data.error || 'This reset link is invalid or expired.');
+    if (response.ok) form.remove();
+  } catch {
+    message.textContent = 'Could not connect. Please try again.';
+  }
+});
+</script>
+</body>
+</html>`);
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  const { token, newPassword } = req.body as {
+    token?: unknown;
+    newPassword?: unknown;
+  };
+
+  if (
+    typeof token !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(token) ||
+    typeof newPassword !== 'string' ||
+    newPassword.length < 8 ||
+    newPassword.length > 200
+  ) {
+    return res.status(400).json({
+      error: 'Provide a valid reset link and a password of 8–200 characters.',
+    });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const result = await client.query<{ id: string; user_id: string }>(
+      `SELECT id, user_id
+       FROM password_reset_tokens
+       WHERE token_hash = $1 AND expires_at > NOW()
+       FOR UPDATE`,
+      [hashSessionToken(token)],
+    );
+
+    const reset = result.rows[0];
+
+    if (!reset) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: 'This reset link is invalid or has expired.',
+      });
+    }
+
+    await client.query(
+      'UPDATE users SET password_hash = $1 WHERE id = $2',
+      [hashPassword(newPassword), reset.user_id],
+    );
+
+    await client.query(
+      'DELETE FROM user_sessions WHERE user_id = $1',
+      [reset.user_id],
+    );
+
+    // Delete every reset token for this account, making links single-use.
+    await client.query(
+      'DELETE FROM password_reset_tokens WHERE user_id = $1',
+      [reset.user_id],
+    );
+
+    await client.query('COMMIT');
+
+    return res.json({ message: 'Password reset successfully.' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Password reset failed:', error);
+    return res.status(500).json({
+      error: 'Could not reset password. Please try again.',
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// --------------------------------------------------
+// EMAIL CHANGE VERIFICATION
+// --------------------------------------------------
+
+app.post('/api/me/email-change', requireAuth, async (req, res) => {
+  const userId = res.locals.authenticatedUserId as string;
+  const { newEmail, currentPassword } = req.body as {
+    newEmail?: unknown;
+    currentPassword?: unknown;
+  };
+
+  if (
+    typeof newEmail !== 'string' ||
+    typeof currentPassword !== 'string'
+  ) {
+    return res.status(400).json({
+      error: 'New email and current password are required.',
+    });
+  }
+
+  const normalizedEmail = newEmail.trim().toLowerCase();
+
+  if (
+    normalizedEmail.length > 255 ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
+  ) {
+    return res.status(400).json({ error: 'Enter a valid email address.' });
+  }
+
+  const publicApiUrl =
+    process.env.PUBLIC_API_URL?.replace(/\/+$/, '');
+
+  if (!publicApiUrl || !publicApiUrl.startsWith('https://')) {
+    return res.status(503).json({
+      error: 'Email verification is not configured on the server.',
+    });
+  }
+
+  const client = await pool.connect();
+
+  let tokenHash: string | null = null;
+
+  try {
+    await client.query('BEGIN');
+
+    const userResult = await client.query<{
+      email: string | null;
+      password_hash: string;
+    }>(
+      'SELECT email, password_hash FROM users WHERE id = $1 FOR UPDATE',
+      [userId],
+    );
+
+    const currentUser = userResult.rows[0];
+
+    if (
+      !currentUser ||
+      !verifyPassword(currentPassword, currentUser.password_hash)
+    ) {
+      await client.query('ROLLBACK');
+      return res.status(401).json({
+        error: 'Current password is incorrect.',
+      });
+    }
+
+    if (currentUser.email?.toLowerCase() === normalizedEmail) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: 'That is already your current email address.',
+      });
+    }
+
+    const existingEmail = await client.query(
+      'SELECT id FROM users WHERE LOWER(email) = $1 LIMIT 1',
+      [normalizedEmail],
+    );
+
+    if (existingEmail.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'That email address is already in use.',
+      });
+    }
+
+    const token = randomBytes(32).toString('hex');
+    tokenHash = hashSessionToken(token);
+
+    await client.query(
+      'DELETE FROM email_change_tokens WHERE user_id = $1',
+      [userId],
+    );
+
+    await client.query(
+      `INSERT INTO email_change_tokens
+        (user_id, new_email, token_hash, expires_at)
+       VALUES ($1, $2, $3, NOW() + INTERVAL '30 minutes')`,
+      [userId, normalizedEmail, tokenHash],
+    );
+
+    await client.query('COMMIT');
+
+    const verifyUrl =
+      `${publicApiUrl}/api/auth/verify-email-change?token=${token}`;
+
+    try {
+      await sendTransactionalEmail(
+        normalizedEmail,
+        'Verify your new JogQuest email',
+        `Confirm your new JogQuest email address using this link. It expires in 30 minutes:\n${verifyUrl}\n\nIf you did not request this, ignore this email.`,
+        `<p>Confirm your new JogQuest email address.</p>
+         <p><a href="${verifyUrl}">Verify email address</a></p>
+         <p>This link expires in 30 minutes. If you did not request this, ignore this email.</p>`,
+      );
+    } catch (error) {
+      await query(
+        'DELETE FROM email_change_tokens WHERE token_hash = $1',
+        [tokenHash],
+      );
+      console.error('Could not send email-change verification.');
+      return res.status(502).json({
+        error: 'Could not send the verification email. Please try again.',
+      });
+    }
+
+    return res.json({
+      message: 'Verification email sent. Your email will change after you verify it.',
+    });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+
+    // Handle a race with another request or the existing unique email index.
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: string }).code === '23505'
+    ) {
+      return res.status(409).json({
+        error: 'That email address is already in use.',
+      });
+    }
+
+    console.error('Email-change request failed:', error);
+    return res.status(500).json({
+      error: 'Could not request an email change.',
+    });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/api/auth/verify-email-change', async (req, res) => {
+  const token =
+    typeof req.query.token === 'string'
+      ? req.query.token
+      : '';
+
+  if (!/^[a-f0-9]{64}$/.test(token)) {
+    return res.status(400).send('Invalid or missing verification link.');
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const result = await client.query<{
+      id: string;
+      user_id: string;
+      new_email: string;
+    }>(
+      `SELECT id, user_id, new_email
+       FROM email_change_tokens
+       WHERE token_hash = $1 AND expires_at > NOW()
+       FOR UPDATE`,
+      [hashSessionToken(token)],
+    );
+
+    const pending = result.rows[0];
+
+    if (!pending) {
+      await client.query('ROLLBACK');
+      return res.status(400).send(
+        'This verification link is invalid or has expired. Request a new one in JogQuest.',
+      );
+    }
+
+    await client.query(
+      'UPDATE users SET email = $1 WHERE id = $2',
+      [pending.new_email, pending.user_id],
+    );
+
+    await client.query(
+      'DELETE FROM email_change_tokens WHERE user_id = $1',
+      [pending.user_id],
+    );
+
+    await client.query('COMMIT');
+
+    return res.type('html').send(
+      '<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Email verified</title><body style="font-family:Arial,sans-serif;background:#101010;color:#fff;padding:40px;text-align:center"><h2>Email verified successfully</h2><p>Your JogQuest email address has been updated. Return to the app and sign in again if needed.</p></body></html>',
+    );
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: string }).code === '23505'
+    ) {
+      return res.status(409).send(
+        'That email address is already in use. Return to JogQuest and request a different address.',
+      );
+    }
+
+    console.error('Email verification failed:', error);
+    return res.status(500).send('Could not verify this email address. Please try again.');
+  } finally {
+    client.release();
+  }
+});
 
 // --------------------------------------------------
 // HEALTH

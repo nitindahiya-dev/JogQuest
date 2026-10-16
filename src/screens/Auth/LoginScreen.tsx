@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -41,6 +42,59 @@ const LoginScreen = () => {
       await login(email.trim().toLowerCase(), password);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail) {
+      Alert.alert(
+        'Email required',
+        'Enter your email address above first.',
+      );
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+
+      const response = await fetch(
+        'http://127.0.0.1:4000/api/auth/forgot-password',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: normalizedEmail,
+          }),
+        },
+      );
+
+      const data = (await response.json()) as {
+        error?: string;
+        message?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Could not request a reset link.');
+      }
+
+      Alert.alert(
+        'Check your email',
+        data.message ||
+          'If an account exists for that email, a reset link will be sent.',
+      );
+    } catch (err) {
+      Alert.alert(
+        'Request failed',
+        err instanceof Error
+          ? err.message
+          : 'Could not connect to the server.',
+      );
     } finally {
       setSubmitting(false);
     }
@@ -105,6 +159,14 @@ const LoginScreen = () => {
             style={styles.input}
           />
         </View>
+
+        <TouchableOpacity
+          onPress={handleForgotPassword}
+          disabled={submitting}
+          style={{ alignSelf: 'flex-end', marginBottom: 12 }}
+        >
+          <Text style={styles.signupLink}>FORGOT PASSWORD?</Text>
+        </TouchableOpacity>
 
         {error && (
           <View style={styles.errorBox}>

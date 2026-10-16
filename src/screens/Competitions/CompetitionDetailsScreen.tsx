@@ -91,8 +91,8 @@ const CompetitionDetailsScreen = () => {
         ),
       ]);
 
-      const competitionData = await competitionResponse.json();
-      const leaderboardData = await leaderboardResponse.json();
+      const competitionData: any = await competitionResponse.json();
+      const leaderboardData: any = await leaderboardResponse.json();
       const membershipData = (await membershipResponse.json()) as Membership;
 
       if (!competitionResponse.ok) {
@@ -165,7 +165,7 @@ const CompetitionDetailsScreen = () => {
         },
       );
 
-      const data = await response.json();
+      const data: any = await response.json();
 
       if (!response.ok) {
         throw new Error(
@@ -330,7 +330,7 @@ const CompetitionDetailsScreen = () => {
         }
         contentContainerStyle={[
           styles.listContent,
-          {paddingBottom: insets.bottom + 40},
+          { paddingBottom: insets.bottom + 40 },
         ]}
         ListHeaderComponent={
           <View>
@@ -410,7 +410,7 @@ const CompetitionDetailsScreen = () => {
                 style={[
                   styles.timerValue,
                   remaining?.value === 'Awaiting dates' &&
-                    styles.timerValueSmall,
+                  styles.timerValueSmall,
                 ]}
                 numberOfLines={1}
                 adjustsFontSizeToFit

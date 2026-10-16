@@ -237,7 +237,7 @@ const MapScreen = () => {
         <TouchableOpacity
           style={styles.startButton}
           activeOpacity={0.85}
-          onPress={() => navigation.navigate('Activity')}>
+          onPress={() => navigation.navigate('MainTabs', { screen: 'Activity' })}>
           <Text style={styles.startButtonText}>START RUN</Text>
         </TouchableOpacity>
       </View>
@@ -400,7 +400,7 @@ const styles = StyleSheet.create({
 
   // Loading
   loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.55)',
     alignItems: 'center',
     justifyContent: 'center',

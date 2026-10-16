@@ -112,7 +112,7 @@ const CompetitionsScreen = () => {
         `${API_BASE_URL}/api/competitions`,
       );
 
-      const data = await response.json();
+      const data: any = await response.json();
 
       if (!response.ok) {
         throw new Error(
@@ -418,7 +418,7 @@ const CompetitionsScreen = () => {
                 </Text>
               </TouchableOpacity>
             </View>
-          ) : null
+          ) : undefined
         }
       />
     </View>

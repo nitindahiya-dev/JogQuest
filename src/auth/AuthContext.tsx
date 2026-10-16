@@ -21,6 +21,8 @@ type AuthContextValue = {
   token: string | null;
   loading: boolean;
 
+  updateUser: (updatedUser: User) => void;
+
   login: (
     email: string,
     password: string,
@@ -51,6 +53,10 @@ const AuthProvider = ({
   ] = useState<User | null>(
     null,
   );
+
+  const updateUser = useCallback((updatedUser: User) => {
+    setUser(updatedUser);
+  }, []);
 
   const [
     token,
@@ -227,6 +233,7 @@ const AuthProvider = ({
         user,
         token,
         loading,
+        updateUser,
         login,
         logout,
       }}>

@@ -26,12 +26,25 @@ type EditableField = 'display_name' | 'username';
 
 const ProfileDetailsScreen = () => {
   const insets = useSafeAreaInsets();
-  const { user, token } = useAuth();
+  const { user, token, updateUser } = useAuth();
   const [profile, setProfile] = useState(user);
   const [field, setField] = useState<EditableField | null>(null);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Password state
+  const [passwordModalVisible, setPasswordModalVisible] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordSaving, setPasswordSaving] = useState(false);
+
+  // Email-change state
+  const [emailModalVisible, setEmailModalVisible] = useState(false);
+  const [newEmail, setNewEmail] = useState('');
+  const [emailCurrentPassword, setEmailCurrentPassword] = useState('');
+  const [emailSaving, setEmailSaving] = useState(false);
 
   useEffect(() => {
     setProfile(user);
@@ -48,7 +61,7 @@ const ProfileDetailsScreen = () => {
         const response = await fetch(`${API_BASE_URL}/api/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        const data = await response.json();
+        const data: any = await response.json();
         if (!response.ok) throw new Error(data.error ?? 'Could not load profile');
         if (active) setProfile(data);
       } catch (error) {
@@ -92,15 +105,129 @@ const ProfileDetailsScreen = () => {
         },
         body: JSON.stringify({ [field]: value }),
       });
-      const data = await response.json().catch(() => ({}));
+      const data: any = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error ?? 'Profile update failed');
-      setProfile(current => current ? { ...current, ...data } : current);
+      const updatedUser = data.user ?? data;
+
+      setProfile(updatedUser);
+      updateUser(updatedUser);
       setField(null);
+
       Alert.alert('Saved', 'Your profile has been updated.');
     } catch (error) {
       Alert.alert('Could not save', error instanceof Error ? error.message : 'Please try again.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const changePassword = async () => {
+    if (!token) {
+      Alert.alert('Session expired', 'Please log in again.');
+      return;
+    }
+
+    if (!currentPassword || newPassword.length < 8) {
+      Alert.alert('Invalid password', 'Enter your current password and a new password of at least 8 characters.');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      Alert.alert('Passwords do not match', 'Confirm your new password correctly.');
+      return;
+    }
+
+    setPasswordSaving(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/me/password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+
+      const data: any = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error ?? 'Password change failed');
+      }
+
+      setPasswordModalVisible(false);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+
+      Alert.alert('Success', 'Your password has been changed.');
+    } catch (error) {
+      Alert.alert(
+        'Password change failed',
+        error instanceof Error ? error.message : 'Please try again.',
+      );
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
+
+  const requestEmailChange = async () => {
+    if (!token) {
+      Alert.alert('Session expired', 'Please log in again.');
+      return;
+    }
+
+    const normalizedEmail = newEmail.trim().toLowerCase();
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      Alert.alert('Invalid email', 'Enter a valid email address.');
+      return;
+    }
+
+    if (!emailCurrentPassword) {
+      Alert.alert('Password required', 'Enter your current password.');
+      return;
+    }
+
+    setEmailSaving(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/me/email-change`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            newEmail: normalizedEmail,
+            currentPassword: emailCurrentPassword,
+          }),
+        },
+      );
+
+      const data: any = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Could not request email change.');
+      }
+
+      setEmailModalVisible(false);
+      setNewEmail('');
+      setEmailCurrentPassword('');
+
+      Alert.alert(
+        'Verification email sent',
+        'Open the verification link sent to your new email address. Your account email will not change until you verify it.',
+      );
+    } catch (error) {
+      Alert.alert(
+        'Email change failed',
+        error instanceof Error ? error.message : 'Please try again.',
+      );
+    } finally {
+      setEmailSaving(false);
     }
   };
 
@@ -136,12 +263,25 @@ const ProfileDetailsScreen = () => {
         <View style={styles.card}>
           {renderRow(<UserIcon color={COLORS.accent} size={18} />, 'Display Name', loading ? 'Loading…' : profile?.display_name || 'Not set', () => openEditor('display_name'))}
           {renderRow(<UserIcon color={COLORS.accent} size={18} />, 'Username', profile?.username ? `@${profile.username}` : 'Not set', () => openEditor('username'))}
-          {renderRow(<MailIcon color={COLORS.accent} size={18} />, 'Email Address', profile?.email || 'No email on account', () => Alert.alert('Email address', 'Email changes are not enabled until email verification is implemented.'), { last: true, helper: 'Email changes require verification.' })}
+          {renderRow(
+            <MailIcon color={COLORS.accent} size={18} />,
+            'Email Address',
+            profile?.email || 'No email on account',
+            () => {
+              setNewEmail('');
+              setEmailCurrentPassword('');
+              setEmailModalVisible(true);
+            },
+            {
+              last: true,
+              helper: 'Changing your email requires verification.',
+            },
+          )}
         </View>
 
         <Text style={styles.sectionLabel}>SECURITY</Text>
         <View style={styles.card}>
-          {renderRow(<LockIcon color={COLORS.accent} size={18} />, 'Password', 'Password management is not configured yet', () => Alert.alert('Not available yet', 'A secure password-change endpoint is not implemented on the server.'), { last: true })}
+          {renderRow(<LockIcon color={COLORS.accent} size={18} />, 'Password', 'Tap to change your account password', () => setPasswordModalVisible(true), { last: true })}
         </View>
 
         <Text style={[styles.sectionLabel, styles.dangerHeading]}>DANGER ZONE</Text>
@@ -150,7 +290,14 @@ const ProfileDetailsScreen = () => {
         </View>
       </ScrollView>
 
-      <Modal visible={field !== null} transparent animationType="fade" onRequestClose={() => !saving && setField(null)}>
+      <Modal
+        visible={field !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!saving) setField(null);
+        }}
+      >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>{field === 'display_name' ? 'Edit display name' : 'Edit username'}</Text>
@@ -173,6 +320,135 @@ const ProfileDetailsScreen = () => {
               </TouchableOpacity>
               <TouchableOpacity style={styles.saveButton} onPress={saveField} disabled={saving}>
                 {saving ? <ActivityIndicator color={COLORS.background} /> : <Text style={styles.saveText}>Save</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={emailModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!emailSaving) setEmailModalVisible(false);
+        }}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Change email address</Text>
+
+            <TextInput
+              style={[styles.input, { marginBottom: 12 }]}
+              placeholder="New email address"
+              placeholderTextColor={COLORS.textMuted}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={newEmail}
+              onChangeText={setNewEmail}
+              editable={!emailSaving}
+            />
+
+            <TextInput
+              style={styles.input}
+              placeholder="Current password"
+              placeholderTextColor={COLORS.textMuted}
+              secureTextEntry
+              autoCapitalize="none"
+              value={emailCurrentPassword}
+              onChangeText={setEmailCurrentPassword}
+              editable={!emailSaving}
+            />
+
+            <Text style={styles.helperText}>
+              A verification link will be sent to your new address.
+            </Text>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setEmailModalVisible(false)}
+                disabled={emailSaving}
+              >
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.saveButton}
+                onPress={requestEmailChange}
+                disabled={emailSaving}
+              >
+                {emailSaving ? (
+                  <ActivityIndicator color={COLORS.background} />
+                ) : (
+                  <Text style={styles.saveText}>Send verification</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={passwordModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!passwordSaving) setPasswordModalVisible(false);
+        }}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Change password</Text>
+
+            <TextInput
+              style={[styles.input, { marginBottom: 12 }]}
+              placeholder="Current password"
+              placeholderTextColor={COLORS.textMuted}
+              secureTextEntry
+              value={currentPassword}
+              onChangeText={setCurrentPassword}
+              editable={!passwordSaving}
+            />
+
+            <TextInput
+              style={[styles.input, { marginBottom: 12 }]}
+              placeholder="New password (minimum 8 characters)"
+              placeholderTextColor={COLORS.textMuted}
+              secureTextEntry
+              value={newPassword}
+              onChangeText={setNewPassword}
+              editable={!passwordSaving}
+            />
+
+            <TextInput
+              style={styles.input}
+              placeholder="Confirm new password"
+              placeholderTextColor={COLORS.textMuted}
+              secureTextEntry
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              editable={!passwordSaving}
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setPasswordModalVisible(false)}
+                disabled={passwordSaving}
+              >
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.saveButton}
+                onPress={changePassword}
+                disabled={passwordSaving}
+              >
+                {passwordSaving
+                  ? <ActivityIndicator color={COLORS.background} />
+                  : <Text style={styles.saveText}>Update</Text>}
               </TouchableOpacity>
             </View>
           </View>

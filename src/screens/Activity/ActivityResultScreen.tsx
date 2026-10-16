@@ -192,7 +192,7 @@ const ActivityResultScreen = () => {
         <TouchableOpacity
           style={styles.primaryButton}
           activeOpacity={0.85}
-          onPress={() => navigation.navigate('Map')}>
+          onPress={() => navigation.navigate('MainTabs', { screen: 'Map' })}>
           <Text style={styles.primaryButtonText}>BACK TO MAP</Text>
         </TouchableOpacity>
 
@@ -216,11 +216,11 @@ const styles = StyleSheet.create({
   },
 
   map: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
 
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.55)',
   },
 

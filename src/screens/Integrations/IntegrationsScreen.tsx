@@ -93,7 +93,7 @@ const IntegrationsScreen = () => {
         },
       );
 
-      const data = await response.json();
+      const data: any = await response.json();
 
       if (!response.ok) {
         throw new Error(
@@ -141,7 +141,7 @@ const IntegrationsScreen = () => {
         },
       );
 
-      const data = await response.json().catch(() => ({}));
+      const data: any = await response.json().catch(() => ({}));
 
       if (!response.ok) {
         throw new Error(data?.error ?? 'Unable to connect Garmin.');
@@ -180,7 +180,7 @@ const IntegrationsScreen = () => {
         },
       );
 
-      const data = await response.json().catch(() => ({}));
+      const data: any = await response.json().catch(() => ({}));
 
       if (!response.ok) {
         throw new Error(data?.error ?? 'Unable to disconnect device.');

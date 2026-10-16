@@ -49,7 +49,7 @@ const NotificationsScreen = () => {
         throw new Error(`Failed to load notifications: ${response.status}`);
       }
 
-      const data = await response.json();
+      const data: any = await response.json();
 
       setNotifications(data.notifications || []);
       setUnreadCount(data.unreadCount || 0);

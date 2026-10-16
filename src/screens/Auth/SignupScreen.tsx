@@ -74,7 +74,7 @@ const SignupScreen = () => {
         }),
       });
 
-      const data = await response.json();
+      const data: any = await response.json();
 
       if (!response.ok || !data.id) {
         throw new Error(data.error ?? 'Signup failed.');

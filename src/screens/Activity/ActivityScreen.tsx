@@ -828,7 +828,7 @@ const styles = StyleSheet.create({
   },
 
   hud: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.md,
   },

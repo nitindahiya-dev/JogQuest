@@ -286,7 +286,7 @@ const LeaderboardScreen = () => {
                 Complete an activity to appear on the leaderboard.
               </Text>
             </View>
-          ) : null
+          ) : undefined
         }
         renderItem={renderPlayer}
       />

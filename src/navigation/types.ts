@@ -1,3 +1,5 @@
+import type { NavigatorScreenParams } from '@react-navigation/native';
+
 export type Coordinate = {
   latitude: number;
   longitude: number;
@@ -30,7 +32,7 @@ export type ActivityResultParams = {
 export type RootStackParamList = {
   Login: undefined;
   Signup: undefined;
-  MainTabs: undefined;
+  MainTabs: NavigatorScreenParams<MainTabParamList> | undefined;
   ActivityResult: ActivityResultParams;
   TerritoryDetails: {
     territoryId: string;

@@ -46,7 +46,7 @@ const PublicProfileScreen = () => {
         `${API_BASE_URL}/api/users/${userId}/social-profile?viewerId=${viewerId}`,
       );
 
-      const data = await response.json();
+      const data: any = await response.json();
 
       if (!response.ok) {
         throw new Error(data.error ?? 'Failed to load');
