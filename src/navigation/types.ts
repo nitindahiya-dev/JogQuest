@@ -65,6 +65,8 @@ export type RootStackParamList = {
   RoutePlanner: undefined;
 
   Integrations: undefined;
+
+  ProfileDetails: undefined; 
 };
 
 export type MainTabParamList = {

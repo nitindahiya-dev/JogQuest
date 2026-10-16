@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from 'react';
+import React, { useEffect, useState } from 'react';
 
 import {
   View,
@@ -52,6 +52,8 @@ import CompetitionsScreen from '../screens/Competitions/CompetitionsScreen';
 import CreateCompetitionScreen from '../screens/Competitions/CreateCompetitionScreen';
 import CompetitionDetailsScreen from '../screens/Competitions/CompetitionDetailsScreen';
 import IntegrationsScreen from '../screens/Integrations/IntegrationsScreen';
+import ProfileDetailsScreen from '../screens/Profile/ProfileDetailsScreen';
+
 
 import type {
   RootStackParamList,
@@ -83,11 +85,11 @@ const CustomTabBar = ({
     <View
       style={[
         styles.tabBarContainer,
-        {bottom: Math.max(insets.bottom, 12) + 8},
+        { bottom: Math.max(insets.bottom, 12) + 8 },
       ]}>
       <View style={styles.tabBar}>
         {state.routes.map((route, index) => {
-          const {options} = descriptors[route.key];
+          const { options } = descriptors[route.key];
           const isFocused = state.index === index;
 
           const label =
@@ -112,7 +114,7 @@ const CustomTabBar = ({
               key={route.key}
               onPress={onPress}
               accessibilityRole="button"
-              accessibilityState={{selected: isFocused}}
+              accessibilityState={{ selected: isFocused }}
               accessibilityLabel={String(label)}
               style={[
                 styles.tabItem,
@@ -144,31 +146,31 @@ const MainTabs = () => {
       <Tab.Screen
         name="Map"
         component={MapScreen}
-        options={{tabBarLabel: 'MAP'}}
+        options={{ tabBarLabel: 'MAP' }}
       />
 
       <Tab.Screen
         name="Feed"
         component={SocialFeedScreen}
-        options={{tabBarLabel: 'FEED'}}
+        options={{ tabBarLabel: 'FEED' }}
       />
 
       <Tab.Screen
         name="Activity"
         component={ActivityScreen}
-        options={{tabBarLabel: 'START'}}
+        options={{ tabBarLabel: 'START' }}
       />
 
       <Tab.Screen
         name="Leaderboard"
         component={LeaderboardScreen}
-        options={{tabBarLabel: 'RANKS'}}
+        options={{ tabBarLabel: 'RANKS' }}
       />
 
       <Tab.Screen
         name="Profile"
         component={ProfileScreen}
-        options={{tabBarLabel: 'PROFILE'}}
+        options={{ tabBarLabel: 'PROFILE' }}
       />
     </Tab.Navigator>
   );
@@ -176,7 +178,7 @@ const MainTabs = () => {
 
 // Root navigator
 const RootNavigator = () => {
-  const {user, loading} = useAuth();
+  const { user, loading } = useAuth();
 
   // Keep the splash visible for at least 2.5 seconds.
   const [showSplash, setShowSplash] = useState(true);
@@ -216,13 +218,13 @@ const RootNavigator = () => {
           <Stack.Screen
             name="Login"
             component={LoginScreen}
-            options={{headerShown: false}}
+            options={{ headerShown: false }}
           />
 
           <Stack.Screen
             name="Signup"
             component={SignupScreen}
-            options={{headerShown: false}}
+            options={{ headerShown: false }}
           />
         </>
       ) : (
@@ -230,31 +232,31 @@ const RootNavigator = () => {
           <Stack.Screen
             name="MainTabs"
             component={MainTabs}
-            options={{headerShown: false}}
+            options={{ headerShown: false }}
           />
 
           <Stack.Screen
             name="ActivityHistory"
             component={ActivityHistoryScreen}
-            options={{title: 'Activity History'}}
+            options={{ title: 'Activity History' }}
           />
 
           <Stack.Screen
             name="Notifications"
             component={NotificationsScreen}
-            options={{title: 'Notifications'}}
+            options={{ title: 'Notifications' }}
           />
 
           <Stack.Screen
             name="PublicProfile"
             component={PublicProfileScreen}
-            options={{title: 'Profile'}}
+            options={{ title: 'Profile' }}
           />
 
           <Stack.Screen
             name="FollowList"
             component={FollowListScreen}
-            options={({route}) => ({
+            options={({ route }) => ({
               title:
                 route.params.mode === 'followers'
                   ? 'Followers'
@@ -265,37 +267,37 @@ const RootNavigator = () => {
           <Stack.Screen
             name="Clubs"
             component={ClubsScreen}
-            options={{title: 'Clubs'}}
+            options={{ title: 'Clubs' }}
           />
 
           <Stack.Screen
             name="CreateClub"
             component={CreateClubScreen}
-            options={{title: 'Create Club'}}
+            options={{ title: 'Create Club' }}
           />
 
           <Stack.Screen
             name="ClubDetails"
             component={ClubDetailsScreen}
-            options={{title: 'Club'}}
+            options={{ title: 'Club' }}
           />
 
           <Stack.Screen
             name="Competitions"
             component={CompetitionsScreen}
-            options={{title: 'Competitions'}}
+            options={{ title: 'Competitions' }}
           />
 
           <Stack.Screen
             name="CreateCompetition"
             component={CreateCompetitionScreen}
-            options={{title: 'Create Competition'}}
+            options={{ title: 'Create Competition' }}
           />
 
           <Stack.Screen
             name="CompetitionDetails"
             component={CompetitionDetailsScreen}
-            options={{title: 'Competition'}}
+            options={{ title: 'Competition' }}
           />
 
           <Stack.Screen
@@ -310,7 +312,13 @@ const RootNavigator = () => {
           <Stack.Screen
             name="Integrations"
             component={IntegrationsScreen}
-            options={{title: 'Integrations'}}
+            options={{ title: 'Integrations' }}
+          />
+
+          <Stack.Screen
+            name="ProfileDetails"
+            component={ProfileDetailsScreen}
+            options={{ title: 'Personal Details' }}
           />
 
           <Stack.Screen
@@ -325,7 +333,7 @@ const RootNavigator = () => {
           <Stack.Screen
             name="TerritoryDetails"
             component={TerritoryDetailsScreen}
-            options={{title: 'Territory'}}
+            options={{ title: 'Territory' }}
           />
         </>
       )}
