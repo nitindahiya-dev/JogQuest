@@ -2,12 +2,14 @@ import { API_BASE_URL } from '../../config/api';
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { launchImageLibrary } from 'react-native-image-picker';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../auth/AuthContext';
@@ -15,8 +17,7 @@ import { COLORS, SPACING, TYPOGRAPHY, SHADOWS } from '../../theme';
 import {
   UsersIcon, TrophyIcon, WatchIcon, SettingsIcon, BellIcon
 } from '../../components/Icons';
-
-
+import { useJogQuestAlert } from '../../components/JogQuestAlert';
 
 const ProfileScreen = () => {
   const navigation = useNavigation<any>();
@@ -27,6 +28,75 @@ const ProfileScreen = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const alert = useJogQuestAlert();
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+
+  const chooseAvatar = useCallback(async () => {
+    if (!token || uploadingAvatar) return;
+
+    const picker = await launchImageLibrary({
+      mediaType: 'photo',
+      selectionLimit: 1,
+    });
+
+    if (picker.didCancel) return;
+
+    const asset = picker.assets?.[0];
+
+    if (!asset?.uri) {
+      alert('Image unavailable', 'Please select another photo.');
+      return;
+    }
+
+    if (asset.fileSize && asset.fileSize > 5 * 1024 * 1024) {
+      alert('Image too large', 'Choose a photo smaller than 5 MB.');
+      return;
+    }
+
+    setUploadingAvatar(true);
+
+    try {
+      const formData = new FormData();
+
+      formData.append('avatar', {
+        uri: asset.uri,
+        name: asset.fileName || `avatar.${asset.type?.split('/')[1] || 'jpg'}`,
+        type: asset.type || 'image/jpeg',
+      } as any);
+
+      const response = await fetch(`${API_BASE_URL}/api/me/avatar`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData as any,
+      });
+
+      const data = (await response.json()) as {
+        error?: string;
+        avatar_url?: string | null;
+      };
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Photo upload failed.');
+      }
+
+      setProfile((current: any) => ({
+        ...current,
+        avatar_url: data.avatar_url,
+      }));
+
+      alert('Photo updated', 'Your profile photo has been saved.');
+    } catch (error) {
+      alert(
+        'Upload failed',
+        error instanceof Error ? error.message : 'Please try again.',
+      );
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }, [token, uploadingAvatar, alert]);
 
   const loadProfile = useCallback(async () => {
     if (!user?.id) return;
@@ -92,9 +162,29 @@ const ProfileScreen = () => {
       <View style={styles.heroSection}>
         <View style={styles.avatarContainer}>
           <View style={styles.avatarGlow} />
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{profile.display_name?.charAt(0).toUpperCase() || 'N'}</Text>
-          </View>
+          <TouchableOpacity
+            style={styles.avatar}
+            onPress={chooseAvatar}
+            disabled={uploadingAvatar}
+            accessibilityLabel="Change profile photo"
+          >
+            {profile.avatar_url ? (
+              <Image
+                source={{ uri: profile.avatar_url }}
+                style={styles.avatarImage}
+              />
+            ) : (
+              <Text style={styles.avatarText}>
+                {profile.display_name?.charAt(0).toUpperCase() || 'N'}
+              </Text>
+            )}
+
+            {uploadingAvatar && (
+              <View style={styles.avatarLoading}>
+                <ActivityIndicator color={COLORS.background} />
+              </View>
+            )}
+          </TouchableOpacity>
           <View style={styles.rankBadge}>
             <Text style={styles.rankBadgeLabel}>RANK</Text>
             <Text style={styles.rankBadgeValue}>#{profile.rank || 3}</Text>
@@ -197,6 +287,18 @@ const styles = StyleSheet.create({
   avatarGlow: { position: 'absolute', width: 120, height: 120, borderRadius: 60, backgroundColor: COLORS.accent, opacity: 0.1, transform: [{ scale: 1.15 }] },
   avatar: { width: 100, height: 100, borderRadius: 50, backgroundColor: COLORS.accent, alignItems: 'center', justifyContent: 'center', borderWidth: 4, borderColor: COLORS.background, zIndex: 2 },
   avatarText: { color: COLORS.background, fontSize: 40, fontWeight: '900' },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 50,
+  },
+  avatarLoading: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   rankBadge: { position: 'absolute', bottom: -8, right: -12, backgroundColor: COLORS.surfaceLight, borderWidth: 2, borderColor: COLORS.accent, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 4, alignItems: 'center', zIndex: 3, flexDirection: 'row', gap: 4 },
   rankBadgeLabel: { color: COLORS.textMuted, fontSize: 8, fontWeight: '900' },
   rankBadgeValue: { color: COLORS.accent, fontSize: 14, fontWeight: '900' },

@@ -8,14 +8,17 @@
     "start": "tsx src/index.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
+    "multer": "^2.4.0",
     "pg": "^8.16.3"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
+    "@types/multer": "^2.3.0",
     "@types/node": "^24.5.0",
     "@types/pg": "^8.23.1",
     "tsx": "^4.20.5",

@@ -7,11 +7,33 @@ import { pool, query } from './db.js';
 import {
   createHash,
   randomBytes,
+  randomUUID,
   scryptSync,
   timingSafeEqual,
 } from 'node:crypto';
+import { createClient } from '@supabase/supabase-js';
+import multer from 'multer';
 
 const app = express();
+
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, callback) => {
+    const allowedTypes = [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+    ];
+
+    if (!allowedTypes.includes(file.mimetype)) {
+      callback(new Error('Only JPEG, PNG, and WebP images are allowed'));
+      return;
+    }
+
+    callback(null, true);
+  },
+});
 
 app.use(cors());
 app.use(express.json());
@@ -403,6 +425,97 @@ app.patch('/api/me/profile', requireAuth, async (req, res) => {
     });
   }
 });
+
+
+app.post(
+  '/api/me/avatar',
+  requireAuth,
+  (req, res, next) => {
+    avatarUpload.single('avatar')(req, res, (error) => {
+      if (error instanceof multer.MulterError) {
+        res.status(error.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({
+          error:
+            error.code === 'LIMIT_FILE_SIZE'
+              ? 'Image must be 5 MB or smaller'
+              : 'Invalid image upload',
+        });
+        return;
+      }
+
+      if (error) {
+        res.status(400).json({
+          error: 'Only JPEG, PNG, and WebP images are allowed',
+        });
+        return;
+      }
+
+      next();
+    });
+  },
+  async (req, res) => {
+    try {
+      const userId = res.locals.authenticatedUserId as string;
+      const file = req.file;
+
+      if (!file) {
+        return res.status(400).json({ error: 'Choose an image first' });
+      }
+
+      const supabaseUrl = process.env.SUPABASE_URL;
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+      if (!supabaseUrl || !supabaseKey) {
+        return res.status(503).json({
+          error: 'Avatar storage is not configured',
+        });
+      }
+
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const extensionByType: Record<string, string> = {
+        'image/jpeg': 'jpg',
+        'image/png': 'png',
+        'image/webp': 'webp',
+      };
+
+      const path = `${userId}/${randomUUID()}.${extensionByType[file.mimetype]}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('profile-avatars')
+        .upload(path, file.buffer, {
+          contentType: file.mimetype,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.error('Avatar upload failed:', uploadError.message);
+        return res.status(502).json({ error: 'Failed to upload avatar' });
+      }
+
+      const { data } = supabase.storage
+        .from('profile-avatars')
+        .getPublicUrl(path);
+
+      const result = await query(
+        `UPDATE users
+         SET avatar_url = $1
+         WHERE id = $2
+         RETURNING id, username, display_name, email, avatar_url`,
+        [data.publicUrl, userId],
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      return res.json(result.rows[0]);
+    } catch (error) {
+      console.error('Avatar upload failed:', error);
+      return res.status(500).json({ error: 'Failed to upload avatar' });
+    }
+  },
+);
+
 
 app.post('/api/me/password', requireAuth, async (req, res) => {
   const userId = res.locals.authenticatedUserId as string;
@@ -1864,7 +1977,7 @@ app.post('/api/territories/claim', requireAuth, async (req, res) => {
     res.status(201).json({ ok: true, territory });
   } catch (error) {
     if (transactionStarted) {
-      await client.query('ROLLBACK').catch(() => {});
+      await client.query('ROLLBACK').catch(() => { });
     }
     console.error(error);
     res.status(500).json({ error: 'Failed to claim territory' });
@@ -2007,17 +2120,17 @@ app.post('/api/territories/:id/challenges', requireAuth, async (req, res) => {
     const challengerId = res.locals.authenticatedUserId as string;
     const { activityId } = req.body;
 
-if (typeof activityId !== 'string' || !activityId.trim()) {
-  return res.status(400).json({
-    error: 'activityId is required',
-  });
-}
+    if (typeof activityId !== 'string' || !activityId.trim()) {
+      return res.status(400).json({
+        error: 'activityId is required',
+      });
+    }
 
-const routeResult = await query<{
-  latitude: number;
-  longitude: number;
-}>(
-  `
+    const routeResult = await query<{
+      latitude: number;
+      longitude: number;
+    }>(
+      `
   SELECT
     ST_Y(ap.location::geometry) AS latitude,
     ST_X(ap.location::geometry) AS longitude
@@ -2027,62 +2140,62 @@ const routeResult = await query<{
     AND a.user_id = $2
   ORDER BY ap.sequence_number ASC
   `,
-  [activityId, challengerId],
-);
+      [activityId, challengerId],
+    );
 
-if (routeResult.rows.length === 0) {
-  return res.status(404).json({
-    error: 'Activity not found for challenger or has no saved GPS points',
-  });
-}
+    if (routeResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Activity not found for challenger or has no saved GPS points',
+      });
+    }
 
-const route = routeResult.rows.map(point => ({
-  latitude: Number(point.latitude),
-  longitude: Number(point.longitude),
-}));
+    const route = routeResult.rows.map(point => ({
+      latitude: Number(point.latitude),
+      longitude: Number(point.longitude),
+    }));
 
-if (
-  route.length < 10 ||
-  route.some(point =>
-    !Number.isFinite(point.latitude) ||
-    !Number.isFinite(point.longitude) ||
-    point.latitude < -90 ||
-    point.latitude > 90 ||
-    point.longitude < -180 ||
-    point.longitude > 180
-  )
-) {
-  return res.status(400).json({
-    error: 'Activity must contain at least 10 valid GPS points',
-  });
-}
+    if (
+      route.length < 10 ||
+      route.some(point =>
+        !Number.isFinite(point.latitude) ||
+        !Number.isFinite(point.longitude) ||
+        point.latitude < -90 ||
+        point.latitude > 90 ||
+        point.longitude < -180 ||
+        point.longitude > 180
+      )
+    ) {
+      return res.status(400).json({
+        error: 'Activity must contain at least 10 valid GPS points',
+      });
+    }
 
-const first = route[0];
-const last = route[route.length - 1];
+    const first = route[0];
+    const last = route[route.length - 1];
 
-if (distanceBetweenCoordinates(first, last) > 0.05) {
-  return res.status(400).json({
-    error: 'Route must finish within 50 metres of its starting point',
-  });
-}
+    if (distanceBetweenCoordinates(first, last) > 0.05) {
+      return res.status(400).json({
+        error: 'Route must finish within 50 metres of its starting point',
+      });
+    }
 
-const ring = [...route];
-ring[ring.length - 1] = first;
+    const ring = [...route];
+    ring[ring.length - 1] = first;
 
-const lineGeoJson = JSON.stringify({
-  type: 'LineString',
-  coordinates: ring.map(point => [
-    point.longitude,
-    point.latitude,
-  ]),
-});
+    const lineGeoJson = JSON.stringify({
+      type: 'LineString',
+      coordinates: ring.map(point => [
+        point.longitude,
+        point.latitude,
+      ]),
+    });
 
-const geometryResult = await query<{
-  polygon_wkt: string;
-  area_m2: number;
-  is_valid: boolean;
-}>(
-  `
+    const geometryResult = await query<{
+      polygon_wkt: string;
+      area_m2: number;
+      is_valid: boolean;
+    }>(
+      `
   WITH route_line AS (
     SELECT ST_SetSRID(ST_GeomFromGeoJSON($1), 4326) AS geom
   ),
@@ -2109,29 +2222,29 @@ const geometryResult = await query<{
   ORDER BY ST_Area(geom::geography) DESC
   LIMIT 1
   `,
-  [lineGeoJson],
-);
+      [lineGeoJson],
+    );
 
-if (geometryResult.rows.length === 0) {
-  return res.status(400).json({
-    error: 'Route does not enclose a valid territory of at least 1,000 m²',
-  });
-}
+    if (geometryResult.rows.length === 0) {
+      return res.status(400).json({
+        error: 'Route does not enclose a valid territory of at least 1,000 m²',
+      });
+    }
 
-const selectedPolygon = geometryResult.rows[0];
+    const selectedPolygon = geometryResult.rows[0];
 
-if (
-  !selectedPolygon.is_valid ||
-  !Number.isFinite(Number(selectedPolygon.area_m2))
-) {
-  return res.status(400).json({
-    error: 'Could not construct a valid challenge polygon',
-  });
-}
+    if (
+      !selectedPolygon.is_valid ||
+      !Number.isFinite(Number(selectedPolygon.area_m2))
+    ) {
+      return res.status(400).json({
+        error: 'Could not construct a valid challenge polygon',
+      });
+    }
 
-const polygonWkt = `SRID=4326;${selectedPolygon.polygon_wkt}`;
+    const polygonWkt = `SRID=4326;${selectedPolygon.polygon_wkt}`;
 
-const result = await query(
+    const result = await query(
       `
       WITH target AS (
         SELECT
@@ -3301,36 +3414,36 @@ app.post('/api/posts', requireAuth, async (req, res) => {
 app.post('/api/users/:userId/follow/:targetUserId',
   requireAuth,
   async (
-  req,
-  res,
-) => {
-  try {
-    const userId = res.locals.authenticatedUserId as string;
+    req,
+    res,
+  ) => {
+    try {
+      const userId = res.locals.authenticatedUserId as string;
       const { targetUserId } = req.params;
 
-    if (userId === targetUserId) {
-      return res.status(400).json({
-        error: 'You cannot follow yourself',
-      });
-    }
+      if (userId === targetUserId) {
+        return res.status(400).json({
+          error: 'You cannot follow yourself',
+        });
+      }
 
-    const targetResult = await query(
-      `
+      const targetResult = await query(
+        `
       SELECT id
       FROM users
       WHERE id = $1
       `,
-      [targetUserId],
-    );
+        [targetUserId],
+      );
 
-    if (targetResult.rows.length === 0) {
-      return res.status(404).json({
-        error: 'Target user not found',
-      });
-    }
+      if (targetResult.rows.length === 0) {
+        return res.status(404).json({
+          error: 'Target user not found',
+        });
+      }
 
-    const result = await query(
-      `
+      const result = await query(
+        `
       INSERT INTO follows (
         follower_id,
         following_id
@@ -3342,28 +3455,28 @@ app.post('/api/users/:userId/follow/:targetUserId',
         following_id,
         created_at
       `,
-      [
-        userId,
-        targetUserId,
-      ],
-    );
+        [
+          userId,
+          targetUserId,
+        ],
+      );
 
-    res.status(
-      result.rows.length > 0
-        ? 201
-        : 200,
-    ).json({
-      following: true,
-      created: result.rows.length > 0,
-    });
-  } catch (error) {
-    console.error(error);
+      res.status(
+        result.rows.length > 0
+          ? 201
+          : 200,
+      ).json({
+        following: true,
+        created: result.rows.length > 0,
+      });
+    } catch (error) {
+      console.error(error);
 
-    res.status(500).json({
-      error: 'Failed to follow user',
-    });
-  }
-});
+      res.status(500).json({
+        error: 'Failed to follow user',
+      });
+    }
+  });
 
 
 // --------------------------------------------------
