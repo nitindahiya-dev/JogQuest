@@ -17,6 +17,7 @@ import {
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import DeviceInfo from 'react-native-device-info';
 import { useJogQuestAlert } from '../../components/JogQuestAlert';
 import {createTerritory} from '../../utils/territory';
 import {saveTerritory} from '../../utils/territoryStorage';
@@ -260,7 +261,40 @@ const ActivityScreen = () => {
   // --------------------------------------------------
   // START / PAUSE / RESUME
   // --------------------------------------------------
-  const startActivity = () => {
+  const startActivity = async () => {
+    if (Platform.OS === 'android') {
+      let permission = await PermissionsAndroid.check(
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+      );
+
+      if (!permission) {
+        const result = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        );
+        permission = result === PermissionsAndroid.RESULTS.GRANTED;
+      }
+
+      if (!permission) {
+        alert(
+          'Location permission required',
+          'JogQuest needs location permission to record your route. Allow location access in Android settings, then try again.',
+          [{text: 'OK'}],
+        );
+        return;
+      }
+
+      const locationEnabled = await DeviceInfo.isLocationEnabled();
+
+      if (!locationEnabled) {
+        alert(
+          'Turn on device location',
+          'Your permission is granted, but device location is off. Swipe down from the top of your screen, turn on Location, then return to JogQuest.',
+          [{text: 'GOT IT'}],
+        );
+        return;
+      }
+    }
+
     setRoute([]);
     setDistance(0);
     routeProgressMaxRef.current = 0;
