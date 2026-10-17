@@ -3390,6 +3390,70 @@ app.post('/api/posts', requireAuth, async (req, res) => {
 
 
 // --------------------------------------------------
+// EDIT OWN POST
+app.put('/api/posts/:postId', requireAuth, async (req, res) => {
+  try {
+    const userId = res.locals.authenticatedUserId as string;
+    const {postId} = req.params;
+    const content =
+      typeof req.body.content === 'string' ? req.body.content.trim() : '';
+
+    if (!content) {
+      return res.status(400).json({error: 'Post content cannot be empty'});
+    }
+    if (content.length > 500) {
+      return res.status(400).json({error: 'Post content cannot exceed 500 characters'});
+    }
+
+    const result = await query(
+      `UPDATE posts
+       SET content = $1
+       WHERE id = $2 AND user_id = $3
+       RETURNING id, content, created_at`,
+      [content, postId, userId],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Post not found or you do not own this post',
+      });
+    }
+
+    return res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Edit post failed:', error);
+    return res.status(500).json({error: 'Failed to update post'});
+  }
+});
+
+
+// DELETE OWN POST
+app.delete('/api/posts/:postId', requireAuth, async (req, res) => {
+  try {
+    const userId = res.locals.authenticatedUserId as string;
+    const {postId} = req.params;
+
+    const result = await query(
+      `DELETE FROM posts
+       WHERE id = $1 AND user_id = $2
+       RETURNING id`,
+      [postId, userId],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Post not found or you do not own this post',
+      });
+    }
+
+    return res.json({deleted: true, id: result.rows[0].id});
+  } catch (error) {
+    console.error('Delete post failed:', error);
+    return res.status(500).json({error: 'Failed to delete post'});
+  }
+});
+
+
 // FOLLOW USER
 // --------------------------------------------------
 

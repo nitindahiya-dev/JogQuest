@@ -10,6 +10,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
+  Share,
+  Alert,
   StyleSheet,
   Text,
   TextInput,
@@ -107,6 +109,9 @@ const SocialFeedScreen = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [posting, setPosting] = useState(false);
+  const [editingPostId, setEditingPostId] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [activeCommentsPostId, setActiveCommentsPostId] = useState<string | null>(null);
@@ -294,6 +299,128 @@ const SocialFeedScreen = () => {
     }
   };
 
+  const startEditingPost = (post: FeedPost) => {
+    setError(null);
+    setEditingPostId(post.id);
+    setEditContent(post.content);
+  };
+
+  const savePostEdit = async (post: FeedPost) => {
+    const content = editContent.trim();
+
+    if (!content) {
+      setError('Post content cannot be empty.');
+      return;
+    }
+    if (content.length > 500 || savingEdit) return;
+
+    try {
+      setSavingEdit(true);
+      setError(null);
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/posts/${post.id}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({content}),
+        },
+      );
+
+      if (!response.ok) {
+        const rawData: unknown = await response.json().catch(() => null);
+        const message =
+          typeof rawData === 'object' &&
+          rawData !== null &&
+          'error' in rawData &&
+          typeof rawData.error === 'string'
+            ? rawData.error
+            : 'Failed to update post';
+        throw new Error(message);
+      }
+
+      setPosts(current =>
+        current.map(item =>
+          item.id === post.id ? {...item, content} : item,
+        ),
+      );
+      setEditingPostId(null);
+      setEditContent('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update post');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const sharePost = async (post: FeedPost) => {
+    const message = [
+      `${post.display_name} (@${post.username}) on JogQuest`,
+      post.content,
+      post.activity_type
+        ? `${post.activity_type}: ${post.distance_km ?? 0} km`
+        : '',
+    ].filter(Boolean).join('\\n\\n');
+
+    try {
+      await Share.share({message});
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not share post');
+    }
+  };
+
+  const deletePost = (post: FeedPost) => {
+    Alert.alert(
+      'Delete post?',
+      'This will permanently delete your post and its likes and comments.',
+      [
+        {text: 'Cancel', style: 'cancel'},
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await fetch(
+                `${API_BASE_URL}/api/posts/${post.id}`,
+                {
+                  method: 'DELETE',
+                  headers: {Authorization: `Bearer ${token}`},
+                },
+              );
+              const rawData: unknown = await response.json().catch(() => null);
+              const errorMessage =
+                typeof rawData === 'object' &&
+                rawData !== null &&
+                'error' in rawData &&
+                typeof rawData.error === 'string'
+                  ? rawData.error
+                  : 'Failed to delete post';
+
+              if (!response.ok) {
+                throw new Error(errorMessage);
+              }
+              setPosts(current => current.filter(item => item.id !== post.id));
+              setComments(current => {
+                const next = {...current};
+                delete next[post.id];
+                return next;
+              });
+              if (activeCommentsPostId === post.id) {
+                setActiveCommentsPostId(null);
+                setCommentText('');
+              }
+            } catch (err) {
+              setError(err instanceof Error ? err.message : 'Failed to delete post');
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const formatTime = (value: string) => {
     const date = new Date(value);
     const now = new Date();
@@ -344,8 +471,46 @@ const SocialFeedScreen = () => {
           <Text style={styles.timestamp}>{formatTime(item.created_at)}</Text>
         </TouchableOpacity>
 
-        {!!item.content && (
-          <Text style={styles.content}>{item.content}</Text>
+        {editingPostId === item.id ? (
+          <View>
+            <TextInput
+              value={editContent}
+              onChangeText={setEditContent}
+              placeholder="Edit your post..."
+              placeholderTextColor={COLORS.textMuted}
+              multiline
+              maxLength={500}
+              editable={!savingEdit}
+              style={styles.editPostInput}
+            />
+            <View style={styles.editActions}>
+              <TouchableOpacity
+                style={styles.editSaveButton}
+                onPress={() => savePostEdit(item)}
+                disabled={savingEdit || !editContent.trim()}>
+                <Text style={styles.editSaveText}>
+                  {savingEdit ? 'SAVING...' : 'SAVE'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.editCancelButton}
+                onPress={() => {
+                  setEditingPostId(null);
+                  setEditContent('');
+                  setError(null);
+                }}
+                disabled={savingEdit}>
+                <Text style={styles.editCancelText}>CANCEL</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.characterCount}>
+              {editContent.length}/500
+            </Text>
+          </View>
+        ) : (
+          !!item.content && (
+            <Text style={styles.content}>{item.content}</Text>
+          )
         )}
 
         {item.activity_id && item.activity_type && (
@@ -404,6 +569,29 @@ const SocialFeedScreen = () => {
               💬  {item.comments_count}
             </Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => sharePost(item)}>
+            <Text style={styles.actionText}>↗ Share</Text>
+          </TouchableOpacity>
+
+          {item.user_id === userId && (
+            <>
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={() => startEditingPost(item)}>
+                <Text style={styles.actionText}>Edit</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={() => deletePost(item)}>
+                <Text style={[styles.actionText, {color: COLORS.danger}]}>
+                  Delete
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
 
         {showComments && (
@@ -673,6 +861,47 @@ const styles = StyleSheet.create({
   timestamp: {
     color: COLORS.textMuted,
     fontSize: 11,
+  },
+  editPostInput: {
+    color: COLORS.text,
+    backgroundColor: COLORS.surfaceLight,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    fontSize: 15,
+    minHeight: 90,
+    padding: 12,
+    marginTop: 14,
+    textAlignVertical: 'top',
+  },
+  editActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+    gap: 10,
+  },
+  editSaveButton: {
+    backgroundColor: COLORS.accent,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  editSaveText: {
+    color: COLORS.background,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  editCancelButton: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  editCancelText: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
   },
   content: {
     color: COLORS.text,
