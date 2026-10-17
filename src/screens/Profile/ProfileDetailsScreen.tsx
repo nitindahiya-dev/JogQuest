@@ -74,7 +74,7 @@ const ProfileDetailsScreen = () => {
     };
     loadProfile();
     return () => { active = false; };
-  }, [token]);
+  }, [token, alert]);
 
   const openEditor = (target: EditableField) => {
     if (!profile) return;

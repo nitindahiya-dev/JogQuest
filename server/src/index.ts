@@ -1571,89 +1571,71 @@ app.get('/api/activities/:userId', async (req, res) => {
 // GET LEADERBOARD
 // --------------------------------------------------
 
-app.get('/api/leaderboard', async (_req, res) => {
-  try {
-    const result = await query(
-      `
-      WITH activity_stats AS (
+app.get(
+  '/api/leaderboard',
+  (req, res, next) => {
+    const scope = String(req.query.scope ?? 'Global');
+    if (!['Global', 'City', 'Friends'].includes(scope)) {
+      return res.status(400).json({ error: 'Invalid leaderboard scope' });
+    }
+    if (scope === 'Global') return next();
+    return requireAuth(req, res, next);
+  },
+  async (req, res) => {
+    try {
+      const scope = String(req.query.scope ?? 'Global');
+      const userId = scope === 'Global'
+        ? null
+        : res.locals.authenticatedUserId as string;
+
+      const result = await query(
+        `
+        WITH activity_stats AS (
+          SELECT user_id, COUNT(*)::int AS activities_count,
+            COALESCE(SUM(distance_km), 0)::double precision AS total_distance_km
+          FROM activities GROUP BY user_id
+        ),
+        territory_stats AS (
+          SELECT user_id, COUNT(*)::int AS territories_captured,
+            COALESCE(SUM(area_km2), 0)::double precision AS territory_km2
+          FROM territories GROUP BY user_id
+        )
         SELECT
-          user_id,
-          COUNT(*)::int AS activities_count,
-          COALESCE(
-            SUM(distance_km),
-            0
-          )::double precision AS total_distance_km
-        FROM activities
-        GROUP BY user_id
-      ),
-      territory_stats AS (
-        SELECT
-          user_id,
-          COUNT(*)::int AS territories_captured,
-          COALESCE(
-            SUM(area_km2),
-            0
-          )::double precision AS territory_km2
-        FROM territories
-        GROUP BY user_id
-      )
-      SELECT
-        ROW_NUMBER() OVER (
-          ORDER BY
-            COALESCE(t.territory_km2, 0) DESC,
-            COALESCE(a.total_distance_km, 0) DESC,
-            u.created_at ASC
-        )::int AS rank,
+          ROW_NUMBER() OVER (
+            ORDER BY COALESCE(t.territory_km2, 0) DESC,
+              COALESCE(a.total_distance_km, 0) DESC, u.created_at ASC
+          )::int AS rank,
+          u.id, u.username, u.display_name, u.avatar_url,
+          COALESCE(t.territory_km2, 0)::double precision AS territory_km2,
+          COALESCE(t.territories_captured, 0)::int AS territories_captured,
+          COALESCE(a.activities_count, 0)::int AS activities_count,
+          COALESCE(a.total_distance_km, 0)::double precision AS total_distance_km
+        FROM users u
+        LEFT JOIN activity_stats a ON a.user_id = u.id
+        LEFT JOIN territory_stats t ON t.user_id = u.id
+        WHERE
+          ($1::text = 'Global'
+            OR ($1::text = 'City' AND NULLIF(TRIM((SELECT city FROM users WHERE id = $2::uuid)), '') IS NOT NULL
+                AND LOWER(TRIM(u.city)) = LOWER(TRIM((SELECT city FROM users WHERE id = $2::uuid))))
+            OR ($1::text = 'Friends' AND (
+                u.id = $2::uuid OR EXISTS (
+                  SELECT 1 FROM follows f
+                  WHERE f.follower_id = $2::uuid AND f.following_id = u.id
+                )
+            )))
+        ORDER BY rank ASC
+        `,
+        [scope, userId],
+      );
 
-        u.id,
-        u.username,
-        u.display_name,
-        u.avatar_url,
+      res.json(result.rows);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Failed to fetch leaderboard' });
+    }
+  },
+);
 
-        COALESCE(
-          t.territory_km2,
-          0
-        )::double precision AS territory_km2,
-
-        COALESCE(
-          t.territories_captured,
-          0
-        )::int AS territories_captured,
-
-        COALESCE(
-          a.activities_count,
-          0
-        )::int AS activities_count,
-
-        COALESCE(
-          a.total_distance_km,
-          0
-        )::double precision AS total_distance_km
-
-      FROM users u
-
-      LEFT JOIN activity_stats a
-        ON a.user_id = u.id
-
-      LEFT JOIN territory_stats t
-        ON t.user_id = u.id
-
-      ORDER BY
-        rank ASC
-      `,
-    );
-
-    res.json(result.rows);
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      error: 'Failed to fetch leaderboard',
-    });
-  }
-});
-
-// --------------------------------------------------
 // CHECK TERRITORY OVERLAP
 // --------------------------------------------------
 
@@ -5557,6 +5539,131 @@ app.post(
 
 
 // --------------------------------------------------
+
+// --------------------------------------------------
+// IMPORT REAL WORKOUTS FROM ANDROID HEALTH CONNECT
+// --------------------------------------------------
+app.post(
+  '/api/users/:userId/integrations/health_connect/import',
+  requireAuth,
+  async (req, res) => {
+    const userId = res.locals.authenticatedUserId as string;
+    const workouts = req.body?.workouts;
+
+    if (!Array.isArray(workouts) || workouts.length > 200) {
+      return res.status(400).json({
+        error: 'Provide a workouts array containing at most 200 workouts.',
+      });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const integration = await client.query(
+        `SELECT id FROM device_integrations
+         WHERE user_id = $1 AND provider = 'health_connect'
+           AND status = 'CONNECTED'`,
+        [userId],
+      );
+
+      if (!integration.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'Connect Health Connect before importing workouts.',
+        });
+      }
+
+      let imported = 0;
+      let duplicates = 0;
+      let skipped = 0;
+
+      for (const item of workouts) {
+        if (
+          !item ||
+          typeof item.externalId !== 'string' ||
+          !item.externalId.trim() ||
+          item.externalId.length > 255 ||
+          !['Run', 'Walk', 'Cycle'].includes(item.activityType) ||
+          typeof item.distanceKm !== 'number' ||
+          !Number.isFinite(item.distanceKm) ||
+          item.distanceKm < 0 ||
+          item.distanceKm > 1000 ||
+          !Number.isInteger(item.elapsedSeconds) ||
+          item.elapsedSeconds < 1 ||
+          item.elapsedSeconds > 604800 ||
+          typeof item.startedAt !== 'string' ||
+          typeof item.finishedAt !== 'string'
+        ) {
+          skipped++;
+          continue;
+        }
+
+        const start = new Date(item.startedAt);
+        const finish = new Date(item.finishedAt);
+        if (
+          !Number.isFinite(start.getTime()) ||
+          !Number.isFinite(finish.getTime()) ||
+          finish <= start ||
+          Math.round((finish.getTime() - start.getTime()) / 1000) > 604800
+        ) {
+          skipped++;
+          continue;
+        }
+
+        const paceSeconds = item.distanceKm > 0
+          ? Math.round(item.elapsedSeconds / item.distanceKm)
+          : 0;
+        const pace = paceSeconds
+          ? `${Math.floor(paceSeconds / 60)}:${String(paceSeconds % 60).padStart(2, '0')} /km`
+          : '0:00 /km';
+
+        const result = await client.query(
+          `INSERT INTO activities (
+             user_id, activity_type, distance_km, elapsed_seconds,
+             pace, started_at, finished_at, source_provider, external_activity_id
+           )
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'health_connect',$8)
+           ON CONFLICT (source_provider, external_activity_id)
+             WHERE source_provider IS NOT NULL
+               AND external_activity_id IS NOT NULL
+           DO NOTHING
+           RETURNING id`,
+          [
+            userId,
+            item.activityType,
+            item.distanceKm,
+            item.elapsedSeconds,
+            pace,
+            start.toISOString(),
+            finish.toISOString(),
+            item.externalId.trim(),
+          ],
+        );
+
+        if (result.rows.length) imported++;
+        else duplicates++;
+      }
+
+      await client.query(
+        `UPDATE device_integrations
+         SET last_sync_at = NOW(), updated_at = NOW()
+         WHERE user_id = $1 AND provider = 'health_connect'`,
+        [userId],
+      );
+
+      await client.query('COMMIT');
+      return res.json({ imported, duplicates, skipped });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Health Connect workout import failed:', error);
+      return res.status(500).json({ error: 'Failed to import workouts.' });
+    } finally {
+      client.release();
+    }
+  },
+);
+
 // GET DEVICE INTEGRATIONS
 // --------------------------------------------------
 
@@ -5607,15 +5714,7 @@ app.post(
       const userId = res.locals.authenticatedUserId as string;
       const { provider } = req.params;
 
-      const allowedProviders: DeviceProvider[] = [
-        'garmin',
-        'suunto',
-        'polar',
-        'coros',
-        'fitbit',
-        'wahoo',
-        'hammerhead',
-      ];
+      const allowedProviders: string[] = ['health_connect'];
 
       if (
         !allowedProviders.includes(

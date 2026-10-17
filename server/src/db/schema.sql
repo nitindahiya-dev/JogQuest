@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS users (
   username VARCHAR(50) UNIQUE NOT NULL,
   display_name VARCHAR(100) NOT NULL,
   avatar_url TEXT,
+  city VARCHAR(100),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

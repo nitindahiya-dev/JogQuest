@@ -1,5 +1,10 @@
 import { API_BASE_URL } from '../../config/api';
 import React, { useCallback, useState } from 'react';
+import {
+  initialize,
+  requestPermission,
+  readRecords,
+} from 'react-native-health-connect';
 
 import {
   ActivityIndicator,
@@ -20,6 +25,7 @@ import { COLORS, SPACING, TYPOGRAPHY, SHADOWS } from '../../theme';
 
 
 const providers = [
+  'health_connect',
   'garmin',
   'suunto',
   'polar',
@@ -36,13 +42,14 @@ type Integration = {
 };
 
 const providerDescriptions: Record<string, string> = {
-  garmin: 'Sync activities from your Garmin device.',
-  suunto: 'Connect your Suunto sports watch.',
-  polar: 'Bring your Polar training data together.',
-  coros: 'Sync activities from your COROS watch.',
-  fitbit: 'Connect your Fitbit activity data.',
-  wahoo: 'Bring your Wahoo workouts into JogQuest.',
-  hammerhead: 'Connect your Hammerhead cycling computer.',
+  health_connect: 'Import real workouts from compatible fitness apps on your Android device.',
+  garmin: 'Direct Garmin connection is not available yet.',
+  suunto: 'Direct Suunto connection is not available yet.',
+  polar: 'Direct Polar connection is not available yet.',
+  coros: 'Direct Coros connection is not available yet.',
+  fitbit: 'Direct Fitbit connection is not available yet.',
+  wahoo: 'Direct Wahoo connection is not available yet.',
+  hammerhead: 'Direct Hammerhead connection is not available yet.',
 };
 
 const formatDate = (value: string | null | undefined) => {
@@ -59,8 +66,10 @@ const formatDate = (value: string | null | undefined) => {
   });
 };
 
-const getProviderName = (provider: string) =>
-  provider.charAt(0).toUpperCase() + provider.slice(1);
+const getProviderName = (provider: string) => {
+  if (provider === 'health_connect') return 'Health Connect';
+  return provider.charAt(0).toUpperCase() + provider.slice(1);
+};
 
 const IntegrationsScreen = () => {
   const alert = useJogQuestAlert();
@@ -121,15 +130,89 @@ const IntegrationsScreen = () => {
     }, [loadIntegrations]),
   );
 
-  const connectGarmin = async () => {
+  const syncHealthConnect = async () => {
     if (!userId || actionProvider) return;
 
     try {
-      setActionProvider('garmin');
+      setActionProvider('health_connect');
       setError(null);
 
-      const response = await fetch(
-        `${API_BASE_URL}/api/users/${userId}/integrations/garmin`,
+      const initialized = await initialize();
+      if (!initialized) {
+        throw new Error(
+          'Health Connect is unavailable. Install or update Health Connect, then try again.',
+        );
+      }
+
+      const granted = await requestPermission([
+        { accessType: 'read', recordType: 'ExerciseSession' },
+        { accessType: 'read', recordType: 'Distance' },
+      ]);
+
+      const exercisePermission = granted.some(
+        item => item.accessType === 'read' && item.recordType === 'ExerciseSession',
+      );
+      if (!exercisePermission) {
+        throw new Error('Exercise-session permission was not granted.');
+      }
+
+      const now = new Date();
+      const from = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const timeRangeFilter = {
+        operator: 'between' as const,
+        startTime: from.toISOString(),
+        endTime: now.toISOString(),
+      };
+
+      const [exerciseResult, distanceResult] = await Promise.all([
+        readRecords('ExerciseSession', { timeRangeFilter, pageSize: 1000 }),
+        readRecords('Distance', { timeRangeFilter, pageSize: 1000 }),
+      ]);
+
+      const distanceRecords = distanceResult.records as any[];
+      const workouts = (exerciseResult.records as any[])
+        .map(session => {
+          const typeMap: Record<number, 'Run' | 'Walk' | 'Cycle'> = {
+            56: 'Run',
+            57: 'Run',
+            79: 'Walk',
+            8: 'Cycle',
+            65: 'Cycle',
+          };
+
+          const activityType = typeMap[session.exerciseType];
+          const startedAt = session.startTime;
+          const finishedAt = session.endTime;
+          const elapsedSeconds = Math.floor(
+            (new Date(finishedAt).getTime() - new Date(startedAt).getTime()) / 1000,
+          );
+
+          const distanceMeters = distanceRecords.reduce((sum, record) => {
+            const contained =
+              new Date(record.startTime).getTime() >= new Date(startedAt).getTime() &&
+              new Date(record.endTime).getTime() <= new Date(finishedAt).getTime();
+
+            return contained ? sum + (record.distance?.inMeters ?? 0) : sum;
+          }, 0);
+
+          return {
+            externalId: session.metadata?.id,
+            activityType,
+            distanceKm: distanceMeters / 1000,
+            elapsedSeconds,
+            startedAt,
+            finishedAt,
+          };
+        })
+        .filter(item =>
+          Boolean(item.externalId) &&
+          Boolean(item.activityType) &&
+          Number.isFinite(item.distanceKm) &&
+          item.elapsedSeconds > 0,
+        );
+
+      const connectResponse = await fetch(
+        `${API_BASE_URL}/api/users/${userId}/integrations/health_connect`,
         {
           method: 'POST',
           headers: {
@@ -137,27 +220,43 @@ const IntegrationsScreen = () => {
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
-            externalAccountId: 'garmin-demo-001',
+            externalAccountId: 'android-health-connect',
           }),
         },
       );
 
-      const data: any = await response.json().catch(() => ({}));
+      const connectData: any = await connectResponse.json().catch(() => ({}));
+      if (!connectResponse.ok) {
+        throw new Error(connectData?.error ?? 'Unable to register Health Connect.');
+      }
 
-      if (!response.ok) {
-        throw new Error(data?.error ?? 'Unable to connect Garmin.');
+      const importResponse = await fetch(
+        `${API_BASE_URL}/api/users/${userId}/integrations/health_connect/import`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ workouts }),
+        },
+      );
+
+      const importData: any = await importResponse.json().catch(() => ({}));
+      if (!importResponse.ok) {
+        throw new Error(importData?.error ?? 'Unable to import workouts.');
       }
 
       await loadIntegrations();
 
       alert(
-        'Garmin Connected',
-        'Your Garmin integration has been connected.',
+        'Health Connect synced',
+        `${importData.imported ?? 0} imported · ${importData.duplicates ?? 0} duplicates · ${importData.skipped ?? 0} skipped.`,
       );
     } catch (err) {
       alert(
-        'Connection Failed',
-        err instanceof Error ? err.message : 'Unable to connect Garmin.',
+        'Health Connect unavailable',
+        err instanceof Error ? err.message : 'Could not sync workouts.',
       );
     } finally {
       setActionProvider(null);
@@ -204,7 +303,7 @@ const IntegrationsScreen = () => {
   };
 
   const connectedCount = integrations.filter(
-    item => item.status === 'CONNECTED',
+    item => item.provider === 'health_connect' && item.status === 'CONNECTED',
   ).length;
 
   if (loading) {
@@ -360,9 +459,9 @@ const IntegrationsScreen = () => {
             item => item.provider === provider,
           );
 
-          const connected = integration?.status === 'CONNECTED';
+          const isHealthConnect = provider === 'health_connect';
+          const connected = isHealthConnect && integration?.status === 'CONNECTED';
           const isLoading = actionProvider === provider;
-          const isGarmin = provider === 'garmin';
 
           return (
             <View
@@ -422,17 +521,17 @@ const IntegrationsScreen = () => {
                   <Text style={styles.deviceMetaValue}>
                     {connected
                       ? formatDate(integration?.last_sync_at)
-                      : isGarmin
+                      : isHealthConnect
                         ? 'Ready to connect'
-                        : 'Integration coming soon'}
+                        : 'Not available yet'}
                   </Text>
                 </View>
 
-                {isGarmin ? (
+                {isHealthConnect ? (
                   connected ? (
                     <TouchableOpacity
                       style={styles.disconnectButton}
-                      onPress={() => disconnect(provider)}
+                      onPress={syncHealthConnect}
                       disabled={Boolean(actionProvider)}
                       activeOpacity={0.8}
                     >
@@ -440,14 +539,14 @@ const IntegrationsScreen = () => {
                         <ActivityIndicator color={COLORS.text} size="small" />
                       ) : (
                         <Text style={styles.disconnectButtonText}>
-                          DISCONNECT
+                          SYNC
                         </Text>
                       )}
                     </TouchableOpacity>
                   ) : (
                     <TouchableOpacity
                       style={styles.connectButton}
-                      onPress={connectGarmin}
+                      onPress={syncHealthConnect}
                       disabled={Boolean(actionProvider)}
                       activeOpacity={0.8}
                     >

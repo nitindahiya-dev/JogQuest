@@ -1,0 +1,2 @@
+ALTER TABLE users ADD COLUMN IF NOT EXISTS city VARCHAR(100);
+CREATE INDEX IF NOT EXISTS idx_users_city ON users (LOWER(city));

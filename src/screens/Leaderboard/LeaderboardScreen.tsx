@@ -284,7 +284,11 @@ const LeaderboardScreen = () => {
             <View style={styles.emptyBox}>
               <Text style={styles.emptyTitle}>No Players Yet</Text>
               <Text style={styles.emptyText}>
-                Complete an activity to appear on the leaderboard.
+                {selectedScope === 'City'
+                  ? 'Set your city in Profile Details to join your city leaderboard.'
+                  : selectedScope === 'Friends'
+                    ? 'Follow other runners to see them here.'
+                    : 'Complete an activity to appear on the leaderboard.'}
               </Text>
             </View>
           ) : undefined
