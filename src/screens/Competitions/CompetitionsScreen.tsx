@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../../config/api';
 import React, { useCallback, useState } from 'react';
 
 import {
@@ -37,7 +38,7 @@ type Competition = {
   participants_count: number;
 };
 
-const API_BASE_URL = 'http://127.0.0.1:4000';
+
 
 const COLORS = {
   background: '#0A0A0A',

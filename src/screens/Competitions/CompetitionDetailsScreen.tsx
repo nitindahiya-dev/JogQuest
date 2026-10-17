@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../../config/api';
 import React, { useCallback, useEffect, useState } from 'react';
 
 import {
@@ -20,7 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../auth/AuthContext';
 import { COLORS, SPACING, TYPOGRAPHY, SHADOWS } from '../../theme';
 
-const API_BASE_URL = 'http://127.0.0.1:4000';
+
 
 type Metric = 'DISTANCE' | 'TERRITORY' | 'ACTIVITIES';
 

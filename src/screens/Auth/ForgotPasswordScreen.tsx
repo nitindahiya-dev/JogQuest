@@ -1,4 +1,5 @@
 
+import { API_BASE_URL } from '../../config/api';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
@@ -22,7 +23,7 @@ type NavigationProp = NativeStackNavigationProp<
   'ForgotPassword'
 >;
 
-const API_BASE_URL = 'http://127.0.0.1:4000';
+
 
 const ForgotPasswordScreen = () => {
   const navigation = useNavigation<NavigationProp>();

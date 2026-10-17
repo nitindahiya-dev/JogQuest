@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../../config/api';
 import React, {
   useCallback,
   useState,
@@ -45,7 +46,7 @@ type Club = {
   members_count: number;
 };
 
-const API_BASE_URL = 'http://127.0.0.1:4000';
+
 
 // ─── Design tokens ───
 const COLORS = {

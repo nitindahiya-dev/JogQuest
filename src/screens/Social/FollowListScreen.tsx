@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../../config/api';
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
@@ -16,7 +17,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, SPACING, TYPOGRAPHY, SHADOWS } from '../../theme';
 
-const API_BASE_URL = 'http://127.0.0.1:4000';
+
 
 const FollowListScreen = () => {
   const route = useRoute<any>();

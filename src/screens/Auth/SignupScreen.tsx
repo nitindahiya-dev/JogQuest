@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../../config/api';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
@@ -15,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../auth/AuthContext';
 import { COLORS, SPACING, TYPOGRAPHY, SHADOWS } from '../../theme';
 
-const API_BASE_URL = 'http://127.0.0.1:4000';
+
 
 const SignupScreen = () => {
   const navigation = useNavigation<any>();

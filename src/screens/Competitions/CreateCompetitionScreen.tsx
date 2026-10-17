@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../../config/api';
 import React, { useState } from 'react';
 
 import {
@@ -27,7 +28,7 @@ type Navigation = NativeStackNavigationProp<
 
 type Metric = 'DISTANCE' | 'TERRITORY' | 'ACTIVITIES';
 
-const API_BASE_URL = 'http://127.0.0.1:4000';
+
 
 const COLORS = {
   background: '#0A0A0A',

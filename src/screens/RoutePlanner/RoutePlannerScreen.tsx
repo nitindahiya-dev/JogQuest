@@ -1,4 +1,5 @@
 
+import { API_BASE_URL } from '../../config/api';
 import React, {
   useEffect,
   useRef,
@@ -61,7 +62,7 @@ type RouteApiResponse = {
   error?: string;
 };
 
-const API_BASE_URL = 'http://127.0.0.1:4000';
+
 const PLANNED_ROUTE_KEY = '@jogquest/planned_route';
 
 // Design tokens

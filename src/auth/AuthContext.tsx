@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../config/api';
 import React, {
   createContext,
   useCallback,
@@ -31,8 +32,7 @@ type AuthContextValue = {
   logout: () => Promise<void>;
 };
 
-const API_BASE_URL =
-  'http://127.0.0.1:4000';
+
 
 const KEYCHAIN_SERVICE =
   'com.jogquest.auth';

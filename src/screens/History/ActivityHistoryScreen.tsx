@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../../config/api';
 import React, {
   useCallback,
   useState,
@@ -33,7 +34,7 @@ type Activity = {
   territory_area_km2: number | null;
 };
 
-const API_BASE_URL = 'http://127.0.0.1:4000';
+
 
 // ─── Design tokens ───
 const COLORS = {
