@@ -32,6 +32,7 @@ export type ActivityResultParams = {
 export type RootStackParamList = {
   Login: undefined;
   Signup: undefined;
+  ForgotPassword: undefined;
   MainTabs: NavigatorScreenParams<MainTabParamList> | undefined;
   ActivityResult: ActivityResultParams;
   TerritoryDetails: {

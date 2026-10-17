@@ -6,7 +6,6 @@ import React, {
 } from 'react';
 
 import {
-  Alert,
   PermissionsAndroid,
   Platform,
   StyleSheet,
@@ -17,7 +16,7 @@ import {
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-
+import { useJogQuestAlert } from '../../components/JogQuestAlert';
 import {createTerritory} from '../../utils/territory';
 import {saveTerritory} from '../../utils/territoryStorage';
 
@@ -99,6 +98,7 @@ const SPACING = {
 };
 
 const ActivityScreen = () => {
+  const alert = useJogQuestAlert();
   const navigation = useNavigation<NavigationProp>();
   const {user, token} = useAuth();
   const insets = useSafeAreaInsets();
@@ -542,7 +542,7 @@ const ActivityScreen = () => {
         } catch (territoryError) {
           console.warn('Territory claim failed:', territoryError);
           resultTerritory = {...territory, captured: false};
-          Alert.alert(
+          alert(
             'Territory Claim Failed',
             territoryError instanceof Error
               ? territoryError.message
@@ -570,7 +570,7 @@ const ActivityScreen = () => {
     } catch (error) {
       console.error('Failed to save activity:', error);
       setIsSaving(false);
-      Alert.alert(
+      alert(
         'Activity Save Failed',
         'The activity could not be saved to the server. Please try again.',
       );

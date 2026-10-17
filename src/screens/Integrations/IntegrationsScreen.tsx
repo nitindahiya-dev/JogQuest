@@ -2,7 +2,6 @@ import React, { useCallback, useState } from 'react';
 
 import {
   ActivityIndicator,
-  Alert,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -10,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-
+import { useJogQuestAlert } from '../../components/JogQuestAlert';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -63,6 +62,7 @@ const getProviderName = (provider: string) =>
   provider.charAt(0).toUpperCase() + provider.slice(1);
 
 const IntegrationsScreen = () => {
+  const alert = useJogQuestAlert();
   const { user, token } = useAuth();
   const insets = useSafeAreaInsets();
   const userId = user?.id;
@@ -149,12 +149,12 @@ const IntegrationsScreen = () => {
 
       await loadIntegrations();
 
-      Alert.alert(
+      alert(
         'Garmin Connected',
         'Your Garmin integration has been connected.',
       );
     } catch (err) {
-      Alert.alert(
+      alert(
         'Connection Failed',
         err instanceof Error ? err.message : 'Unable to connect Garmin.',
       );
@@ -188,12 +188,12 @@ const IntegrationsScreen = () => {
 
       await loadIntegrations();
 
-      Alert.alert(
+      alert(
         'Device Disconnected',
         `${getProviderName(provider)} has been disconnected.`,
       );
     } catch (err) {
-      Alert.alert(
+      alert(
         'Disconnect Failed',
         err instanceof Error ? err.message : 'Unable to disconnect device.',
       );

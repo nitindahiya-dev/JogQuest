@@ -53,6 +53,7 @@ import CreateCompetitionScreen from '../screens/Competitions/CreateCompetitionSc
 import CompetitionDetailsScreen from '../screens/Competitions/CompetitionDetailsScreen';
 import IntegrationsScreen from '../screens/Integrations/IntegrationsScreen';
 import ProfileDetailsScreen from '../screens/Profile/ProfileDetailsScreen';
+import ForgotPasswordScreen from '../screens/Auth/ForgotPasswordScreen';
 
 import type {
   RootStackParamList,
@@ -102,19 +103,19 @@ const CustomTabBar = ({
   const pillTranslateX =
     tabLayouts.length === state.routes.length
       ? animatedIndex.interpolate({
-          inputRange: state.routes.map((_, i) => i),
-          outputRange: tabLayouts.map(l => l.x),
-          extrapolate: 'clamp',
-        })
+        inputRange: state.routes.map((_, i) => i),
+        outputRange: tabLayouts.map(l => l.x),
+        extrapolate: 'clamp',
+      })
       : 0;
 
   const pillWidth =
     tabLayouts.length === state.routes.length
       ? animatedIndex.interpolate({
-          inputRange: state.routes.map((_, i) => i),
-          outputRange: tabLayouts.map(l => l.width),
-          extrapolate: 'clamp',
-        })
+        inputRange: state.routes.map((_, i) => i),
+        outputRange: tabLayouts.map(l => l.width),
+        extrapolate: 'clamp',
+      })
       : 0;
 
   return (
@@ -274,6 +275,12 @@ const RootNavigator = () => {
           <Stack.Screen
             name="Login"
             component={LoginScreen}
+            options={{ headerShown: false }}
+          />
+
+          <Stack.Screen
+            name="ForgotPassword"
+            component={ForgotPasswordScreen}
             options={{ headerShown: false }}
           />
 

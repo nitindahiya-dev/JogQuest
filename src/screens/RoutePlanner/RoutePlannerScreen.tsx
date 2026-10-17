@@ -7,7 +7,6 @@ import React, {
 
 import {
   ActivityIndicator,
-  Alert,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -24,6 +23,7 @@ import MapView, {
 } from 'react-native-maps';
 
 import {useNavigation} from '@react-navigation/native';
+import { useJogQuestAlert } from '../../components/JogQuestAlert';
 
 import type {
   NativeStackNavigationProp,
@@ -84,6 +84,7 @@ const SPACING = {
 };
 
 const RoutePlannerScreen = () => {
+  const alert = useJogQuestAlert();
   const navigation = useNavigation<Navigation>();
   const insets = useSafeAreaInsets();
 
@@ -308,7 +309,7 @@ const RoutePlannerScreen = () => {
   // Save the planned route locally
   const saveRoute = async () => {
     if (points.length < 2) {
-      Alert.alert(
+      alert(
         'Route too short',
         'Add at least two points to create a route.',
       );
@@ -316,7 +317,7 @@ const RoutePlannerScreen = () => {
     }
 
     if (routedRoute.length < 2) {
-      Alert.alert(
+      alert(
         'Route not ready',
         'Wait for the road route to finish generating.',
       );
@@ -341,7 +342,7 @@ const RoutePlannerScreen = () => {
         JSON.stringify(plannedRoute),
       );
 
-      Alert.alert(
+      alert(
         'Route saved',
         `${distanceKm.toFixed(2)} km road route saved.`,
         [
@@ -354,7 +355,7 @@ const RoutePlannerScreen = () => {
     } catch (err) {
       console.error('Failed to save planned route:', err);
 
-      Alert.alert(
+      alert(
         'Save failed',
         'Could not save the planned route.',
       );

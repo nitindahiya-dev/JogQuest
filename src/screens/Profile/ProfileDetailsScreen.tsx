@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   ScrollView,
   StyleSheet,
@@ -20,11 +19,13 @@ import {
   AlertCircleIcon,
 } from '../../components/Icons';
 import { useAuth } from '../../auth/AuthContext';
+import { useJogQuestAlert } from '../../components/JogQuestAlert';
 
 const API_BASE_URL = 'http://127.0.0.1:4000';
 type EditableField = 'display_name' | 'username';
 
 const ProfileDetailsScreen = () => {
+  const alert = useJogQuestAlert();
   const insets = useSafeAreaInsets();
   const { user, token, updateUser } = useAuth();
   const [profile, setProfile] = useState(user);
@@ -65,7 +66,7 @@ const ProfileDetailsScreen = () => {
         if (!response.ok) throw new Error(data.error ?? 'Could not load profile');
         if (active) setProfile(data);
       } catch (error) {
-        if (active) Alert.alert('Profile unavailable', error instanceof Error ? error.message : 'Could not load profile.');
+        if (active) alert('Profile unavailable', error instanceof Error ? error.message : 'Could not load profile.');
       } finally {
         if (active) setLoading(false);
       }
@@ -84,15 +85,15 @@ const ProfileDetailsScreen = () => {
     if (!field || !token) return;
     const value = draft.trim();
     if (!value) {
-      Alert.alert('Required', 'This field cannot be empty.');
+      alert('Required', 'This field cannot be empty.');
       return;
     }
     if (field === 'username' && !/^[a-zA-Z0-9_]{3,50}$/.test(value)) {
-      Alert.alert('Invalid username', 'Use 3–50 letters, numbers, or underscores.');
+      alert('Invalid username', 'Use 3–50 letters, numbers, or underscores.');
       return;
     }
     if (field === 'display_name' && value.length > 100) {
-      Alert.alert('Name too long', 'Display name must be 100 characters or fewer.');
+      alert('Name too long', 'Display name must be 100 characters or fewer.');
       return;
     }
     setSaving(true);
@@ -113,9 +114,12 @@ const ProfileDetailsScreen = () => {
       updateUser(updatedUser);
       setField(null);
 
-      Alert.alert('Saved', 'Your profile has been updated.');
+      alert('Saved', 'Your profile has been updated.');
     } catch (error) {
-      Alert.alert('Could not save', error instanceof Error ? error.message : 'Please try again.');
+      alert(
+  'Could not save',
+  error instanceof Error ? error.message : 'Please try again.',
+);
     } finally {
       setSaving(false);
     }
@@ -123,17 +127,17 @@ const ProfileDetailsScreen = () => {
 
   const changePassword = async () => {
     if (!token) {
-      Alert.alert('Session expired', 'Please log in again.');
+      alert('Session expired', 'Please log in again.');
       return;
     }
 
     if (!currentPassword || newPassword.length < 8) {
-      Alert.alert('Invalid password', 'Enter your current password and a new password of at least 8 characters.');
+      alert('Invalid password', 'Enter your current password and a new password of at least 8 characters.');
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      Alert.alert('Passwords do not match', 'Confirm your new password correctly.');
+      alert('Passwords do not match', 'Confirm your new password correctly.');
       return;
     }
 
@@ -160,9 +164,9 @@ const ProfileDetailsScreen = () => {
       setNewPassword('');
       setConfirmPassword('');
 
-      Alert.alert('Success', 'Your password has been changed.');
+      alert('Success', 'Your password has been changed.');
     } catch (error) {
-      Alert.alert(
+      alert(
         'Password change failed',
         error instanceof Error ? error.message : 'Please try again.',
       );
@@ -173,19 +177,19 @@ const ProfileDetailsScreen = () => {
 
   const requestEmailChange = async () => {
     if (!token) {
-      Alert.alert('Session expired', 'Please log in again.');
+      alert('Session expired', 'Please log in again.');
       return;
     }
 
     const normalizedEmail = newEmail.trim().toLowerCase();
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      Alert.alert('Invalid email', 'Enter a valid email address.');
+      alert('Invalid email', 'Enter a valid email address.');
       return;
     }
 
     if (!emailCurrentPassword) {
-      Alert.alert('Password required', 'Enter your current password.');
+      alert('Password required', 'Enter your current password.');
       return;
     }
 
@@ -217,12 +221,12 @@ const ProfileDetailsScreen = () => {
       setNewEmail('');
       setEmailCurrentPassword('');
 
-      Alert.alert(
+      alert(
         'Verification email sent',
         'Open the verification link sent to your new email address. Your account email will not change until you verify it.',
       );
     } catch (error) {
-      Alert.alert(
+      alert(
         'Email change failed',
         error instanceof Error ? error.message : 'Please try again.',
       );
@@ -286,7 +290,7 @@ const ProfileDetailsScreen = () => {
 
         <Text style={[styles.sectionLabel, styles.dangerHeading]}>DANGER ZONE</Text>
         <View style={[styles.card, styles.cardDanger]}>
-          {renderRow(<AlertCircleIcon color={COLORS.danger} size={18} />, 'Delete Account', 'Account deletion is not available yet', () => Alert.alert('Not available yet', 'Account deletion needs a verified, transactional server flow.'), { last: true, danger: true })}
+          {renderRow(<AlertCircleIcon color={COLORS.danger} size={18} />, 'Delete Account', 'Account deletion is not available yet', () => alert('Not available yet', 'Account deletion needs a verified, transactional server flow.'), { last: true, danger: true })}
         </View>
       </ScrollView>
 

@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   RefreshControl,
   ScrollView,
@@ -12,6 +11,7 @@ import {
   View,
 } from 'react-native';
 
+import { useJogQuestAlert } from '../../components/JogQuestAlert';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -178,7 +178,7 @@ const getHistoryText = (item: TerritoryHistoryItem) => {
         title: 'Ownership transferred',
         description:
           item.previous_owner_display_name &&
-          item.new_owner_display_name
+            item.new_owner_display_name
             ? `${item.previous_owner_display_name} → ${item.new_owner_display_name}`
             : 'Territory ownership changed.',
       };
@@ -193,6 +193,7 @@ const getHistoryText = (item: TerritoryHistoryItem) => {
 
 const TerritoryDetailsScreen = () => {
   const { user, token } = useAuth();
+  const alert = useJogQuestAlert();
   const userId = user?.id;
   const route = useRoute<TerritoryDetailsRouteProp>();
   const { territoryId } = route.params;
@@ -300,7 +301,7 @@ const TerritoryDetailsScreen = () => {
       setActivities(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to load activities:', err);
-      Alert.alert('Unable to load activities', 'Please try again.');
+      alert('Unable to load activities', 'Please try again.');
     } finally {
       setActivityLoading(false);
     }
@@ -401,14 +402,14 @@ const TerritoryDetailsScreen = () => {
 
       await Promise.all([loadChallenges(), loadHistory()]);
 
-      Alert.alert(
+      alert(
         'Challenge submitted',
         'Your territory challenge has been submitted.',
       );
     } catch (err) {
       console.error('Failed to submit challenge:', err);
 
-      Alert.alert(
+      alert(
         'Challenge failed',
         err instanceof Error
           ? err.message
@@ -427,7 +428,7 @@ const TerritoryDetailsScreen = () => {
 
     const actionLabel = decision === 'ACCEPT' ? 'accept' : 'reject';
 
-    Alert.alert(
+    alert(
       `${decision === 'ACCEPT' ? 'Accept' : 'Reject'} challenge?`,
       `Are you sure you want to ${actionLabel} this territory challenge?`,
       [
@@ -472,7 +473,7 @@ const TerritoryDetailsScreen = () => {
             } catch (err) {
               console.error('Failed to resolve challenge:', err);
 
-              Alert.alert(
+              alert(
                 'Action failed',
                 err instanceof Error
                   ? err.message
@@ -1065,7 +1066,7 @@ const TerritoryDetailsScreen = () => {
               style={[
                 styles.submitButton,
                 (!selectedActivityId || submittingChallenge) &&
-                  styles.submitButtonDisabled,
+                styles.submitButtonDisabled,
               ]}
               disabled={!selectedActivityId || submittingChallenge}
               onPress={submitChallenge}
