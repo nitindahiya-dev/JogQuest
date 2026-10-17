@@ -38,7 +38,111 @@ type LeaderboardScope =
   | 'City'
   | 'Friends';
 
+// ─── Dummy data for City & Friends (dev / offline) ───
+const DUMMY_CITY_PLAYERS: LeaderboardPlayer[] = [
+  {
+    rank: 1,
+    id: 'city-1',
+    username: 'cityking',
+    display_name: 'Alex Rivera',
+    avatar_url: null,
+    territory_km2: 12.45,
+    territories_captured: 18,
+    activities_count: 42,
+    total_distance_km: 210.5,
+  },
+  {
+    rank: 2,
+    id: 'city-2',
+    username: 'runner_mia',
+    display_name: 'Mia Chen',
+    avatar_url: null,
+    territory_km2: 9.87,
+    territories_captured: 14,
+    activities_count: 35,
+    total_distance_km: 178.2,
+  },
+  {
+    rank: 3,
+    id: 'city-3',
+    username: 'pace_jordan',
+    display_name: 'Jordan Lee',
+    avatar_url: null,
+    territory_km2: 8.12,
+    territories_captured: 11,
+    activities_count: 29,
+    total_distance_km: 156.8,
+  },
+  {
+    rank: 4,
+    id: 'city-4',
+    username: 'sprint_sam',
+    display_name: 'Sam Okonkwo',
+    avatar_url: null,
+    territory_km2: 6.54,
+    territories_captured: 9,
+    activities_count: 24,
+    total_distance_km: 132.1,
+  },
+  {
+    rank: 5,
+    id: 'city-5',
+    username: 'trail_taylor',
+    display_name: 'Taylor Brooks',
+    avatar_url: null,
+    territory_km2: 5.21,
+    territories_captured: 7,
+    activities_count: 19,
+    total_distance_km: 98.4,
+  },
+];
 
+const DUMMY_FRIENDS_PLAYERS: LeaderboardPlayer[] = [
+  {
+    rank: 1,
+    id: 'friend-1',
+    username: 'bestie_run',
+    display_name: 'Casey Morgan',
+    avatar_url: null,
+    territory_km2: 7.89,
+    territories_captured: 12,
+    activities_count: 31,
+    total_distance_km: 145.6,
+  },
+  {
+    rank: 2,
+    id: 'friend-2',
+    username: 'pack_leader',
+    display_name: 'Riley Quinn',
+    avatar_url: null,
+    territory_km2: 6.33,
+    territories_captured: 10,
+    activities_count: 27,
+    total_distance_km: 128.9,
+  },
+  {
+    rank: 3,
+    id: 'friend-3',
+    username: 'weekend_warrior',
+    display_name: 'Avery Kim',
+    avatar_url: null,
+    territory_km2: 4.56,
+    territories_captured: 8,
+    activities_count: 22,
+    total_distance_km: 102.3,
+  },
+  {
+    rank: 4,
+    id: 'friend-4',
+    username: 'dawn_dash',
+    display_name: 'Jamie Soto',
+    avatar_url: null,
+    territory_km2: 3.18,
+    territories_captured: 5,
+    activities_count: 15,
+    total_distance_km: 74.7,
+  },
+];
 
 // ─── Design tokens ───
 const COLORS = {
@@ -59,12 +163,13 @@ const SPACING = {
 };
 
 const LeaderboardScreen = () => {
-  const {user} = useAuth();
+  const {user, token} = useAuth();
   const insets = useSafeAreaInsets();
 
   const [players, setPlayers] = useState<LeaderboardPlayer[]>([]);
   const [selectedScope, setSelectedScope] = useState<LeaderboardScope>('Global');
   const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,13 +177,37 @@ const LeaderboardScreen = () => {
     try {
       if (isRefresh) {
         setRefreshing(true);
-      } else {
+      } else if (players.length === 0) {
         setLoading(true);
       }
 
       setError(null);
 
-      const response = await fetch(`${API_BASE_URL}/api/leaderboard`);
+      // Dummy data for City & Friends tabs
+      if (selectedScope === 'City') {
+        await new Promise(resolve => setTimeout(resolve, 400));
+        setPlayers(DUMMY_CITY_PLAYERS);
+        return;
+      }
+      if (selectedScope === 'Friends') {
+        await new Promise(resolve => setTimeout(resolve, 400));
+        setPlayers(DUMMY_FRIENDS_PLAYERS);
+        return;
+      }
+
+      // Real API for Global (and future real City/Friends)
+      const headers: Record<string, string> = {};
+      if (selectedScope !== 'Global') {
+        if (!token) {
+          throw new Error('Please log in to view this leaderboard.');
+        }
+        headers.Authorization = `Bearer ${token}`;
+      }
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/leaderboard?scope=${selectedScope}`,
+        {headers},
+      );
 
       if (!response.ok) {
         throw new Error(`Server returned ${response.status}`);
@@ -88,19 +217,23 @@ const LeaderboardScreen = () => {
       setPlayers(data);
     } catch (err) {
       console.error('Failed to load leaderboard:', err);
-      setError('Could not load leaderboard.');
+      setPlayers([]);
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Could not load leaderboard.',
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
+      setInitialLoading(false);
     }
-  }, []);
+  }, [selectedScope, token, players.length]);
 
   useFocusEffect(
     useCallback(() => {
-      if (selectedScope === 'Global') {
-        loadLeaderboard();
-      }
-    }, [loadLeaderboard, selectedScope]),
+      loadLeaderboard();
+    }, [loadLeaderboard]),
   );
 
   const currentPlayer = players.find(player => player.id === user?.id);
@@ -146,14 +279,11 @@ const LeaderboardScreen = () => {
 
   const renderFilter = (scope: LeaderboardScope) => {
     const active = selectedScope === scope;
-    const disabled = scope !== 'Global';
 
     return (
       <TouchableOpacity
-        disabled={disabled}
         style={[
           active ? styles.filterActive : styles.filter,
-          disabled && styles.filterDisabled,
         ]}
         onPress={() => setSelectedScope(scope)}>
         <Text style={active ? styles.filterActiveText : styles.filterText}>
@@ -162,15 +292,6 @@ const LeaderboardScreen = () => {
       </TouchableOpacity>
     );
   };
-
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={COLORS.accent} />
-        <Text style={styles.loadingText}>Loading leaderboard...</Text>
-      </View>
-    );
-  }
 
   return (
     <View
@@ -190,6 +311,13 @@ const LeaderboardScreen = () => {
         {renderFilter('City')}
         {renderFilter('Friends')}
       </View>
+
+      {loading && !initialLoading && (
+        <View style={styles.tabLoading}>
+          <ActivityIndicator size="small" color={COLORS.accent} />
+          <Text style={styles.loadingText}>Updating leaderboard...</Text>
+        </View>
+      )}
 
       {error && (
         <View style={styles.errorBox}>
@@ -359,6 +487,13 @@ const styles = StyleSheet.create({
     gap: 10,
     marginTop: 16,
     marginBottom: 8,
+  },
+  tabLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    gap: 8,
   },
   filter: {
     paddingHorizontal: 16,

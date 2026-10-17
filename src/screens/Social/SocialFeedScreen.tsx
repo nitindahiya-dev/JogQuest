@@ -11,7 +11,6 @@ import {
   Platform,
   RefreshControl,
   Share,
-  Alert,
   StyleSheet,
   Text,
   TextInput,
@@ -40,6 +39,7 @@ import type {
 } from '../../navigation/types';
 
 import {useAuth} from '../../auth/AuthContext';
+import {useJogQuestAlert} from '../../components/JogQuestAlert';
 
 type FeedPost = {
   id: string;
@@ -103,6 +103,7 @@ const SocialFeedScreen = () => {
   const userId = user?.id;
   const navigation = useNavigation<Navigation>();
   const insets = useSafeAreaInsets();
+  const alert = useJogQuestAlert();
 
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [newPost, setNewPost] = useState('');
@@ -373,13 +374,13 @@ const SocialFeedScreen = () => {
   };
 
   const deletePost = (post: FeedPost) => {
-    Alert.alert(
+    alert(
       'Delete post?',
       'This will permanently delete your post and its likes and comments.',
       [
-        {text: 'Cancel', style: 'cancel'},
+        {text: 'CANCEL', style: 'cancel'},
         {
-          text: 'Delete',
+          text: 'DELETE',
           style: 'destructive',
           onPress: async () => {
             try {
@@ -390,7 +391,11 @@ const SocialFeedScreen = () => {
                   headers: {Authorization: `Bearer ${token}`},
                 },
               );
-              const rawData: unknown = await response.json().catch(() => null);
+
+              const rawData: unknown = await response
+                .json()
+                .catch(() => null);
+
               const errorMessage =
                 typeof rawData === 'object' &&
                 rawData !== null &&
@@ -402,18 +407,27 @@ const SocialFeedScreen = () => {
               if (!response.ok) {
                 throw new Error(errorMessage);
               }
-              setPosts(current => current.filter(item => item.id !== post.id));
+
+              setPosts(current =>
+                current.filter(item => item.id !== post.id),
+              );
+
               setComments(current => {
                 const next = {...current};
                 delete next[post.id];
                 return next;
               });
+
               if (activeCommentsPostId === post.id) {
                 setActiveCommentsPostId(null);
                 setCommentText('');
               }
             } catch (err) {
-              setError(err instanceof Error ? err.message : 'Failed to delete post');
+              setError(
+                err instanceof Error
+                  ? err.message
+                  : 'Failed to delete post',
+              );
             }
           },
         },
