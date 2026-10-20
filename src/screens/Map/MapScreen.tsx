@@ -1,6 +1,7 @@
 import { API_BASE_URL } from '../../config/api';
 import React, {
   useCallback,
+  useEffect,
   useRef,
   useState,
 } from 'react';
@@ -11,11 +12,17 @@ import {
   Text,
   View,
   TouchableOpacity,
+  PermissionsAndroid,
+  Platform,
+  Alert,
 } from 'react-native';
+
+import DeviceInfo from 'react-native-device-info';
 
 import MapView, {
   Polygon,
   PROVIDER_GOOGLE,
+  type UserLocationChangeEvent,
 } from 'react-native-maps';
 
 import {
@@ -52,8 +59,6 @@ type ApiTerritory = {
   captured_at: string;
 };
 
-
-
 // ─── Design tokens ───
 const COLORS = {
   background: '#0A0A0A',
@@ -72,12 +77,60 @@ const SPACING = {
 
 const MapScreen = () => {
   const mapRef = useRef<MapView>(null);
+  const hasCenteredOnUserRef = useRef(false);
+  const userLocationRef = useRef<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+
   const navigation = useNavigation<NavigationProp>();
   const insets = useSafeAreaInsets();
 
   const [territories, setTerritories] = useState<StoredTerritory[]>([]);
   const [loading, setLoading] = useState(true);
   const [usingFallback, setUsingFallback] = useState(false);
+  const [selectedTerritoryIndex, setSelectedTerritoryIndex] = useState(0);
+  const [showTerritories, setShowTerritories] = useState(false);
+
+  useEffect(() => {
+    const checkLocationAccess = async () => {
+      try {
+        if (Platform.OS === 'android') {
+          const granted = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+            {
+              title: 'JogQuest Location Permission',
+              message:
+                'JogQuest needs your location to show your position on the territory map.',
+              buttonPositive: 'Allow',
+              buttonNegative: 'Cancel',
+            },
+          );
+
+          if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+            Alert.alert(
+              'Location Permission Required',
+              'Allow location access in Android settings to see your current position.',
+            );
+            return;
+          }
+        }
+
+        const locationEnabled = await DeviceInfo.isLocationEnabled();
+
+        if (!locationEnabled) {
+          Alert.alert(
+            'GPS Is Disabled',
+            'Turn on your device location services to use the territory map.',
+          );
+        }
+      } catch (error) {
+        console.error('Failed to check location access:', error);
+      }
+    };
+
+    checkLocationAccess();
+  }, []);
 
   const convertApiTerritory = (territory: ApiTerritory): StoredTerritory => {
     const ring = territory.polygon.coordinates[0] ?? [];
@@ -110,43 +163,12 @@ const MapScreen = () => {
       const data = (await response.json()) as ApiTerritory[];
       const remoteTerritories = data.map(convertApiTerritory);
       setTerritories(remoteTerritories);
-
-      if (remoteTerritories.length > 0 && remoteTerritories[0].polygon.length > 2) {
-        setTimeout(() => {
-          mapRef.current?.fitToCoordinates(remoteTerritories[0].polygon, {
-            edgePadding: {
-              top: insets.top + 100,
-              right: 60,
-              bottom: insets.bottom + 180,
-              left: 60,
-            },
-            animated: true,
-          });
-        }, 300);
-      }
     } catch (error) {
       console.error('Failed to load territories from API:', error);
 
       const localTerritories = await getTerritories();
       setTerritories(localTerritories);
       setUsingFallback(true);
-
-      if (localTerritories.length > 0) {
-        const latest = localTerritories[localTerritories.length - 1];
-        if (latest.polygon.length > 2) {
-          setTimeout(() => {
-            mapRef.current?.fitToCoordinates(latest.polygon, {
-              edgePadding: {
-                top: insets.top + 100,
-                right: 60,
-                bottom: insets.bottom + 180,
-                left: 60,
-              },
-              animated: true,
-            });
-          }, 300);
-        }
-      }
     } finally {
       setLoading(false);
     }
@@ -164,6 +186,151 @@ const MapScreen = () => {
     });
   };
 
+  const handleUserLocationChange = (
+    event: UserLocationChangeEvent,
+  ) => {
+    const coordinate = event.nativeEvent.coordinate;
+
+    if (!coordinate) {
+      return;
+    }
+
+    userLocationRef.current = {
+      latitude: coordinate.latitude,
+      longitude: coordinate.longitude,
+    };
+
+    // Always center on the first real GPS fix.
+    if (!hasCenteredOnUserRef.current) {
+      hasCenteredOnUserRef.current = true;
+
+      mapRef.current?.animateToRegion(
+        {
+          latitude: coordinate.latitude,
+          longitude: coordinate.longitude,
+          latitudeDelta: 0.012,
+          longitudeDelta: 0.012,
+        },
+        700,
+      );
+    }
+  };
+
+  const goToMyLocation = () => {
+    const location = userLocationRef.current;
+
+    if (!location) {
+      Alert.alert(
+        'Location Not Available',
+        'Waiting for your GPS location. Make sure Location services are enabled and try again.',
+      );
+      return;
+    }
+
+    mapRef.current?.animateToRegion(
+      {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        latitudeDelta: 0.012,
+        longitudeDelta: 0.012,
+      },
+      700,
+    );
+  };
+
+  const focusTerritory = (territory: StoredTerritory) => {
+    if (territory.polygon.length < 3) {
+      return;
+    }
+
+    mapRef.current?.fitToCoordinates(territory.polygon, {
+      edgePadding: {
+        top: insets.top + 100,
+        right: 60,
+        bottom: insets.bottom + 180,
+        left: 60,
+      },
+      animated: true,
+    });
+  };
+
+  const cycleTerritory = () => {
+    const validTerritories = territories.filter(
+      territory => territory.polygon.length >= 3,
+    );
+
+    if (validTerritories.length === 0) {
+      const currentLocation = userLocationRef.current;
+
+      if (currentLocation) {
+        mapRef.current?.animateToRegion(
+          {
+            ...currentLocation,
+            latitudeDelta: 0.012,
+            longitudeDelta: 0.012,
+          },
+          700,
+        );
+      } else {
+        Alert.alert(
+          'No Territories Yet',
+          'Your current location will appear when GPS provides a location fix.',
+        );
+      }
+
+      return;
+    }
+
+    const nextIndex =
+      (selectedTerritoryIndex + 1) % validTerritories.length;
+
+    setSelectedTerritoryIndex(nextIndex);
+    focusTerritory(validTerritories[nextIndex]);
+  };
+
+  const toggleTerritories = () => {
+    if (showTerritories) {
+      setShowTerritories(false);
+
+      // Return to the user's actual location when hiding territories.
+      const location = userLocationRef.current;
+
+      if (location) {
+        mapRef.current?.animateToRegion(
+          {
+            ...location,
+            latitudeDelta: 0.012,
+            longitudeDelta: 0.012,
+          },
+          700,
+        );
+      }
+
+      return;
+    }
+
+    if (territories.length === 0) {
+      Alert.alert(
+        'No Territories Yet',
+        'Complete a closed route to capture your first territory.',
+      );
+      return;
+    }
+
+    setShowTerritories(true);
+
+    const validTerritories = territories.filter(
+      territory => territory.polygon.length >= 3,
+    );
+
+    if (validTerritories.length === 0) {
+      return;
+    }
+
+    setSelectedTerritoryIndex(0);
+    focusTerritory(validTerritories[0]);
+  };
+
   const totalArea = territories
     .reduce((acc, t) => acc + (t.areaKm2 || 0), 0)
     .toFixed(2);
@@ -175,40 +342,65 @@ const MapScreen = () => {
         provider={PROVIDER_GOOGLE}
         style={styles.map}
         showsUserLocation
+        onUserLocationChange={handleUserLocationChange}
         showsMyLocationButton={false}
         userInterfaceStyle="dark"
         initialRegion={{
-          latitude: 28.6139,
-          longitude: 77.209,
-          latitudeDelta: 0.08,
-          longitudeDelta: 0.08,
+          // Temporary starting view until the real GPS fix arrives.
+          latitude: 20.5937,
+          longitude: 78.9629,
+          latitudeDelta: 20,
+          longitudeDelta: 20,
         }}>
-        {territories.map(territory => (
-          <Polygon
-            key={territory.id}
-            coordinates={territory.polygon}
-            strokeWidth={3}
-            strokeColor={COLORS.accent}
-            fillColor="rgba(212, 255, 0, 0.18)"
-            tappable
-            onPress={() => openTerritory(territory)}
-          />
-        ))}
+        {showTerritories &&
+          territories.map(territory => (
+            <Polygon
+              key={territory.id}
+              coordinates={territory.polygon}
+              strokeWidth={3}
+              strokeColor={COLORS.accent}
+              fillColor="rgba(212, 255, 0, 0.18)"
+              tappable
+              onPress={() => openTerritory(territory)}
+            />
+          ))}
       </MapView>
 
       {/* Floating Header — respects notch / Dynamic Island */}
-      <View
+      <TouchableOpacity
         style={[
           styles.headerFloating,
           {top: insets.top + 12},
-        ]}>
-        <Text style={styles.headerTitle}>TERRITORY MAP</Text>
-        <View style={styles.territoryBadge}>
-          <Text style={styles.territoryBadgeText}>
-            {territories.length} ZONE{territories.length === 1 ? '' : 'S'}
+        ]}
+        activeOpacity={0.8}
+        onPress={toggleTerritories}>
+        <View>
+          <Text style={styles.headerTitle}>TERRITORY MAP</Text>
+          <Text style={styles.headerHint}>
+            {showTerritories
+              ? 'TAP TO RETURN TO MY LOCATION'
+              : 'TAP TO VIEW TERRITORIES'}
           </Text>
         </View>
-      </View>
+
+        <View style={styles.territoryBadge}>
+          <Text style={styles.territoryBadgeText}>
+            {territories.length} ZONE{territories.length === 1 ? '' : 'S'}  ›
+          </Text>
+        </View>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[
+          styles.myLocationButton,
+          {top: insets.top + 94},
+        ]}
+        activeOpacity={0.8}
+        onPress={goToMyLocation}>
+        <Text style={styles.myLocationButtonText}>
+          ◎  WHERE AM I?
+        </Text>
+      </TouchableOpacity>
 
       {/* Offline badge */}
       {usingFallback && (
@@ -298,6 +490,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     letterSpacing: 1.5,
+  },
+  headerHint: {
+    color: COLORS.textSecondary,
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 1,
+    marginTop: 5,
+  },
+  myLocationButton: {
+    position: 'absolute',
+    right: SPACING.md,
+    backgroundColor: COLORS.accent,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 16,
+    elevation: 5,
+  },
+  myLocationButtonText: {
+    color: COLORS.background,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.8,
   },
   territoryBadge: {
     backgroundColor: COLORS.accent,
