@@ -2,6 +2,8 @@ export type Coordinate = {
   latitude: number;
   longitude: number;
   accuracy?: number;
+  timestamp?: number;
+
 };
 
 const toRadians = (value: number) => (value * Math.PI) / 180;
@@ -21,8 +23,8 @@ export const calculateDistance = (
   const a =
     Math.sin(dLat / 2) ** 2 +
     Math.cos(lat1) *
-      Math.cos(lat2) *
-      Math.sin(dLon / 2) ** 2;
+    Math.cos(lat2) *
+    Math.sin(dLon / 2) ** 2;
 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 

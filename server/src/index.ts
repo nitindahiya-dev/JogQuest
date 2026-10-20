@@ -13,6 +13,7 @@ import {
 } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import multer from 'multer';
+import { validateActivityGps } from './gpsValidation.js';
 
 const app = express();
 
@@ -41,6 +42,7 @@ app.use(express.json());
 type Coordinate = {
   latitude: number;
   longitude: number;
+  timestamp?: number;
 };
 
 const distanceBetweenCoordinates = (
@@ -1735,38 +1737,144 @@ app.post('/api/territories/claim', requireAuth, async (req, res) => {
     transactionStarted = true;
 
     // Only use GPS points saved for this authenticated user's activity.
-    const routeResult = await client.query<{
-      activity_type: 'Run' | 'Walk' | 'Cycle';
-      latitude: number;
-      longitude: number;
-    }>(
-      `
-      SELECT
-        a.activity_type,
-        ST_Y(ap.location::geometry) AS latitude,
-        ST_X(ap.location::geometry) AS longitude
-      FROM activities a
-      JOIN activity_points ap ON ap.activity_id = a.id
-      WHERE a.id = $1 AND a.user_id = $2
-      ORDER BY ap.sequence_number ASC
-      `,
-      [activityId, userId],
-    );
+const routeResult = await client.query<{
+  activity_type: 'Run' | 'Walk' | 'Cycle';
+  elapsed_seconds: number | string;
+  distance_km: number | string;
+  latitude: number;
+  longitude: number;
+  timestamp: number | string;
+  provider: string | null;
+}>(
+  `
+  SELECT
+    a.activity_type,
+    a.elapsed_seconds,
+    a.distance_km,
+    a.source_provider AS provider,
+    ST_Y(ap.location::geometry) AS latitude,
+    ST_X(ap.location::geometry) AS longitude,
+    EXTRACT(EPOCH FROM ap.recorded_at) * 1000 AS timestamp
+  FROM activities a
+  JOIN activity_points ap ON ap.activity_id = a.id
+  WHERE a.id = $1 AND a.user_id = $2
+  ORDER BY ap.sequence_number ASC
+  `,
+  [activityId, userId],
+);
 
-    if (routeResult.rows.length === 0) {
+if (routeResult.rows.length === 0) {
+  await client.query('ROLLBACK');
+  transactionStarted = false;
+
+  res.status(404).json({
+    error: 'Activity not found or does not belong to this user',
+  });
+  return;
+}
+
+if (routeResult.rows[0].provider) {
+  await client.query('ROLLBACK');
+  transactionStarted = false;
+
+  res.status(422).json({
+    error: 'Imported activities cannot be used to claim territory',
+  });
+  return;
+}
+
+const route = routeResult.rows.map(point => ({
+  latitude: Number(point.latitude),
+  longitude: Number(point.longitude),
+  timestamp: Number(point.timestamp),
+}));
+const activityType = routeResult.rows[0].activity_type;
+const elapsedSeconds = Number(routeResult.rows[0].elapsed_seconds);
+const reportedDistanceKm = Number(routeResult.rows[0].distance_km);
+
+if (
+  !Number.isFinite(elapsedSeconds) ||
+  elapsedSeconds <= 0 ||
+  !Number.isFinite(reportedDistanceKm) ||
+  reportedDistanceKm <= 0
+) {
+  await client.query('ROLLBACK');
+  transactionStarted = false;
+  res.status(422).json({
+    error: 'Activity has invalid duration or distance',
+  });
+  return;
+}
+
+const savedActivityValidation = validateActivityGps({
+  activityType,
+  elapsedSeconds,
+  distanceKm: reportedDistanceKm,
+  route,
+});
+
+if (!savedActivityValidation.ok) {
+  await client.query('ROLLBACK');
+  transactionStarted = false;
+
+  res.status(422).json({
+    error: 'Activity failed GPS integrity checks',
+    reason: savedActivityValidation.body.error,
+  });
+  return;
+}
+
+let serverDistanceKm = 0;
+
+
+    for (let index = 1; index < route.length; index += 1) {
+      const segmentDistanceKm = distanceBetweenCoordinates(
+        route[index - 1],
+        route[index],
+      );
+
+      if (!Number.isFinite(segmentDistanceKm) || segmentDistanceKm > 0.5) {
+        await client.query('ROLLBACK');
+        transactionStarted = false;
+        res.status(422).json({
+          error: 'Activity route contains an invalid GPS jump',
+          segmentIndex: index,
+        });
+        return;
+      }
+
+      serverDistanceKm += segmentDistanceKm;
+    }
+
+    const maximumAverageSpeedKmh = {
+      Run: 25,
+      Walk: 12,
+      Cycle: 80,
+    }[activityType];
+
+    const averageSpeedKmh = serverDistanceKm / (elapsedSeconds / 3600);
+
+    if (averageSpeedKmh > maximumAverageSpeedKmh) {
       await client.query('ROLLBACK');
       transactionStarted = false;
-      res.status(404).json({
-        error: 'Activity not found for this user or has no saved GPS points',
+      res.status(422).json({
+        error: 'Activity speed is too high to claim territory',
+        averageSpeedKmh: Number(averageSpeedKmh.toFixed(2)),
       });
       return;
     }
 
-    const route = routeResult.rows.map(point => ({
-      latitude: Number(point.latitude),
-      longitude: Number(point.longitude),
-    }));
-    const activityType = routeResult.rows[0].activity_type;
+    if (
+      serverDistanceKm > 0 &&
+      Math.abs(reportedDistanceKm - serverDistanceKm) / serverDistanceKm > 0.25
+    ) {
+      await client.query('ROLLBACK');
+      transactionStarted = false;
+      res.status(422).json({
+        error: 'Saved activity distance does not match its GPS route',
+      });
+      return;
+    }
 
     if (route.length < 10) {
       await client.query('ROLLBACK');
@@ -2823,108 +2931,26 @@ app.post('/api/activities', requireAuth, async (req, res) => {
     const authenticatedUserId = res.locals.authenticatedUserId as string;
 
     if (
-      !body.activityType ||
-      typeof body.distanceKm !== 'number' ||
-      typeof body.elapsedSeconds !== 'number' ||
-      !Array.isArray(body.route)
-    ) {
-      return res.status(400).json({
-        error: 'Invalid activity data',
-      });
-    }
-
-    if (body.route.length === 0) {
-      return res.status(400).json({
-        error: 'Route must contain at least one point',
-      });
-    }
-
-    const serverDistanceKm =
-      calculateRouteDistance(
-        body.route,
-      );
-
-    if (
-      !Number.isFinite(
-        serverDistanceKm,
+      !Array.isArray(body.route) ||
+      body.route.some(
+        point =>
+          !point ||
+          !Number.isFinite(point.timestamp) ||
+          (point.timestamp as number) <= 0,
       )
     ) {
       return res.status(400).json({
-        error:
-          'Invalid GPS route',
+        error: 'Every recorded GPS point must have a valid timestamp',
       });
     }
 
-    if (
-      body.elapsedSeconds < 0
-    ) {
-      return res.status(400).json({
-        error:
-          'Elapsed time cannot be negative',
-      });
+    const validation = validateActivityGps(body);
+
+    if (!validation.ok) {
+      return res.status(validation.status).json(validation.body);
     }
 
-    for (
-      let index = 1;
-      index < body.route.length;
-      index += 1
-    ) {
-      const segmentDistanceKm =
-        distanceBetweenCoordinates(
-          body.route[index - 1],
-          body.route[index],
-        );
-
-      if (
-        segmentDistanceKm >
-        0.5
-      ) {
-        return res.status(422).json({
-          error:
-            'Activity contains an impossible GPS jump',
-          segmentDistanceKm,
-          segmentIndex: index,
-        });
-      }
-    }
-
-    const reportedDistanceKm =
-      Number(body.distanceKm);
-
-    if (
-      !Number.isFinite(
-        reportedDistanceKm,
-      ) ||
-      reportedDistanceKm < 0
-    ) {
-      return res.status(400).json({
-        error:
-          'Invalid activity distance',
-      });
-    }
-
-    if (
-      serverDistanceKm > 0 &&
-      reportedDistanceKm > 0
-    ) {
-      const difference =
-        Math.abs(
-          reportedDistanceKm -
-          serverDistanceKm,
-        ) /
-        serverDistanceKm;
-
-      if (
-        difference > 0.25
-      ) {
-        return res.status(422).json({
-          error:
-            'Reported distance does not match GPS route',
-          reportedDistanceKm,
-          serverDistanceKm,
-        });
-      }
-    }
+    const serverDistanceKm = validation.serverDistanceKm;
 
     await client.query('BEGIN');
 
@@ -2966,25 +2992,28 @@ app.post('/api/activities', requireAuth, async (req, res) => {
 
       await client.query(
         `
-        INSERT INTO activity_points (
-          activity_id,
-          sequence_number,
-          location
-        )
-        VALUES (
-          $1,
-          $2,
-          ST_SetSRID(
-            ST_MakePoint($3, $4),
-            4326
-          )::geography
-        )
-        `,
+  INSERT INTO activity_points (
+    activity_id,
+    sequence_number,
+    location,
+    recorded_at
+  )
+  VALUES (
+    $1,
+    $2,
+    ST_SetSRID(
+      ST_MakePoint($3, $4),
+      4326
+    )::geography,
+    to_timestamp($5::double precision / 1000.0)
+  )
+  `,
         [
           activity.id,
           index,
           point.longitude,
           point.latitude,
+          point.timestamp,
         ],
       );
     }
@@ -3394,15 +3423,15 @@ app.post('/api/posts', requireAuth, async (req, res) => {
 app.put('/api/posts/:postId', requireAuth, async (req, res) => {
   try {
     const userId = res.locals.authenticatedUserId as string;
-    const {postId} = req.params;
+    const { postId } = req.params;
     const content =
       typeof req.body.content === 'string' ? req.body.content.trim() : '';
 
     if (!content) {
-      return res.status(400).json({error: 'Post content cannot be empty'});
+      return res.status(400).json({ error: 'Post content cannot be empty' });
     }
     if (content.length > 500) {
-      return res.status(400).json({error: 'Post content cannot exceed 500 characters'});
+      return res.status(400).json({ error: 'Post content cannot exceed 500 characters' });
     }
 
     const result = await query(
@@ -3422,7 +3451,7 @@ app.put('/api/posts/:postId', requireAuth, async (req, res) => {
     return res.json(result.rows[0]);
   } catch (error) {
     console.error('Edit post failed:', error);
-    return res.status(500).json({error: 'Failed to update post'});
+    return res.status(500).json({ error: 'Failed to update post' });
   }
 });
 
@@ -3431,7 +3460,7 @@ app.put('/api/posts/:postId', requireAuth, async (req, res) => {
 app.delete('/api/posts/:postId', requireAuth, async (req, res) => {
   try {
     const userId = res.locals.authenticatedUserId as string;
-    const {postId} = req.params;
+    const { postId } = req.params;
 
     const result = await query(
       `DELETE FROM posts
@@ -3446,10 +3475,10 @@ app.delete('/api/posts/:postId', requireAuth, async (req, res) => {
       });
     }
 
-    return res.json({deleted: true, id: result.rows[0].id});
+    return res.json({ deleted: true, id: result.rows[0].id });
   } catch (error) {
     console.error('Delete post failed:', error);
-    return res.status(500).json({error: 'Failed to delete post'});
+    return res.status(500).json({ error: 'Failed to delete post' });
   }
 });
 

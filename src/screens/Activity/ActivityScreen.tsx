@@ -16,11 +16,11 @@ import {
 } from 'react-native';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DeviceInfo from 'react-native-device-info';
 import { useJogQuestAlert } from '../../components/JogQuestAlert';
-import {createTerritory} from '../../utils/territory';
-import {saveTerritory} from '../../utils/territoryStorage';
+import { createTerritory } from '../../utils/territory';
+import { saveTerritory } from '../../utils/territoryStorage';
 
 import MapView, {
   Marker,
@@ -33,15 +33,15 @@ import {
   useNavigation,
 } from '@react-navigation/native';
 
-import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
-import type {RootStackParamList} from '../../navigation/types';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../../navigation/types';
 
 import {
   calculateDistance,
   Coordinate,
   formatTime,
 } from '../../utils/geo';
-import {useAuth} from '../../auth/AuthContext';
+import { useAuth } from '../../auth/AuthContext';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -102,7 +102,7 @@ const SPACING = {
 const ActivityScreen = () => {
   const alert = useJogQuestAlert();
   const navigation = useNavigation<NavigationProp>();
-  const {user, token} = useAuth();
+  const { user, token } = useAuth();
   const insets = useSafeAreaInsets();
 
   if (!user) {
@@ -114,11 +114,15 @@ const ActivityScreen = () => {
   }
 
   const mapRef = useRef<MapView>(null);
+  const userLocationRef = useRef<Coordinate | null>(null);
+  const hasCenteredOnUserRef = useRef(false);
+  const gpsInvalidRef = useRef(false);
 
   const [activityType, setActivityType] = useState<ActivityType>('Run');
   const [isTracking, setIsTracking] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isGpsInvalid, setIsGpsInvalid] = useState(false);
   const [route, setRoute] = useState<Coordinate[]>([]);
   const [plannedRoute, setPlannedRoute] = useState<PlannedRoute | null>(null);
   const [distance, setDistance] = useState(0);
@@ -230,32 +234,136 @@ const ActivityScreen = () => {
   // --------------------------------------------------
   // GPS LOCATION
   // --------------------------------------------------
+
   const handleLocationChange = (event: any) => {
+    const coordinate = event?.nativeEvent?.coordinate;
+
+    if (
+      !coordinate ||
+      !Number.isFinite(coordinate.latitude) ||
+      !Number.isFinite(coordinate.longitude)
+    ) {
+      return;
+    }
+
+    // Reject Android mock-provider fixes while recording.
+    if (
+      Platform.OS === 'android' &&
+      isTracking &&
+      !isPaused &&
+      coordinate.isFromMockProvider === true
+    ) {
+      gpsInvalidRef.current = true;
+      setIsGpsInvalid(true);
+      setIsTracking(false);
+      setIsPaused(false);
+      setIsSaving(false);
+      setRoute([]);
+      setDistance(0);
+      lastLocationRef.current = null;
+      startTimeRef.current = null;
+      startedAtRef.current = null;
+
+      alert(
+        'Mock GPS detected',
+        'This activity has been invalidated because Android reported a mock GPS location. It cannot be saved. Disable mock-location apps before starting a new activity.',
+      );
+      return;
+    }
+
+    const gpsTimestamp = Number(coordinate.timestamp);
+
+    // Do not record points without a valid GPS-fix timestamp.
+    if (!Number.isFinite(gpsTimestamp) || gpsTimestamp <= 0) {
+      return;
+    }
+
+    const location: Coordinate = {
+      latitude: coordinate.latitude,
+      longitude: coordinate.longitude,
+      timestamp: gpsTimestamp,
+      ...(typeof coordinate.accuracy === 'number'
+        ? { accuracy: coordinate.accuracy }
+        : {}),
+    };
+
+    userLocationRef.current = location;
+
+    if (!hasCenteredOnUserRef.current) {
+      hasCenteredOnUserRef.current = true;
+
+      mapRef.current?.animateToRegion(
+        {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          latitudeDelta: 0.008,
+          longitudeDelta: 0.008,
+        },
+        700,
+      );
+    }
+
     if (!isTracking || isPaused) return;
 
-    const coordinate: Coordinate = event.nativeEvent.coordinate;
-    if (!coordinate) return;
-
-    if (typeof coordinate.accuracy === 'number' && coordinate.accuracy > 50) {
+    if (
+      typeof coordinate.accuracy === 'number' &&
+      coordinate.accuracy > 50
+    ) {
       return;
     }
 
     const lastLocation = lastLocationRef.current;
 
     if (!lastLocation) {
-      lastLocationRef.current = coordinate;
-      setRoute([coordinate]);
+      lastLocationRef.current = location;
+      setRoute([location]);
       return;
     }
 
-    const segmentDistance = calculateDistance(lastLocation, coordinate);
+    // GPS fixes must advance in time.
+    if (
+      typeof lastLocation.timestamp === 'number' &&
+      gpsTimestamp <= lastLocation.timestamp
+    ) {
+      return;
+    }
+
+    const segmentDistance = calculateDistance(lastLocation, location);
 
     if (segmentDistance < 0.003) return;
-    if (segmentDistance > 0.5) return;
+
+    // Do not silently bridge implausibly large gaps.
+    if (segmentDistance > 0.5) {
+      lastLocationRef.current = null;
+      return;
+    }
 
     setDistance(current => current + segmentDistance);
-    setRoute(current => [...current, coordinate]);
-    lastLocationRef.current = coordinate;
+    setRoute(current => [...current, location]);
+    lastLocationRef.current = location;
+  };
+
+
+  const goToMyLocation = () => {
+    const location = userLocationRef.current;
+
+    if (!location) {
+      alert(
+        'Location unavailable',
+        'Waiting for your GPS location. Check that location permission and device GPS are enabled.',
+      );
+      return;
+    }
+
+    mapRef.current?.animateToRegion(
+      {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        latitudeDelta: 0.008,
+        longitudeDelta: 0.008,
+      },
+      700,
+    );
   };
 
   // --------------------------------------------------
@@ -278,7 +386,7 @@ const ActivityScreen = () => {
         alert(
           'Location permission required',
           'JogQuest needs location permission to record your route. Allow location access in Android settings, then try again.',
-          [{text: 'OK'}],
+          [{ text: 'OK' }],
         );
         return;
       }
@@ -289,7 +397,7 @@ const ActivityScreen = () => {
         alert(
           'Turn on device location',
           'Your permission is granted, but device location is off. Swipe down from the top of your screen, turn on Location, then return to JogQuest.',
-          [{text: 'GOT IT'}],
+          [{ text: 'GOT IT' }],
         );
         return;
       }
@@ -301,6 +409,8 @@ const ActivityScreen = () => {
     setElapsedSeconds(0);
     setIsPaused(false);
     setIsSaving(false);
+    gpsInvalidRef.current = false;
+    setIsGpsInvalid(false);
     lastLocationRef.current = null;
     startTimeRef.current = Date.now();
     startedAtRef.current = new Date().toISOString();
@@ -476,10 +586,10 @@ const ActivityScreen = () => {
         route,
         territory: territory.captured
           ? {
-              areaM2: territory.areaM2,
-              areaKm2: territory.areaKm2,
-              polygon: territory.polygon,
-            }
+            areaM2: territory.areaM2,
+            areaKm2: territory.areaKm2,
+            polygon: territory.polygon,
+          }
           : undefined,
       }),
     });
@@ -529,6 +639,22 @@ const ActivityScreen = () => {
   // FINISH
   // --------------------------------------------------
   const stopActivity = async () => {
+    if (gpsInvalidRef.current) {
+      alert(
+        'Activity rejected',
+        'Mock GPS was detected. This activity cannot be saved.',
+      );
+      return;
+    }
+
+    if (route.length < 2) {
+      alert(
+        'Activity rejected',
+        'Not enough GPS points were recorded. Please try again with location enabled.',
+      );
+      return;
+    }
+
     if (isSaving) return;
     setIsSaving(true);
 
@@ -576,7 +702,7 @@ const ActivityScreen = () => {
           });
         } catch (territoryError) {
           console.warn('Territory claim failed:', territoryError);
-          resultTerritory = {...territory, captured: false};
+          resultTerritory = { ...territory, captured: false };
           alert(
             'Territory Claim Failed',
             territoryError instanceof Error
@@ -629,10 +755,10 @@ const ActivityScreen = () => {
         userLocationFastestInterval={2000}
         onUserLocationChange={handleLocationChange}
         initialRegion={{
-          latitude: 28.6139,
-          longitude: 77.209,
-          latitudeDelta: 0.03,
-          longitudeDelta: 0.03,
+          latitude: 20.5937,
+          longitude: 78.9629,
+          latitudeDelta: 20,
+          longitudeDelta: 20,
         }}>
         {plannedRoute && plannedRoute.route.length > 1 && (
           <Polyline
@@ -682,7 +808,7 @@ const ActivityScreen = () => {
         <View
           style={[
             styles.statusBadge,
-            {marginTop: insets.top + 8},
+            { marginTop: insets.top + 8 },
           ]}>
           <View
             style={[
@@ -703,15 +829,27 @@ const ActivityScreen = () => {
           </Text>
         </View>
 
+        <TouchableOpacity
+          style={[
+            styles.whereAmIButton,
+            { top: insets.top + 64 },
+          ]}
+          activeOpacity={0.85}
+          onPress={goToMyLocation}>
+          <Text style={styles.whereAmIButtonText}>
+            ◎  WHERE AM I?
+          </Text>
+        </TouchableOpacity>
+
         {/* Bottom panel — above tab bar + home indicator */}
         <View
           style={[
             styles.bottomPanel,
-            {marginBottom: insets.bottom + 90},
+            { marginBottom: insets.bottom + 90 },
           ]}>
           {!isTracking && plannedRoute && (
             <View style={styles.plannedCard}>
-              <View style={{flex: 1}}>
+              <View style={{ flex: 1 }}>
                 <Text style={styles.plannedLabel}>PLANNED ROUTE</Text>
                 <Text style={styles.plannedValue}>
                   {plannedRoute.distanceKm.toFixed(2)} km
@@ -763,7 +901,7 @@ const ActivityScreen = () => {
               </View>
               <View style={styles.progressTrack}>
                 <View
-                  style={[styles.progressFill, {width: `${routeProgress}%`}]}
+                  style={[styles.progressFill, { width: `${routeProgress}%` }]}
                 />
               </View>
               <View style={styles.progressFooter}>
@@ -894,6 +1032,24 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.5,
+  },
+
+  whereAmIButton: {
+    position: 'absolute',
+    right: SPACING.md,
+    zIndex: 10,
+    backgroundColor: COLORS.accent,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 16,
+    elevation: 6,
+  },
+
+  whereAmIButtonText: {
+    color: COLORS.background,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.8,
   },
 
   bottomPanel: {
