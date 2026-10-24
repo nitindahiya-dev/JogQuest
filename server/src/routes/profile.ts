@@ -244,7 +244,11 @@ router.post('/api/me/password', requireAuth, async (req, res) => {
 
     return res.json({ message: 'Password changed successfully' });
   } catch (error) {
-    await client.query('ROLLBACK');
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      console.error('Password change rollback failed:', rollbackError);
+    }
     console.error('Password change failed:', error);
     return res.status(500).json({
       error: 'Could not change password',

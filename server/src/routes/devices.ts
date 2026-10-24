@@ -28,8 +28,11 @@ router.post(
     }
 
     const client = await pool.connect();
+    let transactionStarted = false;
+
     try {
       await client.query('BEGIN');
+      transactionStarted = true;
 
       const integration = await client.query(
         `SELECT id FROM device_integrations
@@ -40,6 +43,7 @@ router.post(
 
       if (!integration.rows.length) {
         await client.query('ROLLBACK');
+        transactionStarted = false;
         return res.status(409).json({
           error: 'Connect Health Connect before importing workouts.',
         });
@@ -124,9 +128,16 @@ router.post(
       );
 
       await client.query('COMMIT');
+      transactionStarted = false;
       return res.json({ imported, duplicates, skipped });
     } catch (error) {
-      await client.query('ROLLBACK');
+      if (transactionStarted) {
+        try {
+          await client.query('ROLLBACK');
+        } catch (rollbackError) {
+          console.error('Health Connect rollback failed:', rollbackError);
+        }
+      }
       console.error('Health Connect workout import failed:', error);
       return res.status(500).json({ error: 'Failed to import workouts.' });
     } finally {
@@ -314,6 +325,7 @@ router.post(
   requireAuth, async (req, res) => {
     const client =
       await pool.connect();
+    let transactionStarted = false;
 
     try {
       const userId = res.locals.authenticatedUserId as string;
@@ -401,6 +413,7 @@ router.post(
       await client.query(
         'BEGIN',
       );
+      transactionStarted = true;
 
       const activityResult =
         await client.query(
@@ -499,6 +512,7 @@ router.post(
       await client.query(
         'COMMIT',
       );
+      transactionStarted = false;
 
       res.status(201).json({
         imported: true,
@@ -512,16 +526,22 @@ router.post(
           serverDistanceKm,
       });
     } catch (error) {
-      await client.query(
-        'ROLLBACK',
-      );
+      if (transactionStarted) {
+        try {
+          await client.query('ROLLBACK');
+        } catch (rollbackError) {
+          console.error('Garmin import rollback failed:', rollbackError);
+        }
+      }
 
       console.error(error);
 
-      res.status(500).json({
-        error:
-          'Failed to import external activity',
-      });
+      if (!res.headersSent) {
+        res.status(500).json({
+          error:
+            'Failed to import external activity',
+        });
+      }
     } finally {
       client.release();
     }

@@ -215,7 +215,11 @@ router.post('/api/auth/reset-password', async (req, res) => {
 
     return res.json({ message: 'Password reset successfully.' });
   } catch (error) {
-    await client.query('ROLLBACK');
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      console.error('Password reset rollback failed:', rollbackError);
+    }
     console.error('Password reset failed:', error);
     return res.status(500).json({
       error: 'Could not reset password. Please try again.',

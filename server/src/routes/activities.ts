@@ -115,7 +115,8 @@ router.get('/api/activities/:activityId/route', requireAuth, async (req, res) =>
 });
 
 router.post('/api/activities', requireAuth, async (req, res) => {
-  const client = await pool.connect();
+  let client: Awaited<ReturnType<typeof pool.connect>> | undefined;
+  let transactionStarted = false;
 
   try {
     const body = req.body as CreateActivityBody;
@@ -143,7 +144,9 @@ router.post('/api/activities', requireAuth, async (req, res) => {
 
     const serverDistanceKm = validation.serverDistanceKm;
 
+    client = await pool.connect();
     await client.query('BEGIN');
+    transactionStarted = true;
 
     const activityResult = await client.query(
       `
@@ -210,21 +213,30 @@ router.post('/api/activities', requireAuth, async (req, res) => {
     }
 
     await client.query('COMMIT');
+    transactionStarted = false;
 
     res.status(201).json({
       ok: true,
       activity,
     });
   } catch (error) {
-    await client.query('ROLLBACK');
+    if (client && transactionStarted) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Failed to roll back activity transaction:', rollbackError);
+      }
+    }
 
     console.error(error);
 
-    res.status(500).json({
-      error: 'Failed to save activity',
-    });
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: 'Failed to save activity',
+      });
+    }
   } finally {
-    client.release();
+    client?.release();
   }
 });
 

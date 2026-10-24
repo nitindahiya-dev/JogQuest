@@ -235,7 +235,7 @@ registerRoutes(app, {
 const PORT =
   Number(process.env.PORT) || 4000;
 
-app.listen(
+const server = app.listen(
   PORT,
   '0.0.0.0',
   () => {
@@ -244,3 +244,45 @@ app.listen(
     );
   },
 );
+
+let isShuttingDown = false;
+
+async function shutdown(signal: string): Promise<void> {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  console.log(`${signal} received; shutting down JogQuest API.`);
+
+  const forceExitTimer = setTimeout(() => {
+    console.error('Graceful shutdown timed out; forcing exit.');
+    process.exit(1);
+  }, 15000);
+
+  forceExitTimer.unref();
+
+  server.close(async (serverError) => {
+    if (serverError) {
+      console.error('HTTP server shutdown failed:', serverError);
+      process.exitCode = 1;
+    }
+
+    try {
+      await pool.end();
+      console.log('PostgreSQL pool closed.');
+    } catch (error) {
+      console.error('Failed to close PostgreSQL pool:', error);
+      process.exitCode = 1;
+    } finally {
+      clearTimeout(forceExitTimer);
+      process.exit();
+    }
+  });
+}
+
+process.once('SIGTERM', () => {
+  void shutdown('SIGTERM');
+});
+
+process.once('SIGINT', () => {
+  void shutdown('SIGINT');
+});

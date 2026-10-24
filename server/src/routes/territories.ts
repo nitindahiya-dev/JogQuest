@@ -1116,7 +1116,11 @@ router.post(
         },
       });
     } catch (error) {
-      await client.query('ROLLBACK');
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Territory challenge rollback failed:', rollbackError);
+      }
 
       console.error(error);
 
