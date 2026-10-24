@@ -13,46 +13,10 @@ export function registerUsersRoutes<T extends RouteContext>(
   const router = Router();
   const { hashSessionToken, query } = context;
 
-router.post('/api/users', async (req, res) => {
-  try {
-    const { username, displayName, avatarUrl } = req.body;
-
-    if (!username || !displayName) {
-      return res.status(400).json({
-        error: 'username and displayName are required',
-      });
-    }
-
-    const result = await query(
-      `
-      INSERT INTO users (
-        username,
-        display_name,
-        avatar_url
-      )
-      VALUES ($1, $2, $3)
-      RETURNING
-        id,
-        username,
-        display_name,
-        avatar_url,
-        created_at
-      `,
-      [
-        username,
-        displayName,
-        avatarUrl ?? null,
-      ],
-    );
-
-    res.status(201).json(result.rows[0]);
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      error: 'Failed to create user',
-    });
-  }
+router.post('/api/users', (_req, res) => {
+  return res.status(410).json({
+    error: 'This endpoint is retired. Use /api/auth/signup.',
+  });
 });
 
 router.get(

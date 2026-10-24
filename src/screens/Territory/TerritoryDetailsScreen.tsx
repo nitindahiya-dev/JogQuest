@@ -292,6 +292,11 @@ const TerritoryDetailsScreen = () => {
 
       const response = await fetch(
         `${API_BASE_URL}/api/activities/${userId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
       );
 
       if (!response.ok) {
@@ -348,6 +353,11 @@ const TerritoryDetailsScreen = () => {
 
       const routeResponse = await fetch(
         `${API_BASE_URL}/api/activities/${selectedActivityId}/route`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
       );
 
       const routeData = (await routeResponse.json()) as {

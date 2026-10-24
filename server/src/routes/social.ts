@@ -165,9 +165,9 @@ router.patch(
   },
 );
 
-router.get('/api/feed/:userId', async (req, res) => {
+router.get('/api/feed/:userId', requireAuth, async (req, res) => {
   try {
-    const { userId } = req.params;
+    const userId = res.locals.authenticatedUserId as string;
 
     const requestedScope =
       String(req.query.scope ?? 'all');

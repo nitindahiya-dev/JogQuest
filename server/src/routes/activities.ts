@@ -14,9 +14,14 @@ export function registerActivitiesRoutes<T extends RouteContext>(
   const router = Router();
   const { pool, query, requireAuth, validateActivityGps } = context;
 
-router.get('/api/activities/:userId', async (req, res) => {
+router.get('/api/activities/:userId', requireAuth, async (req, res) => {
   try {
     const { userId } = req.params;
+    const authenticatedUserId = res.locals.authenticatedUserId as string;
+
+    if (userId !== authenticatedUserId) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
 
     const result = await query(
       `
@@ -56,7 +61,7 @@ router.get('/api/activities/:userId', async (req, res) => {
   }
 });
 
-router.get('/api/activities/:activityId/route', async (req, res) => {
+router.get('/api/activities/:activityId/route', requireAuth, async (req, res) => {
   try {
     const { activityId } = req.params;
 
@@ -71,8 +76,9 @@ router.get('/api/activities/:activityId/route', async (req, res) => {
         pace
       FROM activities
       WHERE id = $1
+        AND user_id = $2
       `,
-      [activityId],
+      [activityId, res.locals.authenticatedUserId],
     );
 
     if (activityResult.rows.length === 0) {

@@ -132,6 +132,11 @@ const SocialFeedScreen = () => {
       setError(null);
       const response = await fetch(
         `${API_BASE_URL}/api/feed/${userId}?scope=all`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
       );
       const data = (await response.json()) as FeedPost[] | {error?: string};
 

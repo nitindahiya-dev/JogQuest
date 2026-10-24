@@ -85,7 +85,7 @@ const ActivityHistoryScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { user } = useAuth();
+  const { user, token } = useAuth();
 
   const loadActivities = useCallback(
     async (isRefresh = false) => {
@@ -107,6 +107,11 @@ const ActivityHistoryScreen = () => {
 
         const response = await fetch(
           `${API_BASE_URL}/api/activities/${user.id}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
         );
 
         if (!response.ok) {
