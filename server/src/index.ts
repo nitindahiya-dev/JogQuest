@@ -3,6 +3,7 @@ dns.setDefaultResultOrder('ipv4first');
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import { rateLimit } from 'express-rate-limit';
 import { pool, query } from './db.js';
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
@@ -47,8 +48,88 @@ export const avatarUpload = multer({
   },
 });
 
-app.use(cors());
-app.use(express.json());
+// Render runs behind a trusted reverse proxy.
+app.set('trust proxy', 1);
+
+// Browser origins must be explicitly allowed.
+// Native mobile clients generally send no Origin header.
+const configuredOrigins = process.env.CORS_ORIGINS ??
+  (process.env.NODE_ENV === 'production'
+    ? ''
+    : 'http://localhost:3000,http://localhost:8081,http://localhost:19006');
+
+const allowedOrigins = new Set(
+  configuredOrigins
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+);
+
+// Reject unapproved browser origins while allowing native clients
+// and command-line clients that do not send an Origin header.
+app.use((req, res, next) => {
+  const origin = req.get('Origin');
+
+  if (origin && !allowedOrigins.has(origin)) {
+    return res.status(403).json({ error: 'Origin not allowed' });
+  }
+
+  next();
+});
+
+app.use(cors({
+  origin: (origin, callback) => {
+    callback(null, !origin || allowedOrigins.has(origin));
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  maxAge: 600,
+}));
+
+// General API abuse protection.
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please try again later.' },
+});
+
+// Stricter limits for authentication and account-recovery endpoints.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Please try again later.' },
+});
+
+const signupLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many signup attempts. Please try again later.' },
+});
+
+const recoveryLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many recovery attempts. Please try again later.' },
+});
+
+// Apply the general limiter and then stricter limits to sensitive endpoints.
+app.use('/api', apiLimiter);
+app.use('/api/auth/login', loginLimiter);
+app.use('/api/auth/signup', signupLimiter);
+app.use('/api/auth/forgot-password', recoveryLimiter);
+app.use('/api/auth/reset-password', recoveryLimiter);
+
+// Reject oversized JSON and form submissions.
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: false, limit: '100kb' }));
 
 app.get('/api/health', async (_req, res) => {
   try {
