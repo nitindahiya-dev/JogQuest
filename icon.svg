@@ -1,0 +1,17 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Deep Black Background -->
+  <rect width="1024" height="1024" fill="#0A0A0A"/>
+  
+  <!-- Subtle Territory Route Lines (Background) -->
+  <path d="M 150 800 L 400 600 L 850 700" stroke="#1C1C1E" stroke-width="24" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="40 40"/>
+  <path d="M 200 250 L 450 400 L 800 200" stroke="#1C1C1E" stroke-width="24" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="40 40"/>
+  <circle cx="400" cy="600" r="30" fill="#1C1C1E" />
+  <circle cx="450" cy="400" r="30" fill="#1C1C1E" />
+
+  <!-- Main Neon Lime "J" -->
+  <path d="M 400 280 V 650 C 400 760 320 820 220 820 C 120 820 100 720 100 720 L 190 670 C 190 670 210 730 260 730 C 310 730 310 670 310 650 V 280 H 400 Z" fill="#D4FF00"/>
+  
+  <!-- Waypoint Location Pin -->
+  <circle cx="680" cy="500" r="45" fill="#D4FF00"/>
+  <path d="M 680 560 L 680 680" stroke="#D4FF00" stroke-width="24" stroke-linecap="round"/>
+</svg>
