@@ -66,6 +66,7 @@ type ClaimTerritoryResponse = {
   ok: boolean;
   territory: {
     id: string;
+    user_id: string;
     area_m2: number | string;
     area_km2: number | string;
     activity_type: ActivityType;
@@ -609,8 +610,6 @@ const ActivityScreen = () => {
     activityId: string,
     territory: ReturnType<typeof createTerritory>,
   ) => {
-    if (!territory.captured) return null;
-
     const response = await fetch(`${API_BASE_URL}/api/territories/claim`, {
       method: 'POST',
       headers: {
@@ -673,7 +672,7 @@ const ActivityScreen = () => {
         territory,
       );
 
-      if (territory.captured && activityResponse?.activity?.id) {
+      if (activityResponse?.activity?.id) {
         try {
           const claimResponse = await claimTerritoryOnBackend(
             activityResponse.activity.id,
@@ -691,6 +690,7 @@ const ActivityScreen = () => {
 
           await saveTerritory({
             id: savedTerritory.id,
+            ownerId: savedTerritory.user_id,
             areaM2: Number(savedTerritory.area_m2),
             areaKm2: Number(savedTerritory.area_km2),
             polygon: serverRing.map(([longitude, latitude]) => ({
@@ -703,12 +703,22 @@ const ActivityScreen = () => {
         } catch (territoryError) {
           console.warn('Territory claim failed:', territoryError);
           resultTerritory = { ...territory, captured: false };
-          alert(
-            'Territory Claim Failed',
+
+          const errorMessage =
             territoryError instanceof Error
               ? territoryError.message
-              : String(territoryError),
-          );
+              : String(territoryError);
+
+          // A route that does not qualify for capture should not make
+          // an otherwise successfully saved activity appear to have failed.
+          const expectedRejection =
+            /route must finish within 50 metres|at least 10 points|no valid polygon|overlap|minimum area|territory.*not available/i.test(
+              errorMessage,
+            );
+
+          if (!expectedRejection) {
+            alert('Territory Claim Failed', errorMessage);
+          }
         }
       }
 

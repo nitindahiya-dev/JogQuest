@@ -7,6 +7,7 @@ export type StoredCoordinate = {
 
 export type StoredTerritory = {
   id: string;
+  ownerId?: string;
   areaM2: number;
   areaKm2: number;
   polygon: StoredCoordinate[];

@@ -37,6 +37,7 @@ import {
   getTerritories,
   StoredTerritory,
 } from '../../utils/territoryStorage';
+import {useAuth} from '../../auth/AuthContext';
 
 import type {
   RootStackParamList,
@@ -59,6 +60,37 @@ type ApiTerritory = {
   captured_at: string;
 };
 
+const TERRITORY_OWNER_COLORS = [
+  {stroke: '#42A5F5', fill: 'rgba(66, 165, 245, 0.22)'},
+  {stroke: '#AB47BC', fill: 'rgba(171, 71, 188, 0.22)'},
+  {stroke: '#FF7043', fill: 'rgba(255, 112, 67, 0.22)'},
+  {stroke: '#26A69A', fill: 'rgba(38, 166, 154, 0.22)'},
+  {stroke: '#EC407A', fill: 'rgba(236, 64, 122, 0.22)'},
+  {stroke: '#FFCA28', fill: 'rgba(255, 202, 40, 0.22)'},
+];
+
+const getTerritoryColors = (
+  ownerId: string | undefined,
+  currentUserId: string | undefined,
+) => {
+  if (!ownerId) {
+    return {stroke: '#777777', fill: 'rgba(150, 150, 150, 0.16)'};
+  }
+
+  if (currentUserId && ownerId === currentUserId) {
+    return {stroke: '#D4FF00', fill: 'rgba(212, 255, 0, 0.18)'};
+  }
+
+  let hash = 0;
+  for (let i = 0; i < ownerId.length; i += 1) {
+    hash = (hash * 31 + ownerId.charCodeAt(i)) | 0;
+  }
+
+  return TERRITORY_OWNER_COLORS[
+    (hash >>> 0) % TERRITORY_OWNER_COLORS.length
+  ];
+};
+
 // ─── Design tokens ───
 const COLORS = {
   background: '#0A0A0A',
@@ -76,7 +108,8 @@ const SPACING = {
 };
 
 const MapScreen = () => {
-  const mapRef = useRef<MapView>(null);
+    const {user} = useAuth();
+const mapRef = useRef<MapView>(null);
   const hasCenteredOnUserRef = useRef(false);
   const userLocationRef = useRef<{
     latitude: number;
@@ -141,6 +174,7 @@ const MapScreen = () => {
 
     return {
       id: territory.id,
+      ownerId: territory.user_id,
       areaM2: Number(territory.area_m2),
       areaKm2: Number(territory.area_km2),
       polygon,
@@ -353,17 +387,24 @@ const MapScreen = () => {
           longitudeDelta: 20,
         }}>
         {showTerritories &&
-          territories.map(territory => (
-            <Polygon
-              key={territory.id}
-              coordinates={territory.polygon}
-              strokeWidth={3}
-              strokeColor={COLORS.accent}
-              fillColor="rgba(212, 255, 0, 0.18)"
-              tappable
-              onPress={() => openTerritory(territory)}
-            />
-          ))}
+          territories.map(territory => {
+            const territoryColors = getTerritoryColors(
+              territory.ownerId,
+              user?.id,
+            );
+
+            return (
+              <Polygon
+                key={territory.id}
+                coordinates={territory.polygon}
+                strokeWidth={3}
+                strokeColor={territoryColors.stroke}
+                fillColor={territoryColors.fill}
+                tappable
+                onPress={() => openTerritory(territory)}
+              />
+            );
+          })}
       </MapView>
 
       {/* Floating Header — respects notch / Dynamic Island */}
