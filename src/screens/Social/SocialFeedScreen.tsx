@@ -153,7 +153,7 @@ const SocialFeedScreen = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [userId]);
+  }, [userId, token]);
 
   useFocusEffect(
     useCallback(() => {

@@ -1,4 +1,5 @@
 import { Router, type Express } from 'express';
+import type { PoolClient } from 'pg';
 import type { CreateActivityBody } from '../utils/activity.js';
 
 type RouteContext = Record<string, any> & {
@@ -115,7 +116,7 @@ router.get('/api/activities/:activityId/route', requireAuth, async (req, res) =>
 });
 
 router.post('/api/activities', requireAuth, async (req, res) => {
-  let client: Awaited<ReturnType<typeof pool.connect>> | undefined;
+  let client: PoolClient | undefined;
   let transactionStarted = false;
 
   try {

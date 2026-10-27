@@ -142,6 +142,12 @@ app.get('/api/health', async (_req, res) => {
       service: 'JogQuest API',
       database: 'connected',
       time: result.rows[0].now,
+      databasePool: {
+        total: pool.totalCount,
+        idle: pool.idleCount,
+        waiting: pool.waitingCount,
+        max: pool.options.max,
+      },
     });
   } catch (error) {
     console.error(error);
@@ -258,9 +264,10 @@ async function shutdown(signal: string): Promise<void> {
     process.exit(1);
   }, 15000);
 
-  forceExitTimer.unref();
+  // Keep the shutdown timeout active; clear it when shutdown completes.
 
   server.close(async (serverError) => {
+    clearTimeout(forceExitTimer);
     if (serverError) {
       console.error('HTTP server shutdown failed:', serverError);
       process.exitCode = 1;

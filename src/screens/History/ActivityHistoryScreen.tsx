@@ -128,7 +128,7 @@ const ActivityHistoryScreen = () => {
         setRefreshing(false);
       }
     },
-    [user],
+    [user, token],
   );
 
   useFocusEffect(
