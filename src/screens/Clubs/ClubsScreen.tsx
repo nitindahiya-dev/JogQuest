@@ -1,6 +1,7 @@
 import { API_BASE_URL } from '../../config/api';
 import React, {
   useCallback,
+  useMemo,
   useState,
 } from 'react';
 
@@ -20,6 +21,7 @@ import {
 } from '@react-navigation/native';
 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '../../auth/AuthContext';
 
 import type {
   NativeStackNavigationProp,
@@ -41,10 +43,20 @@ type Club = {
   creator_id: string;
   is_public: boolean;
   created_at: string;
-  creator_username: string;
-  creator_display_name: string;
+  creator_username?: string;
+  creator_display_name?: string;
   members_count: number;
 };
+
+type SortOption =
+  | 'newest'
+  | 'oldest'
+  | 'nameAsc'
+  | 'nameDesc'
+  | 'membersDesc'
+  | 'membersAsc';
+
+type VisibilityFilter = 'all' | 'public' | 'private';
 
 
 
@@ -68,10 +80,16 @@ const SPACING = {
 };
 
 const ClubsScreen = () => {
+  const { user, token } = useAuth();
+  const [activeTab, setActiveTab] = useState<'discover' | 'mine'>('discover');
   const navigation = useNavigation<Navigation>();
   const insets = useSafeAreaInsets();
 
   const [clubs, setClubs] = useState<Club[]>([]);
+  const [showSortPanel, setShowSortPanel] = useState(false);
+  const [sortOption, setSortOption] = useState<SortOption>('newest');
+  const [visibilityFilter, setVisibilityFilter] =
+    useState<VisibilityFilter>('all');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,10 +98,21 @@ const ClubsScreen = () => {
     try {
       setError(null);
 
-      const response = await fetch(`${API_BASE_URL}/api/clubs`);
-      const data = (await response.json()) as
-        | Club[]
-        | { error?: string };
+      if (activeTab === 'mine' && (!user?.id || !token)) {
+        setClubs([]);
+        setError('Please log in to view your clubs.');
+        return;
+      }
+
+      const url =
+        activeTab === 'mine'
+          ? `${API_BASE_URL}/api/users/${user!.id}/clubs`
+          : `${API_BASE_URL}/api/clubs`;
+
+      const response = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const data = (await response.json()) as Club[] | { error?: string };
 
       if (!response.ok) {
         throw new Error(
@@ -95,20 +124,46 @@ const ClubsScreen = () => {
 
       setClubs(data as Club[]);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Failed to load clubs',
-      );
+      setError(err instanceof Error ? err.message : 'Failed to load clubs');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [activeTab, user?.id, token]);
 
   useFocusEffect(
     useCallback(() => {
       loadClubs();
     }, [loadClubs]),
   );
+
+  const displayedClubs = useMemo(() => {
+    const filtered = clubs.filter(club => {
+      if (visibilityFilter === 'public') return club.is_public;
+      if (visibilityFilter === 'private') return !club.is_public;
+      return true;
+    });
+
+    return [...filtered].sort((a, b) => {
+      switch (sortOption) {
+        case 'oldest':
+          return new Date(a.created_at).getTime() -
+            new Date(b.created_at).getTime();
+        case 'nameAsc':
+          return a.name.localeCompare(b.name);
+        case 'nameDesc':
+          return b.name.localeCompare(a.name);
+        case 'membersDesc':
+          return (b.members_count ?? 0) - (a.members_count ?? 0);
+        case 'membersAsc':
+          return (a.members_count ?? 0) - (b.members_count ?? 0);
+        case 'newest':
+        default:
+          return new Date(b.created_at).getTime() -
+            new Date(a.created_at).getTime();
+      }
+    });
+  }, [clubs, sortOption, visibilityFilter]);
 
   if (loading) {
     return (
@@ -143,6 +198,126 @@ const ClubsScreen = () => {
         </TouchableOpacity>
       </View>
 
+      <View style={styles.tabs}>
+        <TouchableOpacity
+          accessibilityRole="button"
+          style={[styles.tab, activeTab === 'discover' && styles.activeTab]}
+          onPress={() => {
+            setActiveTab('discover');
+            setLoading(true);
+          }}
+        >
+          <Text style={[styles.tabText, activeTab === 'discover' && styles.activeTabText]}>
+            DISCOVER
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityRole="button"
+          style={[styles.tab, activeTab === 'mine' && styles.activeTab]}
+          onPress={() => {
+            setActiveTab('mine');
+            setLoading(true);
+          }}
+        >
+          <Text style={[styles.tabText, activeTab === 'mine' && styles.activeTabText]}>
+            MY CLUBS
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.sortToolbar}>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityState={{ expanded: showSortPanel }}
+          style={[
+            styles.sortToggle,
+            showSortPanel && styles.sortToggleActive,
+          ]}
+          onPress={() => setShowSortPanel(value => !value)}
+          activeOpacity={0.8}>
+          <Text
+            style={[
+              styles.sortToggleText,
+              showSortPanel && styles.sortToggleTextActive,
+            ]}>
+            ⇅  SORT & FILTER
+          </Text>
+          <Text
+            style={[
+              styles.sortToggleText,
+              showSortPanel && styles.sortToggleTextActive,
+            ]}>
+            {showSortPanel ? '−' : '+'}
+          </Text>
+        </TouchableOpacity>
+        <Text style={styles.resultCount}>
+          {displayedClubs.length} {displayedClubs.length === 1 ? 'CLUB' : 'CLUBS'}
+        </Text>
+      </View>
+
+      {showSortPanel && (
+        <View style={styles.sortPanel}>
+          <Text style={styles.sortSectionTitle}>SORT BY</Text>
+          <View style={styles.sortOptions}>
+            {([
+              ['newest', 'Newest first'],
+              ['oldest', 'Oldest first'],
+              ['nameAsc', 'Name A–Z'],
+              ['nameDesc', 'Name Z–A'],
+              ['membersDesc', 'Most members'],
+              ['membersAsc', 'Fewest members'],
+            ] as [SortOption, string][]).map(([value, label]) => (
+              <TouchableOpacity
+                key={value}
+                accessibilityRole="button"
+                accessibilityState={{ selected: sortOption === value }}
+                style={[
+                  styles.sortChip,
+                  sortOption === value && styles.sortChipActive,
+                ]}
+                onPress={() => setSortOption(value)}
+                activeOpacity={0.8}>
+                <Text
+                  style={[
+                    styles.sortChipText,
+                    sortOption === value && styles.sortChipTextActive,
+                  ]}>
+                  {label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={styles.sortSectionTitle}>VISIBILITY</Text>
+          <View style={styles.sortOptions}>
+            {([
+              ['all', 'All clubs'],
+              ['public', 'Public'],
+              ['private', 'Private'],
+            ] as [VisibilityFilter, string][]).map(([value, label]) => (
+              <TouchableOpacity
+                key={value}
+                accessibilityRole="button"
+                accessibilityState={{ selected: visibilityFilter === value }}
+                style={[
+                  styles.sortChip,
+                  visibilityFilter === value && styles.sortChipActive,
+                ]}
+                onPress={() => setVisibilityFilter(value)}
+                activeOpacity={0.8}>
+                <Text
+                  style={[
+                    styles.sortChipText,
+                    visibilityFilter === value && styles.sortChipTextActive,
+                  ]}>
+                  {label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      )}
+
       {error && (
         <View style={styles.errorBox}>
           <Text style={styles.errorText}>{error}</Text>
@@ -150,7 +325,7 @@ const ClubsScreen = () => {
       )}
 
       <FlatList
-        data={clubs}
+        data={displayedClubs}
         keyExtractor={item => item.id}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -205,7 +380,10 @@ const ClubsScreen = () => {
               </View>
             </View>
 
-            <Text style={styles.arrow}>›</Text>
+            <View style={styles.cardAction}>
+              <Text style={styles.viewClub}>{activeTab === 'mine' ? 'OPEN' : 'VIEW'}</Text>
+              <Text style={styles.arrow}>›</Text>
+            </View>
           </TouchableOpacity>
         )}
         ListEmptyComponent={
@@ -272,6 +450,105 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '900',
     letterSpacing: 0.3,
+  },
+
+  tabs: {
+    flexDirection: 'row',
+    marginHorizontal: SPACING.md,
+    marginBottom: 14,
+    padding: 4,
+    borderRadius: 14,
+    backgroundColor: COLORS.surfaceLight,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: 11,
+  },
+  activeTab: { backgroundColor: COLORS.accent },
+  tabText: { color: COLORS.textMuted, fontSize: 11, fontWeight: '900' },
+  activeTabText: { color: COLORS.background },
+  cardAction: { alignItems: 'center', marginLeft: 8 },
+  viewClub: { color: COLORS.accent, fontSize: 9, fontWeight: '900' },
+  sortToolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: SPACING.md,
+    marginBottom: 12,
+  },
+  sortToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surfaceLight,
+  },
+  sortToggleActive: {
+    borderColor: COLORS.accent,
+  },
+  sortToggleText: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  sortToggleTextActive: {
+    color: COLORS.accent,
+  },
+  resultCount: {
+    color: COLORS.textMuted,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  sortPanel: {
+    marginHorizontal: SPACING.md,
+    marginBottom: 14,
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+  },
+  sortSectionTitle: {
+    color: COLORS.textMuted,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1,
+    marginBottom: 9,
+    marginTop: 4,
+  },
+  sortOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 14,
+  },
+  sortChip: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+    backgroundColor: COLORS.surfaceLight,
+  },
+  sortChipActive: {
+    borderColor: COLORS.accent,
+    backgroundColor: COLORS.accent,
+  },
+  sortChipText: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  sortChipTextActive: {
+    color: COLORS.background,
+    fontWeight: '900',
   },
 
   // List

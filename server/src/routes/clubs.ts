@@ -62,9 +62,16 @@ router.get('/api/clubs', async (_req, res) => {
 
 router.get(
   '/api/users/:userId/clubs',
+  requireAuth,
   async (req, res) => {
     try {
-      const { userId } = req.params;
+      const userId = res.locals.authenticatedUserId as string;
+
+      if (req.params.userId !== userId) {
+        return res.status(403).json({
+          error: 'You can only view your own clubs',
+        });
+      }
 
       const result = await query(
         `
@@ -112,6 +119,9 @@ router.post('/api/clubs', requireAuth, async (req, res) => {
   try {
     const userId = res.locals.authenticatedUserId as string;
     const { name, description } = req.body;
+    const isPublic = typeof req.body?.is_public === 'boolean'
+      ? req.body.is_public
+      : true;
 
     const cleanName =
       typeof name === 'string'
@@ -164,9 +174,10 @@ router.post('/api/clubs', requireAuth, async (req, res) => {
       INSERT INTO clubs (
         name,
         description,
-        creator_id
+        creator_id,
+        is_public
       )
-      VALUES ($1, $2, $3)
+      VALUES ($1, $2, $3, $4)
       RETURNING
         id,
         name,
@@ -179,6 +190,7 @@ router.post('/api/clubs', requireAuth, async (req, res) => {
         cleanName,
         cleanDescription,
         userId,
+        isPublic,
       ],
     );
 
@@ -492,6 +504,204 @@ router.get(
     }
   },
 );
+
+
+  router.get(
+    '/api/clubs/:clubId/requests/me',
+    requireAuth,
+    async (req, res) => {
+      try {
+        const userId = res.locals.authenticatedUserId as string;
+        const { clubId } = req.params;
+        const result = await query(
+          `SELECT id, status, created_at
+           FROM club_join_requests
+           WHERE club_id = $1 AND user_id = $2`,
+          [clubId, userId],
+        );
+        return res.json(result.rows[0] ?? { status: null });
+      } catch (error) {
+        console.error('Failed to load own club join request:', error);
+        return res.status(500).json({ error: 'Failed to load request status' });
+      }
+    },
+  );
+
+  // JOIN REQUESTS: SUBMIT, LIST, REVIEW
+  router.post(
+    '/api/clubs/:clubId/requests',
+    requireAuth,
+    async (req, res) => {
+      try {
+        const userId = res.locals.authenticatedUserId as string;
+        const { clubId } = req.params;
+
+        const clubResult = await query(
+          `SELECT id, creator_id, is_public FROM clubs WHERE id = $1`,
+          [clubId],
+        );
+
+        if (clubResult.rows.length === 0) {
+          return res.status(404).json({ error: 'Club not found' });
+        }
+
+        const club = clubResult.rows[0];
+
+        if (club.is_public) {
+          return res.status(400).json({
+            error: 'This club is public. Join it directly instead.',
+          });
+        }
+
+        if (club.creator_id === userId) {
+          return res.status(400).json({
+            error: 'You own this club already',
+          });
+        }
+
+        const memberResult = await query(
+          `SELECT 1 FROM club_members WHERE club_id = $1 AND user_id = $2`,
+          [clubId, userId],
+        );
+
+        if (memberResult.rows.length > 0) {
+          return res.status(409).json({
+            error: 'You are already a member of this club',
+          });
+        }
+
+        const result = await query(
+          `INSERT INTO club_join_requests (club_id, user_id, status)
+           VALUES ($1, $2, 'pending')
+           ON CONFLICT (club_id, user_id)
+           DO UPDATE SET
+             status = CASE
+               WHEN club_join_requests.status = 'rejected' THEN 'pending'
+               ELSE club_join_requests.status
+             END,
+             created_at = CASE
+               WHEN club_join_requests.status = 'rejected' THEN NOW()
+               ELSE club_join_requests.created_at
+             END,
+             reviewed_at = CASE
+               WHEN club_join_requests.status = 'rejected' THEN NULL
+               ELSE club_join_requests.reviewed_at
+             END
+           RETURNING id, status, created_at`,
+          [clubId, userId],
+        );
+
+        const request = result.rows[0];
+        return res.status(request.status === 'pending' ? 201 : 200).json(request);
+      } catch (error) {
+        console.error('Failed to submit club join request:', error);
+        return res.status(500).json({ error: 'Failed to submit join request' });
+      }
+    },
+  );
+
+  router.get(
+    '/api/clubs/:clubId/requests',
+    requireAuth,
+    async (req, res) => {
+      try {
+        const userId = res.locals.authenticatedUserId as string;
+        const { clubId } = req.params;
+
+        const owner = await query(
+          `SELECT 1 FROM clubs WHERE id = $1 AND creator_id = $2`,
+          [clubId, userId],
+        );
+
+        if (owner.rows.length === 0) {
+          return res.status(403).json({
+            error: 'Only the club owner can view join requests',
+          });
+        }
+
+        const result = await query(
+          `SELECT r.id, r.club_id, r.user_id, r.status, r.created_at,
+                  u.username, u.display_name, u.avatar_url
+           FROM club_join_requests r
+           JOIN users u ON u.id = r.user_id
+           WHERE r.club_id = $1 AND r.status = 'pending'
+           ORDER BY r.created_at ASC`,
+          [clubId],
+        );
+
+        return res.json(result.rows);
+      } catch (error) {
+        console.error('Failed to load club join requests:', error);
+        return res.status(500).json({ error: 'Failed to load join requests' });
+      }
+    },
+  );
+
+  router.patch(
+    '/api/clubs/:clubId/requests/:requestId',
+    requireAuth,
+    async (req, res) => {
+      try {
+        const userId = res.locals.authenticatedUserId as string;
+        const { clubId, requestId } = req.params;
+        const status = req.body?.status;
+
+        if (status !== 'approved' && status !== 'rejected') {
+          return res.status(400).json({
+            error: 'Status must be approved or rejected',
+          });
+        }
+
+        // A single statement checks ownership, updates the request, and
+        // inserts membership only when approval succeeds.
+        const result = await query(
+          `WITH owner AS (
+             SELECT id FROM clubs
+             WHERE id = $1 AND creator_id = $2 AND is_public = FALSE
+           ),
+           updated AS (
+             UPDATE club_join_requests r
+             SET status = $4, reviewed_at = NOW()
+             FROM owner o
+             WHERE r.id = $3
+               AND r.club_id = o.id
+               AND r.status = 'pending'
+             RETURNING r.id, r.club_id, r.user_id, r.status
+           ),
+           added AS (
+             INSERT INTO club_members (club_id, user_id)
+             SELECT club_id, user_id FROM updated WHERE status = 'approved'
+             ON CONFLICT DO NOTHING
+             RETURNING club_id, user_id
+           )
+           SELECT * FROM updated`,
+          [clubId, userId, requestId, status],
+        );
+
+        if (result.rows.length === 0) {
+          const owner = await query(
+            `SELECT 1 FROM clubs WHERE id = $1 AND creator_id = $2`,
+            [clubId, userId],
+          );
+
+          if (owner.rows.length === 0) {
+            return res.status(403).json({
+              error: 'Only the club owner can review requests',
+            });
+          }
+
+          return res.status(404).json({
+            error: 'Pending join request not found',
+          });
+        }
+
+        return res.json(result.rows[0]);
+      } catch (error) {
+        console.error('Failed to review club join request:', error);
+        return res.status(500).json({ error: 'Failed to review join request' });
+      }
+    },
+  );
 
   app.use(router);
 }

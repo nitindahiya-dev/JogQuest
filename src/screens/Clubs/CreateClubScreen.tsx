@@ -30,6 +30,7 @@ const CreateClubScreen = () => {
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [isPublic, setIsPublic] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,6 +58,7 @@ const CreateClubScreen = () => {
           userId: user.id,
           name: cleanName,
           description: description.trim(),
+          is_public: isPublic,
         }),
       });
 
@@ -137,6 +139,32 @@ const CreateClubScreen = () => {
           <Text style={styles.counter}>
             {description.length}/500
           </Text>
+        </View>
+
+        <View style={styles.inputWrapper}>
+          <Text style={styles.label}>CLUB VISIBILITY</Text>
+          <View style={styles.visibilityRow}>
+            <TouchableOpacity
+              style={[styles.visibilityOption, isPublic && styles.visibilitySelected]}
+              onPress={() => setIsPublic(true)}
+              accessibilityRole="button"
+            >
+              <Text style={[styles.visibilityText, isPublic && styles.visibilityTextSelected]}>
+                PUBLIC
+              </Text>
+              <Text style={styles.visibilityHint}>Anyone can join</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.visibilityOption, !isPublic && styles.visibilitySelected]}
+              onPress={() => setIsPublic(false)}
+              accessibilityRole="button"
+            >
+              <Text style={[styles.visibilityText, !isPublic && styles.visibilityTextSelected]}>
+                PRIVATE
+              </Text>
+              <Text style={styles.visibilityHint}>Owner approves requests</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         <TouchableOpacity
@@ -227,6 +255,36 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 6,
     textAlign: 'right',
+  },
+
+  visibilityRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  visibilityOption: {
+    flex: 1,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+  },
+  visibilitySelected: {
+    borderColor: COLORS.accent,
+    backgroundColor: 'rgba(212, 255, 0, 0.08)',
+  },
+  visibilityText: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  visibilityTextSelected: {
+    color: COLORS.accent,
+  },
+  visibilityHint: {
+    color: COLORS.textMuted,
+    fontSize: 10,
+    marginTop: 6,
   },
 
   createButton: {

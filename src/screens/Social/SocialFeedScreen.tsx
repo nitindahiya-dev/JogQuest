@@ -896,7 +896,7 @@ const SocialFeedScreen = () => {
               color={COLORS.accent}
               style={{ paddingVertical: 20 }}
             />
-          ) : null
+          ) : undefined
         }
         showsVerticalScrollIndicator={false}
         refreshControl={

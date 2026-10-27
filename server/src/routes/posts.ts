@@ -49,6 +49,9 @@ router.post(
   requireAuth,
   handlePostMediaUpload,
   async (req, res) => {
+  let uploadedMediaPath: string | null = null;
+  let storageClient: any = null;
+
   try {
     const userId = res.locals.authenticatedUserId as string;
     const { content, activityId } = req.body;
@@ -112,8 +115,6 @@ router.post(
 
     let mediaUrl: string | null = null;
     let mediaType: 'image' | 'video' | null = null;
-    let uploadedMediaPath: string | null = null;
-    let storageClient: any = null;
 
     if (file) {
       const supabaseUrl = process.env.SUPABASE_URL;

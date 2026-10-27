@@ -824,6 +824,24 @@ ON club_members (user_id);
 
 
 -- ==================================================
+-- CLUB JOIN REQUESTS
+-- ==================================================
+
+CREATE TABLE IF NOT EXISTS club_join_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  club_id UUID NOT NULL REFERENCES clubs(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status VARCHAR(16) NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'approved', 'rejected')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  reviewed_at TIMESTAMPTZ,
+  UNIQUE (club_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_club_join_requests_owner_review
+ON club_join_requests (club_id, status, created_at DESC);
+
+-- ==================================================
 -- COMPETITIONS
 -- ==================================================
 

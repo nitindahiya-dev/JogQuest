@@ -50,6 +50,14 @@ type Club = {
   members_count: number;
 };
 
+type ClubJoinRequest = {
+  id: string;
+  user_id: string;
+  username: string;
+  display_name: string;
+  status: 'pending' | 'approved' | 'rejected';
+};
+
 type Member = {
   id: string;
   username: string;
@@ -92,6 +100,8 @@ const ClubDetailsScreen = () => {
   const [club, setClub] = useState<Club | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [joined, setJoined] = useState(false);
+  const [requestStatus, setRequestStatus] = useState<string | null>(null);
+  const [joinRequests, setJoinRequests] = useState<ClubJoinRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -155,9 +165,38 @@ const ClubDetailsScreen = () => {
         );
       }
 
-      setClub(clubData as Club);
+      const loadedClub = clubData as Club;
+      setClub(loadedClub);
       setMembers(membersData as Member[]);
       setJoined(membershipData.joined ?? false);
+
+      if (!loadedClub.is_public && token && userId) {
+        if (loadedClub.creator_id === userId) {
+          const requestsResponse = await fetch(
+            `${API_BASE_URL}/api/clubs/${clubId}/requests`,
+            { headers: { Authorization: `Bearer ${token}` } },
+          );
+          const requestData = await requestsResponse.json();
+          if (requestsResponse.ok && Array.isArray(requestData)) {
+            setJoinRequests(requestData as ClubJoinRequest[]);
+          }
+        } else {
+          const requestResponse = await fetch(
+            `${API_BASE_URL}/api/clubs/${clubId}/requests/me`,
+            { headers: { Authorization: `Bearer ${token}` } },
+          );
+          const requestData = (await requestResponse.json()) as {
+            status?: string | null;
+            error?: string;
+          };
+          if (requestResponse.ok) {
+            setRequestStatus(requestData.status ?? null);
+          }
+        }
+      } else {
+        setRequestStatus(null);
+        setJoinRequests([]);
+      }
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Failed to load club',
@@ -166,7 +205,7 @@ const ClubDetailsScreen = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [clubId, userId]);
+  }, [clubId, userId, token]);
 
   useFocusEffect(
     useCallback(() => {
@@ -212,6 +251,63 @@ const ClubDetailsScreen = () => {
           ? err.message
           : 'Failed to update membership',
       );
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const submitJoinRequest = async () => {
+    if (!club || !token || actionLoading) return;
+    try {
+      setActionLoading(true);
+      setError(null);
+      const response = await fetch(
+        `${API_BASE_URL}/api/clubs/${club.id}/requests`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+      const data = (await response.json()) as {
+        status?: string;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(data.error ?? 'Could not request to join');
+      setRequestStatus(data.status ?? 'pending');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not request to join');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const reviewJoinRequest = async (
+    requestId: string,
+    status: 'approved' | 'rejected',
+  ) => {
+    if (!club || !token || actionLoading) return;
+    try {
+      setActionLoading(true);
+      setError(null);
+      const response = await fetch(
+        `${API_BASE_URL}/api/clubs/${club.id}/requests/${requestId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ status }),
+        },
+      );
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(data.error ?? 'Could not review request');
+      await loadClub();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not review request');
     } finally {
       setActionLoading(false);
     }
@@ -297,29 +393,40 @@ const ClubDetailsScreen = () => {
               </View>
             )}
 
-            {/* Join / Leave */}
-            {!isOwner && (
+            {/* Membership / private join request */}
+            {!isOwner && (club.is_public || joined) && (
               <TouchableOpacity
-                style={[
-                  styles.actionBtn,
-                  joined && styles.actionBtnLeave,
-                ]}
+                style={[styles.actionBtn, joined && styles.actionBtnLeave]}
                 onPress={toggleMembership}
                 disabled={actionLoading}
                 activeOpacity={0.85}
               >
                 {actionLoading ? (
-                  <ActivityIndicator
-                    color={joined ? COLORS.text : COLORS.background}
-                  />
+                  <ActivityIndicator color={joined ? COLORS.text : COLORS.background} />
                 ) : (
-                  <Text
-                    style={[
-                      styles.actionBtnText,
-                      joined && styles.actionBtnTextLeave,
-                    ]}
-                  >
+                  <Text style={[styles.actionBtnText, joined && styles.actionBtnTextLeave]}>
                     {joined ? 'LEAVE CLUB' : 'JOIN CLUB'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            )}
+
+            {!isOwner && !club.is_public && !joined && (
+              <TouchableOpacity
+                style={[styles.actionBtn, requestStatus === 'pending' && styles.actionBtnLeave]}
+                onPress={submitJoinRequest}
+                disabled={actionLoading || requestStatus === 'pending'}
+                activeOpacity={0.85}
+              >
+                {actionLoading ? (
+                  <ActivityIndicator color={COLORS.background} />
+                ) : (
+                  <Text style={styles.actionBtnText}>
+                    {requestStatus === 'pending'
+                      ? 'REQUEST PENDING'
+                      : requestStatus === 'rejected'
+                        ? 'REQUEST AGAIN'
+                        : 'REQUEST TO JOIN'}
                   </Text>
                 )}
               </TouchableOpacity>
@@ -330,6 +437,38 @@ const ClubDetailsScreen = () => {
                 <Text style={styles.ownerBannerText}>
                   ⚡ YOU ARE THE OWNER
                 </Text>
+              </View>
+            )}
+
+            {!club.is_public && isOwner && (
+              <View style={styles.requestsPanel}>
+                <Text style={styles.sectionTitle}>PENDING JOIN REQUESTS</Text>
+                {joinRequests.length === 0 ? (
+                  <Text style={styles.emptyText}>No pending requests.</Text>
+                ) : joinRequests.map(request => (
+                  <View key={request.id} style={styles.requestCard}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.memberName}>
+                        {request.display_name || request.username}
+                      </Text>
+                      <Text style={styles.memberUsername}>@{request.username}</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.approveButton}
+                      disabled={actionLoading}
+                      onPress={() => reviewJoinRequest(request.id, 'approved')}
+                    >
+                      <Text style={styles.reviewButtonText}>APPROVE</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.rejectButton}
+                      disabled={actionLoading}
+                      onPress={() => reviewJoinRequest(request.id, 'rejected')}
+                    >
+                      <Text style={styles.reviewButtonText}>REJECT</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
               </View>
             )}
 
@@ -502,6 +641,42 @@ const styles = StyleSheet.create({
   ownerBannerText: {
     color: COLORS.accent,
     fontSize: 12,
+    fontWeight: '900',
+  },
+
+  requestsPanel: {
+    marginTop: 16,
+    padding: 12,
+    borderRadius: 16,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  requestCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  approveButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    borderRadius: 9,
+    backgroundColor: COLORS.accent,
+  },
+  rejectButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    borderRadius: 9,
+    backgroundColor: COLORS.surfaceLight,
+    borderWidth: 1,
+    borderColor: COLORS.danger,
+  },
+  reviewButtonText: {
+    color: COLORS.background,
+    fontSize: 9,
     fontWeight: '900',
   },
 
