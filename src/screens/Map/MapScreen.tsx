@@ -14,7 +14,6 @@ import {
   TouchableOpacity,
   PermissionsAndroid,
   Platform,
-  Alert,
 } from 'react-native';
 
 import DeviceInfo from 'react-native-device-info';
@@ -38,6 +37,7 @@ import {
   StoredTerritory,
 } from '../../utils/territoryStorage';
 import {useAuth} from '../../auth/AuthContext';
+import {useJogQuestAlert} from '../../components/JogQuestAlert';
 
 import type {
   RootStackParamList,
@@ -108,6 +108,7 @@ const SPACING = {
 };
 
 const MapScreen = () => {
+  const alert = useJogQuestAlert();
     const {user} = useAuth();
 const mapRef = useRef<MapView>(null);
   const hasCenteredOnUserRef = useRef(false);
@@ -141,7 +142,7 @@ const mapRef = useRef<MapView>(null);
           );
 
           if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-            Alert.alert(
+            alert(
               'Location Permission Required',
               'Allow location access in Android settings to see your current position.',
             );
@@ -152,7 +153,7 @@ const mapRef = useRef<MapView>(null);
         const locationEnabled = await DeviceInfo.isLocationEnabled();
 
         if (!locationEnabled) {
-          Alert.alert(
+          alert(
             'GPS Is Disabled',
             'Turn on your device location services to use the territory map.',
           );
@@ -254,7 +255,7 @@ const mapRef = useRef<MapView>(null);
     const location = userLocationRef.current;
 
     if (!location) {
-      Alert.alert(
+      alert(
         'Location Not Available',
         'Waiting for your GPS location. Make sure Location services are enabled and try again.',
       );
@@ -306,7 +307,7 @@ const mapRef = useRef<MapView>(null);
           700,
         );
       } else {
-        Alert.alert(
+        alert(
           'No Territories Yet',
           'Your current location will appear when GPS provides a location fix.',
         );
@@ -344,7 +345,7 @@ const mapRef = useRef<MapView>(null);
     }
 
     if (territories.length === 0) {
-      Alert.alert(
+      alert(
         'No Territories Yet',
         'Complete a closed route to capture your first territory.',
       );
