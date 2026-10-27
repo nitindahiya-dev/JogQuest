@@ -1,8 +1,10 @@
 import { API_BASE_URL } from '../../config/api';
 import React, { useState } from 'react';
+import Geolocation from '@react-native-community/geolocation';
 
 import {
   ActivityIndicator,
+  PermissionsAndroid,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -27,6 +29,7 @@ type Navigation = NativeStackNavigationProp<
 >;
 
 type Metric = 'DISTANCE' | 'TERRITORY' | 'ACTIVITIES';
+type CompetitionLocation = { latitude: number; longitude: number };
 
 
 
@@ -89,6 +92,48 @@ const CreateCompetitionScreen = () => {
   const [duration, setDuration] = useState('7');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [competitionLocation, setCompetitionLocation] = useState<CompetitionLocation | null>(null);
+
+  const useCurrentLocation = async () => {
+    try {
+      setError(null);
+
+      if (Platform.OS === 'android') {
+        const permission = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          {
+            title: 'Attach challenge location',
+            message: 'Allow JogQuest to attach your current location to this challenge.',
+            buttonPositive: 'Allow',
+            buttonNegative: 'Cancel',
+          },
+        );
+
+        if (permission !== PermissionsAndroid.RESULTS.GRANTED) {
+          throw new Error('Location permission was not granted.');
+        }
+      }
+
+      const location = await new Promise<CompetitionLocation>((resolve, reject) => {
+        Geolocation.getCurrentPosition(
+          position => resolve({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          }),
+          error => reject(new Error(
+            error.code === 1
+              ? 'Location permission denied. Enable it in Android settings.'
+              : 'Could not get your current location. Enable device location and try again.',
+          )),
+          { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 },
+        );
+      });
+
+      setCompetitionLocation(location);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not get your location.');
+    }
+  };
 
   const createCompetition = async () => {
     if (loading) return;
@@ -130,6 +175,10 @@ const CreateCompetitionScreen = () => {
             description: cleanDescription,
             metric,
             durationDays: days,
+            ...(competitionLocation ? {
+              latitude: competitionLocation.latitude,
+              longitude: competitionLocation.longitude,
+            } : {}),
           }),
         },
       );
@@ -262,6 +311,27 @@ const CreateCompetitionScreen = () => {
           <Text style={styles.counter}>
             {description.length}/500
           </Text>
+        </View>
+
+        {/* Optional location */}
+        <View style={styles.locationCard}>
+          <View style={styles.locationCardText}>
+            <Text style={styles.locationTitle}>CHALLENGE LOCATION (OPTIONAL)</Text>
+            <Text style={styles.locationDescription}>
+              {competitionLocation
+                ? 'Current location attached. Nearby runners can discover this challenge.'
+                : 'Attach your current GPS location so nearby runners can discover it.'}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.locationButton}
+            onPress={competitionLocation ? () => setCompetitionLocation(null) : useCurrentLocation}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.locationButtonText}>
+              {competitionLocation ? 'REMOVE LOCATION' : 'USE MY LOCATION'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Metric */}
@@ -640,6 +710,44 @@ const styles = StyleSheet.create({
     fontSize: 10,
     marginTop: 6,
     textAlign: 'right',
+  },
+
+  locationCard: {
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 16,
+    padding: SPACING.md,
+    marginBottom: SPACING.xl,
+  },
+  locationCardText: {
+    marginBottom: 12,
+  },
+  locationTitle: {
+    color: COLORS.text,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.7,
+  },
+  locationDescription: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    lineHeight: 17,
+    marginTop: 6,
+  },
+  locationButton: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  locationButtonText: {
+    color: COLORS.accent,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.3,
   },
 
   // Metric options

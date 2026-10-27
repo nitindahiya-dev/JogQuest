@@ -1,12 +1,16 @@
 import { API_BASE_URL } from '../../config/api';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
+import Geolocation from '@react-native-community/geolocation';
 
 import {
   ActivityIndicator,
   FlatList,
+  PermissionsAndroid,
+  Platform,
   RefreshControl,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -36,7 +40,13 @@ type Competition = {
   start_at: string;
   end_at: string;
   participants_count: number;
+  created_at?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  distance_km?: number | null;
 };
+
+type UserLocation = { latitude: number; longitude: number };
 
 
 
@@ -104,13 +114,99 @@ const CompetitionsScreen = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedStatus, setSelectedStatus] = useState('ALL');
+  const [selectedMetric, setSelectedMetric] = useState('ALL');
+  const [sortBy, setSortBy] = useState('RECOMMENDED');
+  const [nearbyEnabled, setNearbyEnabled] = useState(false);
+  const [radiusKm, setRadiusKm] = useState(25);
+  const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
 
-  const loadCompetitions = useCallback(async () => {
+  const filteredCompetitions = useMemo(() => {
+    const search = searchQuery.trim().toLowerCase();
+
+    const results = competitions.filter(item => {
+      const matchesSearch =
+        !search ||
+        item.name.toLowerCase().includes(search) ||
+        (item.description ?? '').toLowerCase().includes(search);
+
+      const status = (item.status ?? 'UPCOMING').toUpperCase();
+      const metric = (item.metric ?? '').toUpperCase();
+
+      return (
+        matchesSearch &&
+        (selectedStatus === 'ALL' || status === selectedStatus) &&
+        (selectedMetric === 'ALL' || metric === selectedMetric)
+      );
+    });
+
+    if (sortBy === 'NEWEST') {
+      results.sort(
+        (a, b) =>
+          new Date(b.created_at ?? b.start_at).getTime() -
+          new Date(a.created_at ?? a.start_at).getTime(),
+      );
+    } else if (sortBy === 'PARTICIPANTS') {
+      results.sort(
+        (a, b) => (b.participants_count ?? 0) - (a.participants_count ?? 0),
+      );
+    }
+
+    return results;
+  }, [competitions, searchQuery, selectedStatus, selectedMetric, sortBy]);
+
+  const getCurrentLocation = useCallback(async (): Promise<UserLocation> => {
+    if (Platform.OS === 'android') {
+      const permission = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        {
+          title: 'Find nearby challenges',
+          message: 'JogQuest uses your location to find nearby competitions.',
+          buttonPositive: 'Allow',
+          buttonNegative: 'Cancel',
+        },
+      );
+
+      if (permission !== PermissionsAndroid.RESULTS.GRANTED) {
+        throw new Error('Location permission was not granted.');
+      }
+    }
+
+    return new Promise((resolve, reject) => {
+      Geolocation.getCurrentPosition(
+        position => resolve({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        }),
+        error => reject(new Error(
+          error.code === 1
+            ? 'Location permission denied. Enable it in Android settings.'
+            : error.code === 2
+              ? 'Your location is unavailable. Enable device location and try again.'
+              : 'Could not get your location. Please try again.',
+        )),
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 },
+      );
+    });
+  }, []);
+
+  const loadCompetitions = useCallback(async (
+    location: UserLocation | null = userLocation,
+    radius = radiusKm,
+  ) => {
     try {
       setError(null);
 
+      const params = new URLSearchParams();
+      if (location) {
+        params.set('latitude', String(location.latitude));
+        params.set('longitude', String(location.longitude));
+        params.set('radiusKm', String(radius));
+      }
+      const query = params.toString();
       const response = await fetch(
-        `${API_BASE_URL}/api/competitions`,
+        `${API_BASE_URL}/api/competitions${query ? `?${query}` : ''}`,
       );
 
       const data: any = await response.json();
@@ -134,7 +230,25 @@ const CompetitionsScreen = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [userLocation, radiusKm]);
+
+  const enableNearby = useCallback(async () => {
+    try {
+      setError(null);
+      const location = await getCurrentLocation();
+      setUserLocation(location);
+      setNearbyEnabled(true);
+      await loadCompetitions(location, radiusKm);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not find nearby challenges.');
+    }
+  }, [getCurrentLocation, loadCompetitions, radiusKm]);
+
+  const disableNearby = useCallback(() => {
+    setNearbyEnabled(false);
+    setUserLocation(null);
+    loadCompetitions(null, radiusKm);
+  }, [loadCompetitions, radiusKm]);
 
   useFocusEffect(
     useCallback(() => {
@@ -161,7 +275,7 @@ const CompetitionsScreen = () => {
   return (
     <View style={styles.container}>
       <FlatList
-        data={competitions}
+        data={filteredCompetitions}
         keyExtractor={item => item.id}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -267,10 +381,162 @@ const CompetitionsScreen = () => {
 
               <View style={styles.countBadge}>
                 <Text style={styles.countBadgeText}>
-                  {competitions.length}
+                  {filteredCompetitions.length}
                 </Text>
               </View>
             </View>
+
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Search challenges..."
+              placeholderTextColor={COLORS.textMuted}
+              returnKeyType="search"
+              clearButtonMode="while-editing"
+              style={styles.discoverySearch}
+              accessibilityLabel="Search competitions by name or description"
+            />
+
+            <View style={styles.nearbyPanel}>
+              <View style={styles.nearbyPanelText}>
+                <Text style={styles.nearbyTitle}>NEARBY CHALLENGES</Text>
+                <Text style={styles.nearbySubtitle}>
+                  {nearbyEnabled
+                    ? `Searching within ${radiusKm} km of your location`
+                    : 'Discover competitions around you'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.nearbyButton}
+                onPress={nearbyEnabled ? disableNearby : enableNearby}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.nearbyButtonText}>
+                  {nearbyEnabled ? 'SHOW ALL' : 'FIND NEARBY'}
+                </Text>
+              </TouchableOpacity>
+              {nearbyEnabled && (
+                <View style={styles.radiusRow}>
+                  {[5, 10, 25, 50].map(radius => (
+                    <TouchableOpacity
+                      key={radius}
+                      style={[
+                        styles.radiusChip,
+                        radiusKm === radius && styles.radiusChipActive,
+                      ]}
+                      onPress={() => {
+                        setRadiusKm(radius);
+                        if (userLocation) {
+                          loadCompetitions(userLocation, radius);
+                        }
+                      }}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: radiusKm === radius }}
+                    >
+                      <Text style={[
+                        styles.radiusChipText,
+                        radiusKm === radius && styles.radiusChipTextActive,
+                      ]}>
+                        {radius} km
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </View>
+
+            <Text style={styles.filterHeading}>STATUS</Text>
+            <View style={styles.filterRow}>
+              {[
+                ['ALL', 'All'],
+                ['ACTIVE', 'Active'],
+                ['UPCOMING', 'Upcoming'],
+                ['ENDED', 'Ended'],
+              ].map(([value, label]) => (
+                <TouchableOpacity
+                  key={value}
+                  onPress={() => setSelectedStatus(value)}
+                  style={[
+                    styles.filterChip,
+                    selectedStatus === value && styles.filterChipActive,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: selectedStatus === value }}
+                >
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      selectedStatus === value && styles.filterChipTextActive,
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.filterHeading}>COMPETITION TYPE</Text>
+            <View style={styles.filterRow}>
+              {[
+                ['ALL', 'All types'],
+                ['DISTANCE', 'Distance'],
+                ['TERRITORY', 'Territory'],
+                ['ACTIVITIES', 'Activities'],
+              ].map(([value, label]) => (
+                <TouchableOpacity
+                  key={value}
+                  onPress={() => setSelectedMetric(value)}
+                  style={[
+                    styles.filterChip,
+                    selectedMetric === value && styles.filterChipActive,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: selectedMetric === value }}
+                >
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      selectedMetric === value && styles.filterChipTextActive,
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.sortRow}>
+              <Text style={styles.filterHeading}>SORT BY</Text>
+              <View style={styles.sortOptions}>
+                {[
+                  ['RECOMMENDED', 'Recommended'],
+                  ['NEWEST', 'Newest'],
+                  ['PARTICIPANTS', 'Most players'],
+                ].map(([value, label]) => (
+                  <TouchableOpacity
+                    key={value}
+                    onPress={() => setSortBy(value)}
+                    style={[
+                      styles.sortOption,
+                      sortBy === value && styles.sortOptionActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.sortOptionText,
+                        sortBy === value && styles.sortOptionTextActive,
+                      ]}
+                    >
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            <Text style={styles.resultsText}>
+              Showing {filteredCompetitions.length} of {competitions.length} challenges
+            </Text>
 
             {error && (
               <View style={styles.errorBox}>
@@ -347,6 +613,14 @@ const CompetitionsScreen = () => {
               >
                 {item.description?.trim() || 'No description available.'}
               </Text>
+
+              {nearbyEnabled && typeof item.distance_km === 'number' && (
+                <Text style={styles.distanceLabel}>
+                  {item.distance_km < 1
+                    ? `${Math.round(item.distance_km * 1000)} m away`
+                    : `${item.distance_km.toFixed(1)} km away`}
+                </Text>
+              )}
 
               <View style={styles.metricBadge}>
                 <Text style={styles.metricLabel}>TRACKING</Text>
@@ -870,5 +1144,150 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '900',
   },
+
+  nearbyPanel: {
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 16,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  nearbyPanelText: {
+    marginBottom: 12,
+  },
+  nearbyTitle: {
+    color: COLORS.text,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+  },
+  nearbySubtitle: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    marginTop: 5,
+  },
+  nearbyButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: COLORS.accent,
+    borderRadius: 10,
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+  },
+  nearbyButtonText: {
+    color: COLORS.background,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+  },
+  radiusRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  radiusChip: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  radiusChipActive: {
+    borderColor: COLORS.accent,
+    backgroundColor: 'rgba(212,255,0,0.10)',
+  },
+  radiusChipText: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  radiusChipTextActive: {
+    color: COLORS.accent,
+  },
+  distanceLabel: {
+    color: COLORS.accent,
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 10,
+  },
+  discoverySearch: {
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    minHeight: 48,
+    paddingHorizontal: 14,
+    color: COLORS.text,
+    fontSize: 14,
+    marginTop: 14,
+    marginBottom: 16,
+  },
+  filterHeading: {
+    color: COLORS.textMuted,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+    marginBottom: 9,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 16,
+  },
+  filterChip: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  filterChipActive: {
+    backgroundColor: COLORS.accent,
+    borderColor: COLORS.accent,
+  },
+  filterChipText: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  filterChipTextActive: {
+    color: COLORS.background,
+  },
+  sortRow: {
+    marginBottom: 10,
+  },
+  sortOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  sortOption: {
+    borderRadius: 9,
+    backgroundColor: COLORS.surfaceLight,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  sortOptionActive: {
+    backgroundColor: 'rgba(212,255,0,0.12)',
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+  },
+  sortOptionText: {
+    color: COLORS.textSecondary,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  sortOptionTextActive: {
+    color: COLORS.accent,
+  },
+  resultsText: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    marginBottom: 12,
+  },
+
 });
 

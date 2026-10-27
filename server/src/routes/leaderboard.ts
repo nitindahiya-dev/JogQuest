@@ -80,8 +80,59 @@ router.get(
 
 router.get(
   '/api/competitions',
-  async (_req, res) => {
+  async (req, res) => {
     try {
+      const rawLatitude = req.query.latitude;
+      const rawLongitude = req.query.longitude;
+      const rawRadius = req.query.radiusKm;
+      const hasLocation =
+        rawLatitude !== undefined || rawLongitude !== undefined;
+
+      let latitude: number | null = null;
+      let longitude: number | null = null;
+
+      if (hasLocation) {
+        if (
+          typeof rawLatitude !== 'string' ||
+          typeof rawLongitude !== 'string' ||
+          rawLatitude.trim() === '' ||
+          rawLongitude.trim() === ''
+        ) {
+          return res.status(400).json({
+            error: 'latitude and longitude must be provided together',
+          });
+        }
+
+        latitude = Number(rawLatitude);
+        longitude = Number(rawLongitude);
+
+        if (
+          !Number.isFinite(latitude) ||
+          latitude < -90 ||
+          latitude > 90 ||
+          !Number.isFinite(longitude) ||
+          longitude < -180 ||
+          longitude > 180
+        ) {
+          return res.status(400).json({
+            error: 'Invalid latitude or longitude',
+          });
+        }
+      }
+
+      const radiusKm =
+        rawRadius === undefined ? 25 : Number(rawRadius);
+
+      if (
+        !Number.isFinite(radiusKm) ||
+        radiusKm < 1 ||
+        radiusKm > 500
+      ) {
+        return res.status(400).json({
+          error: 'radiusKm must be between 1 and 500',
+        });
+      }
+
       const result = await query(
         `
         SELECT
@@ -94,6 +145,9 @@ router.get(
           c.end_at,
           c.is_public,
           c.created_at,
+          c.latitude,
+          c.longitude,
+          nearby.distance_km,
 
           u.username AS creator_username,
           u.display_name AS creator_display_name,
@@ -117,7 +171,28 @@ router.get(
         LEFT JOIN competition_participants cp
           ON cp.competition_id = c.id
 
+        CROSS JOIN LATERAL (
+          SELECT CASE
+            WHEN $1::double precision IS NULL THEN NULL
+            WHEN c.latitude IS NULL OR c.longitude IS NULL THEN NULL
+            ELSE 6371 * 2 * ASIN(SQRT(LEAST(1.0,
+              POWER(SIN(RADIANS(c.latitude - $1::double precision) / 2), 2)
+              + COS(RADIANS($1::double precision))
+              * COS(RADIANS(c.latitude))
+              * POWER(SIN(RADIANS(c.longitude - $2::double precision) / 2), 2)
+            )))
+          END AS distance_km
+        ) nearby
+
         WHERE c.is_public = TRUE
+          AND (
+            $1::double precision IS NULL
+            OR (
+              c.latitude IS NOT NULL
+              AND c.longitude IS NOT NULL
+              AND nearby.distance_km <= $3::double precision
+            )
+          )
 
         GROUP BY
           c.id,
@@ -131,8 +206,14 @@ router.get(
             WHEN NOW() < c.start_at THEN 1
             ELSE 2
           END,
+          CASE
+            WHEN $1::double precision IS NOT NULL
+              THEN nearby.distance_km
+            ELSE NULL
+          END ASC NULLS LAST,
           c.start_at ASC
         `,
+        [latitude, longitude, radiusKm],
       );
 
       res.json(result.rows);
@@ -210,7 +291,7 @@ router.post(
   requireAuth, async (req, res) => {
     try {
       const userId = res.locals.authenticatedUserId as string;
-      const { name, description, metric, durationDays } = req.body;
+      const { name, description, metric, durationDays, latitude, longitude } = req.body;
 
       const cleanName =
         typeof name === 'string'
@@ -221,6 +302,34 @@ router.post(
         typeof description === 'string'
           ? description.trim()
           : '';
+
+      const hasLatitude = latitude !== undefined && latitude !== null;
+      const hasLongitude = longitude !== undefined && longitude !== null;
+
+      if (hasLatitude !== hasLongitude) {
+        return res.status(400).json({
+          error: 'latitude and longitude must be provided together',
+        });
+      }
+
+      const cleanLatitude = hasLatitude ? Number(latitude) : null;
+      const cleanLongitude = hasLongitude ? Number(longitude) : null;
+
+      if (
+        hasLatitude &&
+        (
+          !Number.isFinite(cleanLatitude) ||
+          cleanLatitude! < -90 ||
+          cleanLatitude! > 90 ||
+          !Number.isFinite(cleanLongitude) ||
+          cleanLongitude! < -180 ||
+          cleanLongitude! > 180
+        )
+      ) {
+        return res.status(400).json({
+          error: 'Invalid latitude or longitude',
+        });
+      }
 
       if (!cleanName) {
         return res.status(400).json({
@@ -293,7 +402,9 @@ router.post(
           creator_id,
           metric,
           start_at,
-          end_at
+          end_at,
+          latitude,
+          longitude
         )
         VALUES (
           $1,
@@ -301,7 +412,9 @@ router.post(
           $3,
           $4,
           NOW(),
-          NOW() + ($5 * INTERVAL '1 day')
+          NOW() + ($5 * INTERVAL '1 day'),
+          $6,
+          $7
         )
         RETURNING
           id,
@@ -312,7 +425,9 @@ router.post(
           start_at,
           end_at,
           is_public,
-          created_at
+          created_at,
+          latitude,
+          longitude
         `,
         [
           cleanName,
@@ -320,6 +435,8 @@ router.post(
           userId,
           metric,
           days,
+          cleanLatitude,
+          cleanLongitude,
         ],
       );
 
