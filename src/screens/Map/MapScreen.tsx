@@ -126,45 +126,61 @@ const mapRef = useRef<MapView>(null);
   const [selectedTerritoryIndex, setSelectedTerritoryIndex] = useState(0);
   const [showTerritories, setShowTerritories] = useState(false);
 
-  useEffect(() => {
-    const checkLocationAccess = async () => {
-      try {
-        if (Platform.OS === 'android') {
-          const granted = await PermissionsAndroid.request(
-            PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-            {
-              title: 'JogQuest Location Permission',
-              message:
-                'JogQuest needs your location to show your position on the territory map.',
-              buttonPositive: 'Allow',
-              buttonNegative: 'Cancel',
-            },
-          );
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
 
-          if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+      const checkLocationAccess = async () => {
+        try {
+          if (Platform.OS === 'android') {
+            const granted = await PermissionsAndroid.request(
+              PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+              {
+                title: 'JogQuest Location Permission',
+                message:
+                  'JogQuest needs your location to show your position on the territory map.',
+                buttonPositive: 'Allow',
+                buttonNegative: 'Cancel',
+              },
+            );
+
+            if (!active) return;
+
+            if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+              alert(
+                'Location Permission Required',
+                'Allow location access in Android settings to see your current position.',
+              );
+              return;
+            }
+          }
+
+          const locationEnabled = await DeviceInfo.isLocationEnabled();
+
+          if (!active) return;
+
+          if (!locationEnabled) {
             alert(
-              'Location Permission Required',
-              'Allow location access in Android settings to see your current position.',
+              'GPS Is Disabled',
+              'Turn on your device location services, then return to the Map screen.',
             );
             return;
           }
+
+          // Request a fresh map location fix after GPS is enabled.
+          hasCenteredOnUserRef.current = false;
+        } catch (error) {
+          console.error('Failed to check location access:', error);
         }
+      };
 
-        const locationEnabled = await DeviceInfo.isLocationEnabled();
+      checkLocationAccess();
 
-        if (!locationEnabled) {
-          alert(
-            'GPS Is Disabled',
-            'Turn on your device location services to use the territory map.',
-          );
-        }
-      } catch (error) {
-        console.error('Failed to check location access:', error);
-      }
-    };
-
-    checkLocationAccess();
-  }, []);
+      return () => {
+        active = false;
+      };
+    }, [alert]),
+  );
 
   const convertApiTerritory = (territory: ApiTerritory): StoredTerritory => {
     const ring = territory.polygon.coordinates[0] ?? [];
