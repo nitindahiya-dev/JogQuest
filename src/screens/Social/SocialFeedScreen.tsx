@@ -1,7 +1,7 @@
 import { API_BASE_URL } from '../../config/api';
-import React, {
-  useCallback,
-  useState,
+import React, {useCallback,
+  useState,,
+  useRef,
 } from 'react';
 
 import {
@@ -113,6 +113,10 @@ const SocialFeedScreen = () => {
   const alert = useJogQuestAlert();
 
   const [posts, setPosts] = useState<FeedPost[]>([]);
+  const [hasMorePosts, setHasMorePosts] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadingMoreRef = useRef(false);
+  const FEED_PAGE_SIZE = 20;
   const [newPost, setNewPost] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -130,6 +134,7 @@ const SocialFeedScreen = () => {
   const loadFeed = useCallback(async () => {
     if (!userId) {
       setPosts([]);
+      setHasMorePosts(false);
       setLoading(false);
       setRefreshing(false);
       return;
@@ -137,8 +142,10 @@ const SocialFeedScreen = () => {
 
     try {
       setError(null);
+      setHasMorePosts(true);
+
       const response = await fetch(
-        `${API_BASE_URL}/api/feed/${userId}?scope=all`,
+        `${API_BASE_URL}/api/feed/${userId}?scope=all&limit=${FEED_PAGE_SIZE}&offset=0`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -153,7 +160,9 @@ const SocialFeedScreen = () => {
         );
       }
 
-      setPosts(data as FeedPost[]);
+      const firstPage = data as FeedPost[];
+      setPosts(firstPage);
+      setHasMorePosts(firstPage.length === FEED_PAGE_SIZE);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load feed');
     } finally {
@@ -161,6 +170,61 @@ const SocialFeedScreen = () => {
       setRefreshing(false);
     }
   }, [userId, token]);
+
+  const loadMoreFeed = useCallback(async () => {
+    if (
+      !userId ||
+      !hasMorePosts ||
+      loadingMoreRef.current ||
+      loading ||
+      refreshing
+    ) {
+      return;
+    }
+
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/feed/${userId}?scope=all&limit=${FEED_PAGE_SIZE}&offset=${posts.length}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+      const data = (await response.json()) as FeedPost[] | { error?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          'error' in data && data.error ? data.error : 'Failed to load more posts',
+        );
+      }
+
+      const nextPage = data as FeedPost[];
+      setPosts(current => {
+        const existingIds = new Set(current.map(post => post.id));
+        return [
+          ...current,
+          ...nextPage.filter(post => !existingIds.has(post.id)),
+        ];
+      });
+      setHasMorePosts(nextPage.length === FEED_PAGE_SIZE);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load more posts');
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [
+    userId,
+    token,
+    posts.length,
+    hasMorePosts,
+    loading,
+    refreshing,
+  ]);
 
   useFocusEffect(
     useCallback(() => {
@@ -238,7 +302,9 @@ const SocialFeedScreen = () => {
     }
   };
 
-  const loadComments = async (postId: string) => {
+  const loadComments = async (
+    postId: string,
+  ): Promise<Comment[] | null> => {
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/posts/${postId}/comments`,
@@ -251,12 +317,17 @@ const SocialFeedScreen = () => {
         );
       }
 
+      const loadedComments = data as Comment[];
+
       setComments(current => ({
         ...current,
-        [postId]: data as Comment[],
+        [postId]: loadedComments,
       }));
+
+      return loadedComments;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load comments');
+      return null;
     }
   };
 
@@ -296,15 +367,17 @@ const SocialFeedScreen = () => {
       }
 
       setCommentText('');
-      await loadComments(postId);
+      const refreshedComments = await loadComments(postId);
 
-      setPosts(current =>
-        current.map(item =>
-          item.id === postId
-            ? { ...item, comments_count: item.comments_count + 1 }
-            : item,
-        ),
-      );
+      if (refreshedComments !== null) {
+        setPosts(current =>
+          current.map(item =>
+            item.id === postId
+              ? { ...item, comments_count: refreshedComments.length }
+              : item,
+          ),
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create comment');
     } finally {
@@ -635,7 +708,31 @@ const SocialFeedScreen = () => {
             ) : (
               postComments.map(comment => (
                 <View key={comment.id} style={styles.commentRow}>
-                  <Text style={styles.commentName}>{comment.display_name}</Text>
+                  <TouchableOpacity
+                    style={styles.commentAuthor}
+                    activeOpacity={0.8}
+                    onPress={() =>
+                      navigation.navigate('PublicProfile', {
+                        userId: comment.user_id,
+                      })
+                    }>
+                    <View style={styles.commentAvatar}>
+                      {comment.avatar_url ? (
+                        <Image
+                          source={{uri: comment.avatar_url}}
+                          style={styles.commentAvatarImage}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <Text style={styles.commentAvatarText}>
+                          {comment.display_name?.charAt(0)?.toUpperCase() || '?'}
+                        </Text>
+                      )}
+                    </View>
+                    <Text style={styles.commentName}>
+                      {comment.display_name}
+                    </Text>
+                  </TouchableOpacity>
                   <Text style={styles.commentText}>{comment.comment}</Text>
                 </View>
               ))
@@ -681,6 +778,17 @@ const SocialFeedScreen = () => {
         data={posts}
         keyExtractor={item => item.id}
         renderItem={renderPost}
+        onEndReached={loadMoreFeed}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={
+          loadingMore ? (
+            <ActivityIndicator
+              size="small"
+              color={COLORS.accent}
+              style={{ paddingVertical: 20 }}
+            />
+          ) : null
+        }
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -1071,7 +1179,33 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   commentRow: {
-    marginBottom: 10,
+    marginBottom: 12,
+  },
+  commentAuthor: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    marginBottom: 4,
+  },
+  commentAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    marginRight: 8,
+  },
+  commentAvatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 15,
+  },
+  commentAvatarText: {
+    color: COLORS.background,
+    fontSize: 12,
+    fontWeight: '900',
   },
   commentName: {
     color: COLORS.text,
