@@ -545,6 +545,10 @@ CREATE TABLE IF NOT EXISTS posts (
   content VARCHAR(500) NOT NULL
     DEFAULT '',
 
+  media_url TEXT,
+  media_type VARCHAR(16)
+    CHECK (media_type IS NULL OR media_type IN ('image', 'video')),
+
   created_at TIMESTAMPTZ NOT NULL
     DEFAULT NOW()
 );
@@ -1037,3 +1041,7 @@ ON activities (
 )
 WHERE source_provider IS NOT NULL
   AND external_activity_id IS NOT NULL;
+
+-- Community post media support (safe to run on existing databases).
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS media_url TEXT;
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS media_type VARCHAR(16);

@@ -1,10 +1,13 @@
 import { API_BASE_URL } from '../../config/api';
+import { launchImageLibrary } from 'react-native-image-picker';
+import Video from 'react-native-video';
 import React, {useCallback,
-  useState,,
+  useState,
   useRef,
 } from 'react';
 
 import {
+  Linking,
   ActivityIndicator,
   Image,
   FlatList,
@@ -55,6 +58,8 @@ type FeedPost = {
   user_id: string;
   activity_id: string | null;
   content: string;
+  media_url: string | null;
+  media_type: 'image' | 'video' | null;
   created_at: string;
   username: string;
   display_name: string;
@@ -68,6 +73,14 @@ type FeedPost = {
   likes_count: number;
   comments_count: number;
   liked_by_me: boolean;
+};
+
+type SelectedPostMedia = {
+  uri: string;
+  name: string;
+  type: string;
+  fileSize?: number;
+  mediaKind: 'image' | 'video';
 };
 
 type Comment = {
@@ -118,6 +131,7 @@ const SocialFeedScreen = () => {
   const loadingMoreRef = useRef(false);
   const FEED_PAGE_SIZE = 20;
   const [newPost, setNewPost] = useState('');
+  const [selectedMedia, setSelectedMedia] = useState<SelectedPostMedia | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [posting, setPosting] = useState(false);
@@ -232,29 +246,89 @@ const SocialFeedScreen = () => {
     }, [loadFeed]),
   );
 
+  const choosePostMedia = async () => {
+    if (posting) return;
+
+    const picker = await launchImageLibrary({
+      mediaType: 'mixed',
+      selectionLimit: 1,
+      videoQuality: 'medium',
+      includeExtra: false,
+    });
+
+    if (picker.didCancel) return;
+
+    const asset = picker.assets?.[0];
+    if (!asset?.uri) {
+      alert('Media unavailable', 'Please select another image or video.');
+      return;
+    }
+
+    const kind = asset.type?.startsWith('video/') ? 'video' : 'image';
+    const maxSize = kind === 'video' ? 50 : 10;
+
+    if (asset.fileSize && asset.fileSize > maxSize * 1024 * 1024) {
+      alert('Media too large', `Choose a ${kind} smaller than ${maxSize} MB.`);
+      return;
+    }
+
+    if (
+      !['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/quicktime']
+        .includes(asset.type || '')
+    ) {
+      alert('Unsupported media', 'Use JPEG, PNG, WebP, MP4, or MOV.');
+      return;
+    }
+
+    setSelectedMedia({
+      uri: asset.uri,
+      name: asset.fileName || `${kind}.${asset.type?.split('/')[1] || (kind === 'video' ? 'mp4' : 'jpg')}`,
+      type: asset.type || (kind === 'video' ? 'video/mp4' : 'image/jpeg'),
+      fileSize: asset.fileSize,
+      mediaKind: kind,
+    });
+  };
+
   const createPost = async () => {
     const content = newPost.trim();
-    if (!userId || !content || posting) return;
+    if ((!content && !selectedMedia) || !userId || posting) return;
 
     try {
       setPosting(true);
       setError(null);
 
+      let body: any;
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${token}`,
+      };
+
+      if (selectedMedia) {
+        const formData = new FormData();
+        formData.append('content', content);
+        formData.append('media', {
+          uri: selectedMedia.uri,
+          name: selectedMedia.name,
+          type: selectedMedia.type,
+        } as any);
+        body = formData;
+      } else {
+        headers['Content-Type'] = 'application/json';
+        body = JSON.stringify({ userId, content });
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/posts`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ userId, content }),
+        headers,
+        body,
       });
 
       const data = (await response.json()) as { error?: string };
       if (!response.ok) {
-        throw new Error(data.error ?? 'Failed to create post');
+        throw new Error(data.error || 'Failed to create post');
       }
 
       setNewPost('');
+      setSelectedMedia(null);
       await loadFeed();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create post');
@@ -611,6 +685,41 @@ const SocialFeedScreen = () => {
           !!item.content && <Text style={styles.content}>{item.content}</Text>
         )}
 
+        {item.media_url && item.media_type === 'image' && (
+          <Image
+            source={{ uri: item.media_url }}
+            resizeMode="cover"
+            style={{
+              width: '100%',
+              height: 280,
+              borderRadius: 14,
+              marginTop: 12,
+              backgroundColor: COLORS.surfaceLight,
+            }}
+          />
+        )}
+        {item.media_url && item.media_type === 'video' && (
+          <View
+            style={{
+              marginTop: 12,
+              height: 240,
+              borderRadius: 14,
+              overflow: 'hidden',
+              backgroundColor: '#000',
+            }}>
+            <Video
+              source={{ uri: item.media_url }}
+              style={{ width: '100%', height: '100%' }}
+              controls
+              paused
+              resizeMode="contain"
+              playInBackground={false}
+              playWhenInactive={false}
+              onError={() => setError('Unable to play this video.')}
+            />
+          </View>
+        )}
+
         {/* Activity Stats Card */}
         {item.activity_id && item.activity_type && (
           <View style={styles.activityCard}>
@@ -833,15 +942,59 @@ const SocialFeedScreen = () => {
                 />
               </View>
 
+              {selectedMedia && (
+                <View style={{
+                  marginTop: 12,
+                  padding: 10,
+                  borderRadius: 12,
+                  backgroundColor: COLORS.surfaceLight,
+                }}>
+                  {selectedMedia.mediaKind === 'image' ? (
+                    <Image
+                      source={{ uri: selectedMedia.uri }}
+                      resizeMode="cover"
+                      style={{ width: '100%', height: 180, borderRadius: 10 }}
+                    />
+                  ) : (
+                    <Text style={{ color: COLORS.accent, padding: 14, fontWeight: '800' }}>
+                      VIDEO SELECTED: {selectedMedia.name}
+                    </Text>
+                  )}
+                  <TouchableOpacity
+                    onPress={() => setSelectedMedia(null)}
+                    style={{ paddingTop: 10, alignSelf: 'flex-end' }}>
+                    <Text style={{ color: COLORS.danger, fontWeight: '800' }}>
+                      REMOVE MEDIA
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              <TouchableOpacity
+                onPress={choosePostMedia}
+                disabled={posting}
+                style={{
+                  alignSelf: 'flex-start',
+                  marginTop: 10,
+                  paddingVertical: 9,
+                  paddingHorizontal: 12,
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: COLORS.border,
+                }}>
+                <Text style={{ color: COLORS.accent, fontWeight: '800' }}>
+                  + Attach photo or video
+                </Text>
+              </TouchableOpacity>
+
               <View style={styles.createFooter}>
                 <Text style={styles.characterCount}>{newPost.length}/500</Text>
                 <TouchableOpacity
                   style={[
                     styles.postButton,
-                    !newPost.trim() && styles.postButtonDisabled,
+                    !newPost.trim() && !selectedMedia && styles.postButtonDisabled,
                   ]}
                   onPress={createPost}
-                  disabled={posting || !newPost.trim()}>
+                  disabled={posting || (!newPost.trim() && !selectedMedia)}>
                   {posting ? (
                     <ActivityIndicator size="small" color={COLORS.background} />
                   ) : (

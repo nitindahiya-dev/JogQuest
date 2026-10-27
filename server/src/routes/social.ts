@@ -202,6 +202,8 @@ router.get('/api/feed/:userId', requireAuth, async (req, res) => {
         p.user_id,
         p.activity_id,
         p.content,
+        p.media_url,
+        p.media_type,
         p.created_at,
 
         u.username,
