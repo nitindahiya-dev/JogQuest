@@ -5,6 +5,9 @@ import {
   StyleSheet,
   Pressable,
   Animated,
+  BackHandler,
+  Platform,
+  ToastAndroid,
 } from 'react-native';
 
 import {
@@ -406,6 +409,35 @@ const RootNavigator = () => {
 
 // App navigator
 const AppNavigator = () => {
+  const lastBackPress = useRef(0);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') {
+      return;
+    }
+
+    const subscription = BackHandler.addEventListener(
+      'hardwareBackPress',
+      () => {
+        const now = Date.now();
+
+        if (now - lastBackPress.current < 2000) {
+          BackHandler.exitApp();
+          return true;
+        }
+
+        lastBackPress.current = now;
+        ToastAndroid.show(
+          'Press back again to exit',
+          ToastAndroid.SHORT,
+        );
+        return true;
+      },
+    );
+
+    return () => subscription.remove();
+  }, []);
+
   return (
     <SafeAreaProvider>
       <AuthProvider>
