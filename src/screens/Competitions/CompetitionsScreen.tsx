@@ -547,7 +547,7 @@ const CompetitionsScreen = () => {
                 <Text style={styles.errorText}>{error}</Text>
 
                 <TouchableOpacity
-                  onPress={loadCompetitions}
+                  onPress={() => loadCompetitions()}
                   style={styles.retryButton}
                   activeOpacity={0.85}
                 >

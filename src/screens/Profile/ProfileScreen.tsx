@@ -187,7 +187,7 @@ const ProfileScreen = () => {
           </TouchableOpacity>
           <View style={styles.rankBadge}>
             <Text style={styles.rankBadgeLabel}>RANK</Text>
-            <Text style={styles.rankBadgeValue}>#{profile.rank || 3}</Text>
+            <Text style={styles.rankBadgeValue}>#{profile.rank ?? 0}</Text>
           </View>
         </View>
         <Text style={styles.name}>{profile.display_name}</Text>
@@ -204,7 +204,7 @@ const ProfileScreen = () => {
           <Text style={styles.territoryLabel}>TOTAL TERRITORY</Text>
           <View style={styles.territoryValueRow}>
             <Text style={styles.territoryValue}>
-              {Number(profile.territory_km2 || 0.001).toFixed(3)}
+              {Number(profile.territory_km2 ?? 0).toFixed(3)}
             </Text>
             <Text style={styles.territoryUnit}>km²</Text>
           </View>
@@ -218,15 +218,15 @@ const ProfileScreen = () => {
       <Text style={styles.sectionLabel}>QUEST STATS</Text>
       <View style={styles.statsGrid}>
         <View style={styles.statBox}>
-          <Text style={styles.statValue}>{profile.activities_count || 5}</Text>
+          <Text style={styles.statValue}>{profile.activities_count ?? 0}</Text>
           <Text style={styles.statLabel}>ACTIVITIES</Text>
         </View>
         <View style={styles.statBox}>
-          <Text style={styles.statValue}>{Number(profile.total_distance_km || 2.35).toFixed(1)}</Text>
+          <Text style={styles.statValue}>{Number(profile.total_distance_km ?? 0).toFixed(1)}</Text>
           <Text style={styles.statLabel}>TOTAL KM</Text>
         </View>
         <View style={styles.statBox}>
-          <Text style={styles.statValue}>{profile.territories_captured || 1}</Text>
+          <Text style={styles.statValue}>{profile.territories_captured ?? 0}</Text>
           <Text style={styles.statLabel}>CAPTURED</Text>
         </View>
         <View style={styles.statBox}>
