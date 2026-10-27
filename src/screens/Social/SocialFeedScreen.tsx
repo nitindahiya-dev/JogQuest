@@ -6,6 +6,7 @@ import React, {
 
 import {
   ActivityIndicator,
+  Image,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -31,15 +32,23 @@ import type {
 import type {
   NativeStackNavigationProp,
 } from '@react-navigation/native-stack';
-import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type {
   MainTabParamList,
   RootStackParamList,
 } from '../../navigation/types';
 
-import {useAuth} from '../../auth/AuthContext';
-import {useJogQuestAlert} from '../../components/JogQuestAlert';
+import { useAuth } from '../../auth/AuthContext';
+import { useJogQuestAlert } from '../../components/JogQuestAlert';
+import {
+  HeartIcon,
+  CommentIcon,
+  ShareIcon,
+  SendIcon,
+  EditIcon,
+  TrashIcon,
+} from '../../components/Icons';
 
 type FeedPost = {
   id: string;
@@ -77,18 +86,16 @@ type Navigation = CompositeNavigationProp<
   NativeStackNavigationProp<RootStackParamList>
 >;
 
-
-
 // ─── Design tokens ───
 const COLORS = {
   background: '#0A0A0A',
-  surface: 'rgba(18, 18, 18, 0.95)',
-  surfaceLight: '#171717',
+  surface: '#141414',
+  surfaceLight: '#1C1C1E',
   accent: '#D4FF00',
   text: '#FFFFFF',
   textSecondary: '#A0A0A0',
   textMuted: '#666666',
-  border: 'rgba(255,255,255,0.10)',
+  border: 'rgba(255,255,255,0.08)',
   danger: '#FF4D4D',
 };
 
@@ -99,7 +106,7 @@ const SPACING = {
 };
 
 const SocialFeedScreen = () => {
-  const {user, token} = useAuth();
+  const { user, token } = useAuth();
   const userId = user?.id;
   const navigation = useNavigation<Navigation>();
   const insets = useSafeAreaInsets();
@@ -138,7 +145,7 @@ const SocialFeedScreen = () => {
           },
         },
       );
-      const data = (await response.json()) as FeedPost[] | {error?: string};
+      const data = (await response.json()) as FeedPost[] | { error?: string };
 
       if (!response.ok) {
         throw new Error(
@@ -175,10 +182,10 @@ const SocialFeedScreen = () => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({userId, content}),
+        body: JSON.stringify({ userId, content }),
       });
 
-      const data = (await response.json()) as {error?: string};
+      const data = (await response.json()) as { error?: string };
       if (!response.ok) {
         throw new Error(data.error ?? 'Failed to create post');
       }
@@ -204,11 +211,11 @@ const SocialFeedScreen = () => {
         `${API_BASE_URL}/api/posts/${post.id}/like/${userId}`,
         {
           method,
-          headers: {Authorization: `Bearer ${token}`},
+          headers: { Authorization: `Bearer ${token}` },
         },
       );
 
-      const data = (await response.json()) as {error?: string};
+      const data = (await response.json()) as { error?: string };
       if (!response.ok) {
         throw new Error(data.error ?? 'Failed to update like');
       }
@@ -236,7 +243,7 @@ const SocialFeedScreen = () => {
       const response = await fetch(
         `${API_BASE_URL}/api/posts/${postId}/comments`,
       );
-      const data = (await response.json()) as Comment[] | {error?: string};
+      const data = (await response.json()) as Comment[] | { error?: string };
 
       if (!response.ok) {
         throw new Error(
@@ -277,11 +284,11 @@ const SocialFeedScreen = () => {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({userId, comment: value}),
+          body: JSON.stringify({ userId, comment: value }),
         },
       );
 
-      const data = (await response.json()) as Comment | {error?: string};
+      const data = (await response.json()) as Comment | { error?: string };
       if (!response.ok) {
         throw new Error(
           'error' in data && data.error ? data.error : 'Failed to create comment',
@@ -294,7 +301,7 @@ const SocialFeedScreen = () => {
       setPosts(current =>
         current.map(item =>
           item.id === postId
-            ? {...item, comments_count: item.comments_count + 1}
+            ? { ...item, comments_count: item.comments_count + 1 }
             : item,
         ),
       );
@@ -324,17 +331,14 @@ const SocialFeedScreen = () => {
       setSavingEdit(true);
       setError(null);
 
-      const response = await fetch(
-        `${API_BASE_URL}/api/posts/${post.id}`,
-        {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({content}),
+      const response = await fetch(`${API_BASE_URL}/api/posts/${post.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
         },
-      );
+        body: JSON.stringify({ content }),
+      });
 
       if (!response.ok) {
         const rawData: unknown = await response.json().catch(() => null);
@@ -350,7 +354,7 @@ const SocialFeedScreen = () => {
 
       setPosts(current =>
         current.map(item =>
-          item.id === post.id ? {...item, content} : item,
+          item.id === post.id ? { ...item, content } : item,
         ),
       );
       setEditingPostId(null);
@@ -369,10 +373,12 @@ const SocialFeedScreen = () => {
       post.activity_type
         ? `${post.activity_type}: ${post.distance_km ?? 0} km`
         : '',
-    ].filter(Boolean).join('\\n\\n');
+    ]
+      .filter(Boolean)
+      .join('\n\n');
 
     try {
-      await Share.share({message});
+      await Share.share({ message });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not share post');
     }
@@ -383,7 +389,7 @@ const SocialFeedScreen = () => {
       'Delete post?',
       'This will permanently delete your post and its likes and comments.',
       [
-        {text: 'CANCEL', style: 'cancel'},
+        { text: 'CANCEL', style: 'cancel' },
         {
           text: 'DELETE',
           style: 'destructive',
@@ -393,13 +399,11 @@ const SocialFeedScreen = () => {
                 `${API_BASE_URL}/api/posts/${post.id}`,
                 {
                   method: 'DELETE',
-                  headers: {Authorization: `Bearer ${token}`},
+                  headers: { Authorization: `Bearer ${token}` },
                 },
               );
 
-              const rawData: unknown = await response
-                .json()
-                .catch(() => null);
+              const rawData: unknown = await response.json().catch(() => null);
 
               const errorMessage =
                 typeof rawData === 'object' &&
@@ -413,12 +417,10 @@ const SocialFeedScreen = () => {
                 throw new Error(errorMessage);
               }
 
-              setPosts(current =>
-                current.filter(item => item.id !== post.id),
-              );
+              setPosts(current => current.filter(item => item.id !== post.id));
 
               setComments(current => {
-                const next = {...current};
+                const next = { ...current };
                 delete next[post.id];
                 return next;
               });
@@ -429,9 +431,7 @@ const SocialFeedScreen = () => {
               }
             } catch (err) {
               setError(
-                err instanceof Error
-                  ? err.message
-                  : 'Failed to delete post',
+                err instanceof Error ? err.message : 'Failed to delete post',
               );
             }
           },
@@ -464,22 +464,31 @@ const SocialFeedScreen = () => {
     return `${minutes}:${String(seconds).padStart(2, '0')}`;
   };
 
-  const renderPost = ({item}: {item: FeedPost}) => {
+  const renderPost = ({ item }: { item: FeedPost }) => {
     const postComments = comments[item.id] ?? [];
     const showComments = activeCommentsPostId === item.id;
 
     return (
       <View style={styles.postCard}>
+        {/* Header */}
         <TouchableOpacity
           style={styles.userRow}
           activeOpacity={0.8}
           onPress={() =>
-            navigation.navigate('PublicProfile', {userId: item.user_id})
+            navigation.navigate('PublicProfile', { userId: item.user_id })
           }>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {item.display_name.slice(0, 1).toUpperCase()}
-            </Text>
+            {item.avatar_url ? (
+              <Image
+                source={{ uri: item.avatar_url }}
+                style={styles.avatarImage}
+                resizeMode="cover"
+              />
+            ) : (
+              <Text style={styles.avatarText}>
+                {item.display_name?.slice(0, 1)?.toUpperCase() || '?'}
+              </Text>
+            )}
           </View>
 
           <View style={styles.userInfo}>
@@ -490,6 +499,7 @@ const SocialFeedScreen = () => {
           <Text style={styles.timestamp}>{formatTime(item.created_at)}</Text>
         </TouchableOpacity>
 
+        {/* Content / Edit mode */}
         {editingPostId === item.id ? (
           <View>
             <TextInput
@@ -504,14 +514,6 @@ const SocialFeedScreen = () => {
             />
             <View style={styles.editActions}>
               <TouchableOpacity
-                style={styles.editSaveButton}
-                onPress={() => savePostEdit(item)}
-                disabled={savingEdit || !editContent.trim()}>
-                <Text style={styles.editSaveText}>
-                  {savingEdit ? 'SAVING...' : 'SAVE'}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
                 style={styles.editCancelButton}
                 onPress={() => {
                   setEditingPostId(null);
@@ -521,17 +523,22 @@ const SocialFeedScreen = () => {
                 disabled={savingEdit}>
                 <Text style={styles.editCancelText}>CANCEL</Text>
               </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.editSaveButton}
+                onPress={() => savePostEdit(item)}
+                disabled={savingEdit || !editContent.trim()}>
+                <Text style={styles.editSaveText}>
+                  {savingEdit ? 'SAVING...' : 'SAVE'}
+                </Text>
+              </TouchableOpacity>
             </View>
-            <Text style={styles.characterCount}>
-              {editContent.length}/500
-            </Text>
+            <Text style={styles.characterCount}>{editContent.length}/500</Text>
           </View>
         ) : (
-          !!item.content && (
-            <Text style={styles.content}>{item.content}</Text>
-          )
+          !!item.content && <Text style={styles.content}>{item.content}</Text>
         )}
 
+        {/* Activity Stats Card */}
         {item.activity_id && item.activity_type && (
           <View style={styles.activityCard}>
             <View style={styles.activityHeader}>
@@ -568,51 +575,59 @@ const SocialFeedScreen = () => {
           </View>
         )}
 
-        <View style={styles.actions}>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => toggleLike(item)}>
-            <Text
-              style={[
-                styles.actionText,
-                item.liked_by_me && styles.likedText,
-              ]}>
-              {item.liked_by_me ? '♥' : '♡'}  {item.likes_count}
-            </Text>
-          </TouchableOpacity>
+        {/* ─── Premium Action Bar ─── */}
+        <View style={styles.actionBar}>
+          <View style={styles.actionBarLeft}>
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => toggleLike(item)}>
+              <HeartIcon
+                color={item.liked_by_me ? COLORS.danger : COLORS.textSecondary}
+                fill={item.liked_by_me ? COLORS.danger : 'none'}
+                size={20}
+              />
+              <Text
+                style={[
+                  styles.actionText,
+                  item.liked_by_me && styles.likedText,
+                ]}>
+                {item.likes_count}
+              </Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => toggleComments(item.id)}>
-            <Text style={styles.actionText}>
-              💬  {item.comments_count}
-            </Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => toggleComments(item.id)}>
+              <CommentIcon color={COLORS.textSecondary} size={20} />
+              <Text style={styles.actionText}>{item.comments_count}</Text>
+            </TouchableOpacity>
+          </View>
 
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => sharePost(item)}>
-            <Text style={styles.actionText}>↗ Share</Text>
-          </TouchableOpacity>
+          <View style={styles.actionBarRight}>
+            <TouchableOpacity
+              style={styles.iconActionButton}
+              onPress={() => sharePost(item)}>
+              <ShareIcon color={COLORS.textSecondary} size={20} />
+            </TouchableOpacity>
 
-          {item.user_id === userId && (
-            <>
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => startEditingPost(item)}>
-                <Text style={styles.actionText}>Edit</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => deletePost(item)}>
-                <Text style={[styles.actionText, {color: COLORS.danger}]}>
-                  Delete
-                </Text>
-              </TouchableOpacity>
-            </>
-          )}
+            {item.user_id === userId && (
+              <>
+                <TouchableOpacity
+                  style={styles.iconActionButton}
+                  onPress={() => startEditingPost(item)}>
+                  <EditIcon color={COLORS.textSecondary} size={18} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.iconActionButton}
+                  onPress={() => deletePost(item)}>
+                  <TrashIcon color={COLORS.danger} size={18} />
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
         </View>
 
+        {/* Comments */}
         {showComments && (
           <View style={styles.commentsSection}>
             {postComments.length === 0 ? (
@@ -620,9 +635,7 @@ const SocialFeedScreen = () => {
             ) : (
               postComments.map(comment => (
                 <View key={comment.id} style={styles.commentRow}>
-                  <Text style={styles.commentName}>
-                    {comment.display_name}
-                  </Text>
+                  <Text style={styles.commentName}>{comment.display_name}</Text>
                   <Text style={styles.commentText}>{comment.comment}</Text>
                 </View>
               ))
@@ -690,27 +703,30 @@ const SocialFeedScreen = () => {
           <View>
             <View style={styles.header}>
               <Text style={styles.title}>COMMUNITY</Text>
-              <Text style={styles.subtitle}>
-                See what the squad is doing
-              </Text>
+              <Text style={styles.subtitle}>See what the squad is doing</Text>
             </View>
 
+            {/* Premium Composer with avatar */}
             <View style={styles.createCard}>
-              <TextInput
-                value={newPost}
-                onChangeText={setNewPost}
-                placeholder="Share an update..."
-                placeholderTextColor={COLORS.textMuted}
-                multiline
-                maxLength={500}
-                style={styles.postInput}
-              />
+              <View style={styles.createTop}>
+                <View style={styles.smallAvatar}>
+                  <Text style={styles.smallAvatarText}>
+                    {user?.display_name?.charAt(0).toUpperCase() || 'N'}
+                  </Text>
+                </View>
+                <TextInput
+                  value={newPost}
+                  onChangeText={setNewPost}
+                  placeholder="Share an update..."
+                  placeholderTextColor={COLORS.textMuted}
+                  multiline
+                  maxLength={500}
+                  style={styles.postInput}
+                />
+              </View>
 
               <View style={styles.createFooter}>
-                <Text style={styles.characterCount}>
-                  {newPost.length}/500
-                </Text>
-
+                <Text style={styles.characterCount}>{newPost.length}/500</Text>
                 <TouchableOpacity
                   style={[
                     styles.postButton,
@@ -721,7 +737,7 @@ const SocialFeedScreen = () => {
                   {posting ? (
                     <ActivityIndicator size="small" color={COLORS.background} />
                   ) : (
-                    <Text style={styles.postButtonText}>POST</Text>
+                    <SendIcon color={COLORS.background} size={18} />
                   )}
                 </TouchableOpacity>
               </View>
@@ -764,6 +780,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
   },
 
+  // Header
   header: {
     paddingBottom: 8,
   },
@@ -780,18 +797,39 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
   },
 
+  // Composer
   createCard: {
     backgroundColor: COLORS.surface,
-    borderRadius: 20,
+    borderRadius: 24,
     padding: SPACING.md,
     borderWidth: 1,
     borderColor: COLORS.border,
-    marginBottom: SPACING.md,
+    marginBottom: SPACING.lg,
+  },
+  createTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  smallAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    marginTop: 4,
+  },
+  smallAvatarText: {
+    color: COLORS.background,
+    fontSize: 16,
+    fontWeight: '900',
   },
   postInput: {
+    flex: 1,
     color: COLORS.text,
     fontSize: 15,
-    minHeight: 70,
+    minHeight: 60,
     textAlignVertical: 'top',
   },
   createFooter: {
@@ -809,22 +847,17 @@ const styles = StyleSheet.create({
   },
   postButton: {
     backgroundColor: COLORS.accent,
-    borderRadius: 14,
-    minWidth: 72,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    justifyContent: 'center',
   },
   postButtonDisabled: {
-    backgroundColor: '#2A2A2A',
-  },
-  postButtonText: {
-    color: COLORS.background,
-    fontSize: 12,
-    fontWeight: '900',
-    letterSpacing: 0.5,
+    backgroundColor: COLORS.surfaceLight,
   },
 
+  // Error
   errorBox: {
     backgroundColor: 'rgba(255,77,77,0.12)',
     borderWidth: 1,
@@ -838,17 +871,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
 
+  // Post Card
   postCard: {
     backgroundColor: COLORS.surface,
-    borderRadius: 22,
+    borderRadius: 24,
     padding: SPACING.lg,
-    marginBottom: 14,
+    marginBottom: SPACING.md,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
   userRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 12,
   },
   avatar: {
     width: 44,
@@ -857,6 +892,11 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.accent,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 22,
   },
   avatarText: {
     color: COLORS.background,
@@ -869,7 +909,7 @@ const styles = StyleSheet.create({
   },
   displayName: {
     color: COLORS.text,
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '800',
   },
   username: {
@@ -881,6 +921,15 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     fontSize: 11,
   },
+  content: {
+    color: COLORS.textSecondary,
+    fontSize: 15,
+    lineHeight: 22,
+    marginTop: 4,
+    marginBottom: 12,
+  },
+
+  // Edit mode
   editPostInput: {
     color: COLORS.text,
     backgroundColor: COLORS.surfaceLight,
@@ -890,7 +939,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     minHeight: 90,
     padding: 12,
-    marginTop: 14,
+    marginTop: 4,
     textAlignVertical: 'top',
   },
   editActions: {
@@ -922,18 +971,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  content: {
-    color: COLORS.text,
-    fontSize: 15,
-    lineHeight: 22,
-    marginTop: 14,
-  },
 
+  // Activity Card
   activityCard: {
     backgroundColor: COLORS.surfaceLight,
     borderRadius: 16,
     padding: 14,
-    marginTop: 14,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
@@ -945,7 +989,7 @@ const styles = StyleSheet.create({
   },
   activityType: {
     color: COLORS.accent,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '900',
     letterSpacing: 0.5,
   },
@@ -980,27 +1024,41 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.border,
   },
 
-  actions: {
+  // ─── Premium Action Bar ───
+  actionBar: {
     flexDirection: 'row',
-    marginTop: 16,
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingTop: 14,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
   },
+  actionBarLeft: {
+    flexDirection: 'row',
+    gap: 20,
+  },
+  actionBarRight: {
+    flexDirection: 'row',
+    gap: 16,
+  },
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 28,
+    gap: 6,
   },
   actionText: {
     color: COLORS.textSecondary,
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '700',
   },
   likedText: {
     color: COLORS.danger,
   },
+  iconActionButton: {
+    padding: 4,
+  },
 
+  // Comments
   commentsSection: {
     marginTop: 14,
     paddingTop: 14,
@@ -1055,6 +1113,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
 
+  // Empty state
   empty: {
     alignItems: 'center',
     justifyContent: 'center',

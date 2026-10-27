@@ -2,6 +2,7 @@ import { API_BASE_URL } from '../../config/api';
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -32,6 +33,8 @@ const PublicProfileScreen = () => {
   const [loading, setLoading] = useState(true);
   const [followLoading, setFollowLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [avatarRefreshKey, setAvatarRefreshKey] = useState(Date.now());
+  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
 
   const loadProfile = useCallback(async () => {
     if (!viewerId) {
@@ -53,6 +56,8 @@ const PublicProfileScreen = () => {
         throw new Error(data.error ?? 'Failed to load');
       }
 
+      setAvatarLoadFailed(false);
+      setAvatarRefreshKey(Date.now());
       setProfile(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed');
@@ -68,12 +73,7 @@ const PublicProfileScreen = () => {
   );
 
   const toggleFollow = async () => {
-    if (
-      !viewerId ||
-      !profile ||
-      profile.id === viewerId ||
-      followLoading
-    ) {
+    if (!viewerId || !profile || profile.id === viewerId || followLoading) {
       return;
     }
 
@@ -81,7 +81,6 @@ const PublicProfileScreen = () => {
       setFollowLoading(true);
 
       const method = profile.followed_by_viewer ? 'DELETE' : 'POST';
-
       const response = await fetch(
         `${API_BASE_URL}/api/users/${viewerId}/follow/${profile.id}`,
         {
@@ -92,17 +91,25 @@ const PublicProfileScreen = () => {
         },
       );
 
+      const result = (await response.json().catch(() => ({}))) as {error?: string};
+
       if (!response.ok) {
-        throw new Error('Failed to update follow status.');
+        throw new Error(result.error || 'Failed to update follow status.');
       }
 
-      setProfile((current: any) => ({
-        ...current,
-        followed_by_viewer: !current.followed_by_viewer,
-        followers_count: current.followed_by_viewer
-          ? current.followers_count - 1
-          : current.followers_count + 1,
-      }));
+      // The API is the source of truth for follow status and counts.
+      const profileResponse = await fetch(
+        `${API_BASE_URL}/api/users/${profile.id}/social-profile?viewerId=${viewerId}`,
+      );
+      const updatedProfile = (await profileResponse.json()) as any;
+
+      if (!profileResponse.ok) {
+        throw new Error(
+          updatedProfile.error || 'Follow updated, but profile refresh failed.',
+        );
+      }
+
+      setProfile(updatedProfile);
     } catch (e) {
       console.error('Failed to update follow status:', e);
     } finally {
@@ -139,6 +146,10 @@ const PublicProfileScreen = () => {
   }
 
   const isOwnProfile = viewerId === profile.id;
+  const avatarUri =
+    profile.avatar_url && !avatarLoadFailed
+      ? `${profile.avatar_url}${profile.avatar_url.includes('?') ? '&' : '?'}v=${avatarRefreshKey}`
+      : null;
 
   return (
     <ScrollView
@@ -153,9 +164,19 @@ const PublicProfileScreen = () => {
     >
       <View style={styles.profileHeader}>
         <View style={styles.avatarContainer}>
-          <Text style={styles.avatarText}>
-            {profile.display_name.charAt(0).toUpperCase()}
-          </Text>
+          {avatarUri ? (
+            <Image
+              key={avatarUri}
+              source={{uri: avatarUri}}
+              style={styles.avatarImage}
+              onError={() => setAvatarLoadFailed(true)}
+              resizeMode="cover"
+            />
+          ) : (
+            <Text style={styles.avatarText}>
+              {profile.display_name?.charAt(0)?.toUpperCase() || '?'}
+            </Text>
+          )}
         </View>
 
         <Text style={styles.name}>{profile.display_name}</Text>
@@ -338,6 +359,12 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
 
+  avatarImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+  },
+
   name: {
     ...TYPOGRAPHY.h1,
     fontSize: 26,
@@ -486,7 +513,8 @@ const styles = StyleSheet.create({
     ...TYPOGRAPHY.h3,
     fontSize: 15,
     color: COLORS.accent,
-    flexShrink: 0,
+    flexShrink: 0, 
+    textAlign: 'right',
   },
 });
 
