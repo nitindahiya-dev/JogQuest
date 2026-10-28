@@ -24,6 +24,14 @@ type Message = {
   created_at: string;
 };
 
+type ChatApiResponse = {
+  error?: string;
+  messages?: Message[];
+  blockedByMe?: boolean;
+  blockedMe?: boolean;
+  message?: Message;
+};
+
 const ChatScreen = () => {
   const { user, token } = useAuth();
   const alert = useJogQuestAlert();
@@ -60,7 +68,7 @@ const ChatScreen = () => {
         `${API_BASE_URL}/api/messages/conversations/${conversationId}/messages`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
-      const data = await response.json().catch(() => ({}));
+      const data = (await response.json().catch(() => ({}))) as ChatApiResponse;
 
       if (!response.ok) {
         throw new Error(data.error || 'Could not load messages.');
@@ -84,7 +92,7 @@ const ChatScreen = () => {
         `${API_BASE_URL}/api/messages/blocks/${otherUserId}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
-      const data = await response.json().catch(() => ({}));
+      const data = (await response.json().catch(() => ({}))) as ChatApiResponse;
 
       if (!response.ok) {
         throw new Error(data.error || 'Could not load block status.');
@@ -135,7 +143,7 @@ const ChatScreen = () => {
                   headers: { Authorization: `Bearer ${token}` },
                 },
               );
-              const data = await response.json().catch(() => ({}));
+              const data = (await response.json().catch(() => ({}))) as ChatApiResponse;
 
               if (!response.ok) {
                 throw new Error(data.error || `Could not ${action} runner.`);
@@ -191,16 +199,17 @@ const ChatScreen = () => {
           body: JSON.stringify({ body }),
         },
       );
-      const data = await response.json().catch(() => ({}));
+      const data = (await response.json().catch(() => ({}))) as ChatApiResponse;
 
       if (!response.ok) {
         throw new Error(data.error || 'Could not send message.');
       }
 
-      if (data.message) {
+      const sentMessage = data.message;
+      if (sentMessage) {
         setMessages(current => {
-          if (current.some(message => message.id === data.message.id)) return current;
-          return [...current, data.message];
+          if (current.some(message => message.id === sentMessage.id)) return current;
+          return [...current, sentMessage];
         });
       }
       setDraft('');

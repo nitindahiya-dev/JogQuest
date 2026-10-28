@@ -48,7 +48,7 @@ const MessagesScreen = () => {
         `${API_BASE_URL}/api/messages/conversations`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
-      const data = await response.json().catch(() => ({}));
+      const data = (await response.json().catch(() => ({}))) as { error?: string; conversations?: Conversation[] };
 
       if (!response.ok) {
         throw new Error(data.error || 'Could not load conversations.');

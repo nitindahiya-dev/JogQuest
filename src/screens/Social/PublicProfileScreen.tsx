@@ -84,7 +84,7 @@ const PublicProfileScreen = () => {
         },
         body: JSON.stringify({ userId: profile.id }),
       });
-      const data = await response.json().catch(() => ({}));
+      const data = (await response.json().catch(() => ({}))) as { error?: string; conversationId?: string };
 
       if (!response.ok || !data.conversationId) {
         throw new Error(data.error || 'Could not open conversation.');

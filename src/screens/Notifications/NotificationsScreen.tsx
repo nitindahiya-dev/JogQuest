@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../auth/AuthContext';
 import { COLORS, SPACING, TYPOGRAPHY, SHADOWS } from '../../theme';
@@ -18,6 +18,7 @@ import { COLORS, SPACING, TYPOGRAPHY, SHADOWS } from '../../theme';
 
 const NotificationsScreen = () => {
   const { user, token } = useAuth();
+  const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
 
   const userId = user?.id;
@@ -101,6 +102,41 @@ const NotificationsScreen = () => {
     }
   };
 
+  const handleNotificationPress = async (item: any) => {
+    if (!item.read_at && userId) {
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/api/notifications/${item.id}/read`,
+          {
+            method: 'PATCH',
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
+        );
+
+        if (response.ok) {
+          setNotifications(prev =>
+            prev.map(notification =>
+              notification.id === item.id
+                ? { ...notification, read_at: new Date().toISOString() }
+                : notification,
+            ),
+          );
+          setUnreadCount(count => Math.max(0, count - 1));
+        }
+      } catch (error) {
+        console.error('Failed to mark notification as read:', error);
+      }
+    }
+
+    if (item.competition_id) {
+      navigation.navigate('CompetitionDetails', {
+        competitionId: item.competition_id,
+      });
+    }
+  };
+
   if (loading) {
     return (
       <View
@@ -152,7 +188,10 @@ const NotificationsScreen = () => {
           />
         }
         renderItem={({ item }) => (
-          <View
+          <TouchableOpacity
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            onPress={() => handleNotificationPress(item)}
             style={[
               styles.card,
               !item.read_at && styles.unreadCard,
@@ -177,7 +216,7 @@ const NotificationsScreen = () => {
                 {new Date(item.created_at).toLocaleString()}
               </Text>
             </View>
-          </View>
+          </TouchableOpacity>
         )}
         ListEmptyComponent={
           <View style={styles.empty}>
