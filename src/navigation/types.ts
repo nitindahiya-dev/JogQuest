@@ -41,6 +41,14 @@ export type RootStackParamList = {
 
   ActivityHistory: undefined;
   Notifications: undefined;
+  Messages: undefined;
+  Chat: {
+    conversationId: string;
+    otherUserId: string;
+    otherUsername: string;
+    otherDisplayName: string;
+    otherAvatarUrl?: string | null;
+  };
 
   PublicProfile: {
     userId: string;

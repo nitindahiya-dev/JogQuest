@@ -124,9 +124,12 @@ const ClubDetailsScreen = () => {
         membershipResponse,
       ] = await Promise.all([
         fetch(`${API_BASE_URL}/api/clubs/${clubId}`),
-        fetch(`${API_BASE_URL}/api/clubs/${clubId}/members`),
+        fetch(`${API_BASE_URL}/api/clubs/${clubId}/members`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        }),
         fetch(
           `${API_BASE_URL}/api/clubs/${clubId}/membership/${userId}`,
+          { headers: token ? { Authorization: `Bearer ${token}` } : {} },
         ),
       ]);
 
@@ -151,14 +154,6 @@ const ClubDetailsScreen = () => {
         );
       }
 
-      if (!membersResponse.ok) {
-        throw new Error(
-          'error' in membersData && membersData.error
-            ? membersData.error
-            : 'Failed to load members',
-        );
-      }
-
       if (!membershipResponse.ok) {
         throw new Error(
           membershipData.error ?? 'Failed to load membership',
@@ -167,7 +162,11 @@ const ClubDetailsScreen = () => {
 
       const loadedClub = clubData as Club;
       setClub(loadedClub);
-      setMembers(membersData as Member[]);
+      setMembers(
+        membersResponse.ok && Array.isArray(membersData)
+          ? membersData as Member[]
+          : [],
+      );
       setJoined(membershipData.joined ?? false);
 
       if (!loadedClub.is_public && token && userId) {

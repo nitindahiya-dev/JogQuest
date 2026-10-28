@@ -72,6 +72,36 @@ const PublicProfileScreen = () => {
     }, [loadProfile]),
   );
 
+  const startMessage = async () => {
+    if (!token || !profile?.id || profile.id === viewerId) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/messages/conversations`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ recipientId: profile.id }),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || !data.conversationId) {
+        throw new Error(data.error || 'Could not open conversation.');
+      }
+
+      navigation.navigate('Chat', {
+        conversationId: data.conversationId,
+        otherUserId: profile.id,
+        otherUsername: profile.username || '',
+        otherDisplayName: profile.display_name || profile.username || 'Runner',
+        otherAvatarUrl: profile.avatar_url || null,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not open conversation.');
+    }
+  };
+
   const toggleFollow = async () => {
     if (!viewerId || !profile || profile.id === viewerId || followLoading) {
       return;
@@ -191,6 +221,16 @@ const PublicProfileScreen = () => {
           </Text>
         </View>
       </View>
+
+      {!isOwnProfile && (
+        <TouchableOpacity
+          style={styles.messageBtn}
+          onPress={startMessage}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.messageBtnText}>MESSAGE</Text>
+        </TouchableOpacity>
+      )}
 
       {!isOwnProfile && (
         <TouchableOpacity
@@ -388,6 +428,22 @@ const styles = StyleSheet.create({
   levelText: {
     ...TYPOGRAPHY.label,
     color: COLORS.accent,
+  },
+
+  messageBtn: {
+    backgroundColor: COLORS.surface,
+    paddingVertical: SPACING.lg,
+    borderRadius: 20,
+    alignItems: 'center',
+    marginBottom: SPACING.sm,
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+  },
+
+  messageBtnText: {
+    ...TYPOGRAPHY.label,
+    color: COLORS.accent,
+    fontSize: 13,
   },
 
   followBtn: {

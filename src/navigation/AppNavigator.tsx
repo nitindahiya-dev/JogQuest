@@ -46,6 +46,8 @@ import RoutePlannerScreen from '../screens/RoutePlanner/RoutePlannerScreen';
 import TerritoryDetailsScreen from '../screens/Territory/TerritoryDetailsScreen';
 import ActivityHistoryScreen from '../screens/History/ActivityHistoryScreen';
 import NotificationsScreen from '../screens/Notifications/NotificationsScreen';
+import MessagesScreen from '../screens/Messages/MessagesScreen';
+import ChatScreen from '../screens/Messages/ChatScreen';
 import PublicProfileScreen from '../screens/Social/PublicProfileScreen';
 import FollowListScreen from '../screens/Social/FollowListScreen';
 import ClubsScreen from '../screens/Clubs/ClubsScreen';
@@ -311,6 +313,19 @@ const RootNavigator = () => {
             name="Notifications"
             component={NotificationsScreen}
             options={{ title: 'Notifications' }}
+          />
+          <Stack.Screen
+            name="Messages"
+            component={MessagesScreen}
+            options={{ title: 'Messages' }}
+          />
+
+          <Stack.Screen
+            name="Chat"
+            component={ChatScreen}
+            options={({ route }) => ({
+              title: route.params.otherDisplayName || route.params.otherUsername || 'Chat',
+            })}
           />
 
           <Stack.Screen

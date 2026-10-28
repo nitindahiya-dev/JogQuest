@@ -11,6 +11,7 @@ import { registerClubsRoutes } from './clubs.js';
 import { registerLeaderboardRoutes } from './leaderboard.js';
 import { registerRoutesRoutes } from './routes.js';
 import { registerDevicesRoutes } from './devices.js';
+import { registerMessagingRoutes } from './messaging.js';
 
 type RouteContext = Record<string, any> & {
   pool: typeof import('../db.js').pool;
@@ -33,4 +34,5 @@ export function registerRoutes<T extends RouteContext>(
   registerLeaderboardRoutes(app, context);
   registerRoutesRoutes(app, context);
   registerDevicesRoutes(app, context);
+  registerMessagingRoutes(app, context);
 }

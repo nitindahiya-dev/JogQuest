@@ -242,6 +242,14 @@ const ProfileScreen = () => {
 
       {/* Secondary Actions Grid */}
       <View style={styles.actionGrid}>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => navigation.getParent()?.navigate('Messages')}
+          accessibilityRole="button"
+          accessibilityLabel="Open messages inbox"
+        >
+          <Text style={styles.actionText}>✉ MESSAGES</Text>
+        </TouchableOpacity>
         <TouchableOpacity style={styles.actionButton} onPress={() => navigation.getParent()?.navigate('Clubs')}>
           <UsersIcon color={COLORS.text} size={22} />
           <Text style={styles.actionText}>CLUBS</Text>

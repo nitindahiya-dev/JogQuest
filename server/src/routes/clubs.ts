@@ -301,9 +301,39 @@ router.get(
   '/api/clubs/:clubId/members',
   async (req, res) => {
     try {
-      const {
-        clubId,
-      } = req.params;
+      const { clubId } = req.params;
+
+      const clubResult = await query<{ is_public: boolean; creator_id: string }>(
+        `SELECT is_public, creator_id FROM clubs WHERE id = $1`,
+        [clubId],
+      );
+
+      if (clubResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Club not found' });
+      }
+
+      const club = clubResult.rows[0];
+
+      if (!club.is_public) {
+        const userId = res.locals.authenticatedUserId as string | undefined;
+
+        if (!userId) {
+          return res.status(401).json({ error: 'Authentication required' });
+        }
+
+        if (userId !== club.creator_id) {
+          const membershipResult = await query(
+            `SELECT 1 FROM club_members WHERE club_id = $1 AND user_id = $2`,
+            [clubId, userId],
+          );
+
+          if (membershipResult.rows.length === 0) {
+            return res.status(403).json({
+              error: 'Only private-club members can view the member list',
+            });
+          }
+        }
+      }
 
       const result = await query(
         `
@@ -313,16 +343,10 @@ router.get(
           u.display_name,
           u.avatar_url,
           cm.joined_at
-
         FROM club_members cm
-
-        JOIN users u
-          ON u.id = cm.user_id
-
+        JOIN users u ON u.id = cm.user_id
         WHERE cm.club_id = $1
-
-        ORDER BY
-          cm.joined_at ASC
+        ORDER BY cm.joined_at ASC
         `,
         [clubId],
       );
@@ -330,11 +354,7 @@ router.get(
       res.json(result.rows);
     } catch (error) {
       console.error(error);
-
-      res.status(500).json({
-        error:
-          'Failed to fetch club members',
-      });
+      res.status(500).json({ error: 'Failed to fetch club members' });
     }
   },
 );
@@ -468,12 +488,17 @@ router.delete(
 
 router.get(
   '/api/clubs/:clubId/membership/:userId',
+  requireAuth,
   async (req, res) => {
     try {
-      const {
-        clubId,
-        userId,
-      } = req.params;
+      const { clubId, userId } = req.params;
+      const authenticatedUserId = res.locals.authenticatedUserId as string;
+
+      if (userId !== authenticatedUserId) {
+        return res.status(403).json({
+          error: 'You can only check your own membership status',
+        });
+      }
 
       const result = await query(
         `
@@ -484,23 +509,15 @@ router.get(
             AND user_id = $2
         ) AS joined
         `,
-        [
-          clubId,
-          userId,
-        ],
+        [clubId, authenticatedUserId],
       );
 
       res.json({
-        joined:
-          result.rows[0]?.joined ?? false,
+        joined: result.rows[0]?.joined ?? false,
       });
     } catch (error) {
       console.error(error);
-
-      res.status(500).json({
-        error:
-          'Failed to fetch membership status',
-      });
+      res.status(500).json({ error: 'Failed to fetch membership status' });
     }
   },
 );

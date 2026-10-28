@@ -11,6 +11,7 @@ import {
   RefreshControl,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -90,6 +91,7 @@ const ClubsScreen = () => {
   const [sortOption, setSortOption] = useState<SortOption>('newest');
   const [visibilityFilter, setVisibilityFilter] =
     useState<VisibilityFilter>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -138,7 +140,18 @@ const ClubsScreen = () => {
   );
 
   const displayedClubs = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
     const filtered = clubs.filter(club => {
+      if (
+        query &&
+        !club.name.toLowerCase().includes(query) &&
+        !(club.description || '').toLowerCase().includes(query)
+      ) {
+        return false;
+      }
+
+      if (activeTab === 'discover' && !club.is_public) return false;
       if (visibilityFilter === 'public') return club.is_public;
       if (visibilityFilter === 'private') return !club.is_public;
       return true;
@@ -163,7 +176,7 @@ const ClubsScreen = () => {
             new Date(a.created_at).getTime();
       }
     });
-  }, [clubs, sortOption, visibilityFilter]);
+  }, [activeTab, clubs, searchQuery, sortOption, visibilityFilter]);
 
   if (loading) {
     return (
@@ -204,6 +217,7 @@ const ClubsScreen = () => {
           style={[styles.tab, activeTab === 'discover' && styles.activeTab]}
           onPress={() => {
             setActiveTab('discover');
+            setVisibilityFilter('all');
             setLoading(true);
           }}
         >
@@ -216,6 +230,7 @@ const ClubsScreen = () => {
           style={[styles.tab, activeTab === 'mine' && styles.activeTab]}
           onPress={() => {
             setActiveTab('mine');
+            setVisibilityFilter('all');
             setLoading(true);
           }}
         >
@@ -224,6 +239,17 @@ const ClubsScreen = () => {
           </Text>
         </TouchableOpacity>
       </View>
+
+      <TextInput
+        accessibilityLabel="Search clubs by name or description"
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+        placeholder="Search clubs by name or description"
+        placeholderTextColor={COLORS.textMuted}
+        returnKeyType="search"
+        autoCapitalize="none"
+        style={styles.searchInput}
+      />
 
       <View style={styles.sortToolbar}>
         <TouchableOpacity
@@ -293,7 +319,9 @@ const ClubsScreen = () => {
             {([
               ['all', 'All clubs'],
               ['public', 'Public'],
-              ['private', 'Private'],
+              ...(activeTab === 'mine'
+                ? [['private', 'Private'] as [VisibilityFilter, string]]
+                : []),
             ] as [VisibilityFilter, string][]).map(([value, label]) => (
               <TouchableOpacity
                 key={value}
@@ -388,10 +416,16 @@ const ClubsScreen = () => {
         )}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>No Clubs Yet</Text>
+            <Text style={styles.emptyTitle}>
+              {searchQuery.trim() ? 'No Matching Clubs' : 'No Clubs Yet'}
+            </Text>
 
             <Text style={styles.emptyText}>
-              Create the first JogQuest club.
+              {searchQuery.trim()
+                ? 'Try another name or description.'
+                : activeTab === 'mine'
+                  ? 'Join a club or create your own.'
+                  : 'Create the first JogQuest club.'}
             </Text>
           </View>
         }
@@ -471,6 +505,18 @@ const styles = StyleSheet.create({
   activeTabText: { color: COLORS.background },
   cardAction: { alignItems: 'center', marginLeft: 8 },
   viewClub: { color: COLORS.accent, fontSize: 9, fontWeight: '900' },
+  searchInput: {
+    marginHorizontal: SPACING.md,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surfaceLight,
+    color: COLORS.text,
+    fontSize: 13,
+  },
   sortToolbar: {
     flexDirection: 'row',
     alignItems: 'center',
