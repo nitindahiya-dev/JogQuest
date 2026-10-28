@@ -197,7 +197,8 @@ router.get(
         GROUP BY
           c.id,
           u.username,
-          u.display_name
+          u.display_name,
+          nearby.distance_km
 
         ORDER BY
           CASE

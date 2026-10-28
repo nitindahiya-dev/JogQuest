@@ -82,7 +82,7 @@ const PublicProfileScreen = () => {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ recipientId: profile.id }),
+        body: JSON.stringify({ userId: profile.id }),
       });
       const data = await response.json().catch(() => ({}));
 

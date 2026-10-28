@@ -96,7 +96,7 @@ router.get(
 
         WHERE mine.user_id = $1
 
-        GROUP BY c.id
+        GROUP BY c.id, mine.joined_at
 
         ORDER BY
           mine.joined_at DESC

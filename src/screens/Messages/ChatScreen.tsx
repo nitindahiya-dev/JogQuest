@@ -261,7 +261,7 @@ const ChatScreen = () => {
           You blocked this runner. Unblock them to send messages.
         </Text>
       )}
-      {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>
+      {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
 
       {loading ? (
         <View style={styles.loading}>
