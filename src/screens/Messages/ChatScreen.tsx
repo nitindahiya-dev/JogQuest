@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -32,6 +33,7 @@ const ChatScreen = () => {
     otherUserId,
     otherUsername,
     otherDisplayName,
+    otherAvatarUrl,
   } = route.params;
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -219,13 +221,30 @@ const ChatScreen = () => {
     >
       <View style={styles.chatHeader}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>
-            {(otherDisplayName || otherUsername || 'R').charAt(0).toUpperCase()}
-          </Text>
+          {otherAvatarUrl ? (
+            <Image
+              source={{ uri: otherAvatarUrl }}
+              style={styles.avatarImage}
+              onError={() => {}}
+            />
+          ) : (
+            <Text style={styles.avatarText}>
+              {(otherDisplayName || otherUsername || 'R').charAt(0).toUpperCase()}
+            </Text>
+          )}
         </View>
         <View style={styles.headerText}>
-          <Text style={styles.name}>{otherDisplayName || otherUsername || 'Runner'}</Text>
-          <Text style={styles.username}>@{otherUsername || otherUserId}</Text>
+          <Text style={styles.name} numberOfLines={1}>
+            {otherDisplayName || otherUsername || 'Runner'}
+          </Text>
+          <Text style={styles.username} numberOfLines={1}>
+            @{otherUsername || otherUserId}
+          </Text>
+          <Text style={styles.chatStatus}>
+            {blockStatus?.blockedByMe || blockStatus?.blockedMe
+              ? 'Messaging unavailable'
+              : 'JogQuest runner'}
+          </Text>
         </View>
         <Pressable
           onPress={() => {
@@ -330,11 +349,30 @@ const ChatScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  chatHeader: { flexDirection: 'row', alignItems: 'center', padding: SPACING.md, borderBottomWidth: 1, borderBottomColor: COLORS.border, gap: 12 },
-  avatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: COLORS.accent, alignItems: 'center', justifyContent: 'center' },
+  chatHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: COLORS.background,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    gap: 10,
+  },
+  avatar: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    overflow: 'hidden',
+    backgroundColor: COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   avatarText: { color: COLORS.background, fontSize: 17, fontWeight: '900' },
+  avatarImage: { width: '100%', height: '100%', borderRadius: 24 },
+  chatStatus: { color: COLORS.accent, fontSize: 11, fontWeight: '600', marginTop: 3 },
   headerText: { flex: 1 },
-  name: { ...TYPOGRAPHY.h3, color: COLORS.text },
+  name: { ...TYPOGRAPHY.h3, color: COLORS.text, fontSize: 16 },
   username: { ...TYPOGRAPHY.body, color: COLORS.textMuted, fontSize: 12, marginTop: 2 },
   refreshButton: { width: 38, height: 38, borderRadius: 19, borderWidth: 1, borderColor: COLORS.border, alignItems: 'center', justifyContent: 'center' },
   refreshText: { color: COLORS.accent, fontSize: 22 },
@@ -362,11 +400,22 @@ const styles = StyleSheet.create({
   error: { ...TYPOGRAPHY.body, color: COLORS.danger, paddingHorizontal: SPACING.md, paddingTop: SPACING.sm },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   messagesList: { flex: 1 },
-  messagesContent: { padding: SPACING.md, paddingBottom: SPACING.lg, flexGrow: 1, justifyContent: 'flex-end' },
-  messageRow: { width: '100%', marginBottom: 10 },
+  messagesContent: {
+    paddingHorizontal: 16,
+    paddingTop: 18,
+    paddingBottom: 20,
+    flexGrow: 1,
+    justifyContent: 'flex-end',
+  },
+  messageRow: { width: '100%', marginBottom: 12 },
   mineRow: { alignItems: 'flex-end' },
   theirsRow: { alignItems: 'flex-start' },
-  bubble: { maxWidth: '84%', borderRadius: 18, paddingHorizontal: 13, paddingVertical: 10 },
+  bubble: {
+    maxWidth: '84%',
+    borderRadius: 20,
+    paddingHorizontal: 15,
+    paddingVertical: 11,
+  },
   mineBubble: { backgroundColor: COLORS.accent, borderBottomRightRadius: 5 },
   theirsBubble: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderBottomLeftRadius: 5 },
   messageText: { ...TYPOGRAPHY.body, color: COLORS.text, fontSize: 15 },
@@ -376,9 +425,40 @@ const styles = StyleSheet.create({
   empty: { alignItems: 'center', padding: SPACING.xl },
   emptyTitle: { ...TYPOGRAPHY.h2, color: COLORS.text },
   emptySubtitle: { ...TYPOGRAPHY.body, color: COLORS.textMuted, marginTop: SPACING.xs },
-  composer: { flexDirection: 'row', alignItems: 'flex-end', padding: SPACING.md, borderTopWidth: 1, borderTopColor: COLORS.border, gap: 10 },
-  input: { flex: 1, maxHeight: 120, minHeight: 44, borderRadius: 18, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.surface, color: COLORS.text, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 12, fontSize: 15 },
-  sendButton: { minWidth: 64, height: 44, paddingHorizontal: 13, borderRadius: 15, backgroundColor: COLORS.accent, alignItems: 'center', justifyContent: 'center' },
+  composer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    paddingBottom: 14,
+    backgroundColor: COLORS.background,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    gap: 10,
+  },
+  input: {
+    flex: 1,
+    maxHeight: 120,
+    minHeight: 48,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    color: COLORS.text,
+    paddingHorizontal: 18,
+    paddingTop: 13,
+    paddingBottom: 12,
+    fontSize: 15,
+  },
+  sendButton: {
+    minWidth: 68,
+    height: 48,
+    paddingHorizontal: 16,
+    borderRadius: 24,
+    backgroundColor: COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   sendDisabled: { opacity: 0.45 },
   sendPressed: { opacity: 0.8 },
   sendText: { color: COLORS.background, fontWeight: '900', fontSize: 11, letterSpacing: 0.5 },
