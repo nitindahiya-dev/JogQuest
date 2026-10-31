@@ -1823,7 +1823,7 @@ const CompetitionDetailsScreen = () => {
             {/* Personal ranking */}
             {joined &&
               currentUser &&
-              !['DRAFT', 'CANCELLED'].includes(competition.status) && (
+              competition.status === 'COMPLETED' && (
               <View style={styles.youCard}>
                 <View style={styles.youCardTop}>
                   <Text style={styles.youEyebrow}>
@@ -1935,7 +1935,7 @@ const CompetitionDetailsScreen = () => {
             {/* Participant progress */}
             {joined &&
               progress &&
-              ['ACTIVE', 'UNDER_REVIEW', 'COMPLETED'].includes(competition.status) && (
+              competition.status === 'COMPLETED' && (
               <View
                 style={{
                   backgroundColor: COLORS.surface,
@@ -2191,7 +2191,13 @@ const CompetitionDetailsScreen = () => {
                  padding: SPACING.md,
                  marginBottom: SPACING.lg,
                }}>
-                {competition.status !== 'DRAFT' && (
+                {(
+                  ['UNDER_REVIEW', 'COMPLETED'].includes(competition.status) ||
+                  (
+                    competition.status === 'ACTIVE' &&
+                    Date.now() >= new Date(competition.end_at).getTime()
+                  )
+                ) && (
                   <>
                  <Text style={{ color: COLORS.accent, fontSize: 10, fontWeight: '900', letterSpacing: 1 }}>
                    ORGANIZER CONSOLE

@@ -418,88 +418,91 @@ const CompetitionsScreen = () => {
             </View>
 
             {/* My Drafts */}
-            <View style={styles.draftsSection}>
-              <View style={styles.sectionHeader}>
-                <View>
-                  <Text style={styles.sectionTitle}>MY DRAFTS</Text>
-                  <Text style={styles.sectionSubtitle}>
-                    Challenges you're still working on
-                  </Text>
+            {/* My Drafts */}
+            {!draftsLoading && myDrafts.length > 0 && (
+              <View style={styles.draftsSection}>
+                <View style={styles.sectionHeader}>
+                  <View>
+                    <Text style={styles.sectionTitle}>MY DRAFTS</Text>
+                    <Text style={styles.sectionSubtitle}>
+                      Challenges you're still working on
+                    </Text>
+                  </View>
+
+                  <View style={styles.countBadge}>
+                    <Text style={styles.countBadgeText}>{myDrafts.length}</Text>
+                  </View>
                 </View>
 
-                <View style={styles.countBadge}>
-                  <Text style={styles.countBadgeText}>{myDrafts.length}</Text>
-                </View>
-              </View>
+                {draftsLoading && myDrafts.length === 0 ? (
+                  <View style={styles.draftsLoading}>
+                    <ActivityIndicator color={COLORS.accent} />
+                    <Text style={styles.draftsLoadingText}>
+                      Loading your drafts...
+                    </Text>
+                  </View>
+                ) : draftsError ? (
+                  <View style={styles.draftsEmpty}>
+                    <Text style={styles.draftsEmptyText}>{draftsError}</Text>
 
-              {draftsLoading && myDrafts.length === 0 ? (
-                <View style={styles.draftsLoading}>
-                  <ActivityIndicator color={COLORS.accent} />
-                  <Text style={styles.draftsLoadingText}>
-                    Loading your drafts...
-                  </Text>
-                </View>
-              ) : draftsError ? (
-                <View style={styles.draftsEmpty}>
-                  <Text style={styles.draftsEmptyText}>{draftsError}</Text>
+                    <TouchableOpacity
+                      onPress={loadMyDrafts}
+                      style={styles.draftRetryButton}
+                    >
+                      <Text style={styles.draftRetryText}>RETRY</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : myDrafts.length === 0 ? (
+                  <View style={styles.draftsEmpty}>
+                    <Text style={styles.draftsEmptyTitle}>No saved drafts</Text>
+                    <Text style={styles.draftsEmptyText}>
+                      Challenges you create but haven't published will appear
+                      here.
+                    </Text>
+                  </View>
+                ) : (
+                  myDrafts.map(draft => (
+                    <TouchableOpacity
+                      key={draft.id}
+                      style={styles.draftCard}
+                      activeOpacity={0.85}
+                      onPress={() =>
+                        navigation.navigate('CompetitionDetails', {
+                          competitionId: draft.id,
+                        })
+                      }
+                    >
+                      <View style={styles.draftCardTop}>
+                        <View style={styles.draftBadge}>
+                          <Text style={styles.draftBadgeText}>DRAFT</Text>
+                        </View>
 
-                  <TouchableOpacity
-                    onPress={loadMyDrafts}
-                    style={styles.draftRetryButton}
-                  >
-                    <Text style={styles.draftRetryText}>RETRY</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : myDrafts.length === 0 ? (
-                <View style={styles.draftsEmpty}>
-                  <Text style={styles.draftsEmptyTitle}>No saved drafts</Text>
-                  <Text style={styles.draftsEmptyText}>
-                    Challenges you create but haven't published will appear
-                    here.
-                  </Text>
-                </View>
-              ) : (
-                myDrafts.map(draft => (
-                  <TouchableOpacity
-                    key={draft.id}
-                    style={styles.draftCard}
-                    activeOpacity={0.85}
-                    onPress={() =>
-                      navigation.navigate('CompetitionDetails', {
-                        competitionId: draft.id,
-                      })
-                    }
-                  >
-                    <View style={styles.draftCardTop}>
-                      <View style={styles.draftBadge}>
-                        <Text style={styles.draftBadgeText}>DRAFT</Text>
+                        <Text style={styles.draftArrow}>↗</Text>
                       </View>
 
-                      <Text style={styles.draftArrow}>↗</Text>
-                    </View>
-
-                    <Text style={styles.draftName} numberOfLines={2}>
-                      {draft.name}
-                    </Text>
-
-                    <Text style={styles.draftDescription} numberOfLines={2}>
-                      {draft.description?.trim() ||
-                        'No description added yet.'}
-                    </Text>
-
-                    <View style={styles.draftFooter}>
-                      <Text style={styles.draftMetric}>
-                        {draft.metric || 'RUNNING'}
+                      <Text style={styles.draftName} numberOfLines={2}>
+                        {draft.name}
                       </Text>
 
-                      <Text style={styles.draftAction}>
-                        CONTINUE EDITING →
+                      <Text style={styles.draftDescription} numberOfLines={2}>
+                        {draft.description?.trim() ||
+                          'No description added yet.'}
                       </Text>
-                    </View>
-                  </TouchableOpacity>
-                ))
-              )}
-            </View>
+
+                      <View style={styles.draftFooter}>
+                        <Text style={styles.draftMetric}>
+                          {draft.metric || 'RUNNING'}
+                        </Text>
+
+                        <Text style={styles.draftAction}>
+                          CONTINUE EDITING →
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))
+                )}
+              </View>
+            )}
 
             <View style={styles.sectionHeader}>
               <View>
