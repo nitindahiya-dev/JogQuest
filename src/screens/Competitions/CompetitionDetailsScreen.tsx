@@ -38,6 +38,16 @@ type Competition = {
   registration_closes_at?: string | null;
   max_participants?: number | null;
   participants_count: number;
+  entry_type?: 'FREE' | 'PAID';
+  entry_fee_paise?: number | string;
+  prize_type?: 'NONE' | 'CASH' | 'SPONSORED' | 'MIXED';
+  cash_prize_paise?: number | string;
+  prize_distribution?: {
+    first?: number | string;
+    second?: number | string;
+    third?: number | string;
+  } | null;
+  currency?: string;
 };
 
 type LeaderboardEntry = {
@@ -56,6 +66,11 @@ type OfficialCompetitionResult = {
   score: number | string;
   metric: Metric;
   finalized_at: string;
+  badges?: Array<{
+    code: string;
+    name: string;
+    icon: string;
+  }>;
 };
 
 type Membership = {
@@ -153,11 +168,33 @@ const CompetitionDetailsScreen = () => {
   const [rewardNotes, setRewardNotes] = useState('');
   const [operationsLoading, setOperationsLoading] = useState(false);
 
+  // PHASE 8: sponsored reward offers and claims.
+  const [sponsoredOffers, setSponsoredOffers] = useState<any[]>([]);
+  const [participantSponsoredOffers, setParticipantSponsoredOffers] = useState<any[]>([]);
+  const [sponsoredClaims, setSponsoredClaims] = useState<any[]>([]);
+  const [sponsoredLoading, setSponsoredLoading] = useState(false);
+  const [sponsorNameInput, setSponsorNameInput] = useState('');
+  const [sponsoredRewardNameInput, setSponsoredRewardNameInput] = useState('');
+  const [sponsoredDescriptionInput, setSponsoredDescriptionInput] = useState('');
+  const [sponsoredQuantityInput, setSponsoredQuantityInput] = useState('1');
+  const [sponsoredEligibilityInput, setSponsoredEligibilityInput] = useState('ALL_PARTICIPANTS');
+  const [sponsoredDeadlineInput, setSponsoredDeadlineInput] = useState('');
+  const [sponsoredPolicyInput, setSponsoredPolicyInput] = useState('EXPIRE');
+  const [sponsoredOfferReason, setSponsoredOfferReason] = useState('');
+  const [sponsoredClaimReason, setSponsoredClaimReason] = useState('');
+  const [sponsoredActionLoading, setSponsoredActionLoading] = useState(false);
+
   // PHASE7_DRAFT_EDIT_PUBLISH
   const [draftName, setDraftName] = useState('');
   const [draftDescription, setDraftDescription] = useState('');
   const [draftMetric, setDraftMetric] = useState<Metric>('DISTANCE');
   const [draftDurationDays, setDraftDurationDays] = useState('7');
+  const [draftEntryType, setDraftEntryType] = useState<'FREE' | 'PAID'>('FREE');
+  const [draftEntryFee, setDraftEntryFee] = useState('');
+  const [draftPrizeType, setDraftPrizeType] = useState<'NONE' | 'CASH' | 'SPONSORED' | 'MIXED'>('NONE');
+  const [draftFirstPrize, setDraftFirstPrize] = useState('');
+  const [draftSecondPrize, setDraftSecondPrize] = useState('');
+  const [draftThirdPrize, setDraftThirdPrize] = useState('');
   const [draftSaving, setDraftSaving] = useState(false);
 
 
@@ -442,6 +479,65 @@ const CompetitionDetailsScreen = () => {
   ]);
 
 
+  const startOrganizerReview = useCallback(async () => {
+    if (!token || organizerActionLoading) return;
+
+    if (competition?.status !== 'ACTIVE') {
+      setOrganizerError('Only active competitions can enter review.');
+      return;
+    }
+
+    if (Date.now() < new Date(competition.end_at).getTime()) {
+      setOrganizerError('The challenge cannot enter review before its end time.');
+      return;
+    }
+
+    setOrganizerActionLoading(true);
+    setOrganizerError(null);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/competitions/${competitionId}/review`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        },
+      );
+
+      const data: any = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error ?? 'Failed to start competition review.');
+      }
+
+      await Promise.all([
+        loadCompetition(),
+        loadOrganizerPanel(),
+        loadOrganizerAudit(),
+      ]);
+    } catch (err) {
+      setOrganizerError(
+        err instanceof Error ? err.message : 'Failed to start competition review.',
+      );
+    } finally {
+      setOrganizerActionLoading(false);
+    }
+  }, [
+    competition?.status,
+    competition?.end_at,
+    competitionId,
+    token,
+    organizerActionLoading,
+    loadCompetition,
+    loadOrganizerPanel,
+    loadOrganizerAudit,
+  ]);
+
+
   const finalizeOrganizerCompetition = useCallback(async () => {
     if (!token || organizerActionLoading) return;
 
@@ -567,6 +663,55 @@ const CompetitionDetailsScreen = () => {
       return;
     }
 
+    const toPaise = (value: string): number | null => {
+      const rupees = Number(value || 0);
+      if (!Number.isFinite(rupees) || rupees < 0) return null;
+
+      const paise = Math.round(rupees * 100);
+      if (
+        !Number.isSafeInteger(paise) ||
+        Math.abs(rupees * 100 - paise) > 0.000001
+      ) {
+        return null;
+      }
+
+      return paise;
+    };
+
+    const enteredFeePaise = toPaise(draftEntryFee);
+    const firstPaise = toPaise(draftFirstPrize);
+    const secondPaise = toPaise(draftSecondPrize);
+    const thirdPaise = toPaise(draftThirdPrize);
+
+    if (
+      enteredFeePaise === null ||
+      firstPaise === null ||
+      secondPaise === null ||
+      thirdPaise === null
+    ) {
+      setOrganizerError('Enter valid non-negative amounts with at most two decimal places.');
+      return;
+    }
+
+    const entryFeePaise = draftEntryType === 'PAID' ? enteredFeePaise : 0;
+    const hasCashPrize = draftPrizeType === 'CASH' || draftPrizeType === 'MIXED';
+    const cashPrizePaise = hasCashPrize
+      ? firstPaise + secondPaise + thirdPaise
+      : 0;
+
+    if (draftEntryType === 'PAID' && entryFeePaise <= 0) {
+      setOrganizerError('Paid entry requires a fee greater than zero.');
+      return;
+    }
+
+    if (
+      hasCashPrize &&
+      (!Number.isSafeInteger(cashPrizePaise) || cashPrizePaise <= 0)
+    ) {
+      setOrganizerError('Cash prize allocations must total more than zero.');
+      return;
+    }
+
     try {
       setDraftSaving(true);
       setOrganizerError(null);
@@ -579,7 +724,21 @@ const CompetitionDetailsScreen = () => {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ name, description, metric: draftMetric, durationDays }),
+          body: JSON.stringify({
+            name,
+            description,
+            metric: draftMetric,
+            durationDays,
+            entryType: draftEntryType,
+            entryFeePaise,
+            prizeType: draftPrizeType,
+            cashPrizePaise,
+            prizeDistribution: {
+              first: hasCashPrize ? firstPaise : 0,
+              second: hasCashPrize ? secondPaise : 0,
+              third: hasCashPrize ? thirdPaise : 0,
+            },
+          }),
         },
       );
       const data: any = await response.json();
@@ -594,8 +753,9 @@ const CompetitionDetailsScreen = () => {
     }
   }, [
     token, competition, isOrganizer, draftSaving, draftName, draftDescription,
-    draftDurationDays, draftMetric, competitionId, loadCompetition,
-    loadOrganizerPanel, loadOrganizerAudit,
+    draftDurationDays, draftMetric, draftEntryType, draftEntryFee,
+    draftPrizeType, draftFirstPrize, draftSecondPrize, draftThirdPrize,
+    competitionId, loadCompetition, loadOrganizerPanel, loadOrganizerAudit,
   ]);
 
   const publishOrganizerDraft = useCallback(async () => {
@@ -792,6 +952,215 @@ const CompetitionDetailsScreen = () => {
     token,
   ]);
 
+  const loadSponsoredRewards = useCallback(async () => {
+    if (!token || !competitionId || competition?.status !== 'COMPLETED') {
+      setSponsoredOffers([]);
+      setParticipantSponsoredOffers([]);
+      setSponsoredClaims([]);
+      return;
+    }
+
+    setSponsoredLoading(true);
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+      const requests: Promise<any>[] = [];
+
+      if (isOrganizer) {
+        requests.push(
+          fetch(`${API_BASE_URL}/api/competitions/${competitionId}/admin/reward-offers`, { headers })
+            .then(async response => {
+              const data: any = await response.json();
+              if (!response.ok) throw new Error(data?.error ?? 'Could not load organizer reward offers.');
+              return { kind: 'admin', data };
+            }),
+        );
+      }
+
+      if (joined) {
+        requests.push(
+          fetch(`${API_BASE_URL}/api/competitions/${competitionId}/reward-offers`, { headers })
+            .then(async response => {
+              const data: any = await response.json();
+              if (!response.ok) throw new Error(data?.error ?? 'Could not load participant reward offers.');
+              return { kind: 'participant', data };
+            }),
+        );
+      }
+
+      const results = await Promise.all(requests);
+      for (const result of results) {
+        if (result.kind === 'admin') {
+          setSponsoredOffers(Array.isArray(result.data?.offers) ? result.data.offers : []);
+          setSponsoredClaims(Array.isArray(result.data?.claims) ? result.data.claims : []);
+        } else {
+          setParticipantSponsoredOffers(Array.isArray(result.data?.offers) ? result.data.offers : []);
+        }
+      }
+    } catch (err) {
+      setOrganizerError(err instanceof Error ? err.message : 'Could not load sponsored rewards.');
+    } finally {
+      setSponsoredLoading(false);
+    }
+  }, [competition?.status, competitionId, isOrganizer, joined, token]);
+
+  const createSponsoredReward = useCallback(async () => {
+    if (!token || sponsoredActionLoading) return;
+    const sponsorName = sponsorNameInput.trim();
+    const rewardName = sponsoredRewardNameInput.trim();
+    const description = sponsoredDescriptionInput.trim();
+    const quantity = Number(sponsoredQuantityInput);
+    let claimDeadline: string | null = null;
+
+    if (!sponsorName || !rewardName || !description) {
+      setOrganizerError('Enter the sponsor, reward name, and reward description.');
+      return;
+    }
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100000) {
+      setOrganizerError('Reward quantity must be a whole number from 1 to 100000.');
+      return;
+    }
+    if (sponsoredDeadlineInput.trim()) {
+      const parsed = new Date(sponsoredDeadlineInput.trim());
+      if (Number.isNaN(parsed.getTime()) || parsed.getTime() <= Date.now()) {
+        setOrganizerError('Enter a future claim deadline in ISO format, or leave it blank.');
+        return;
+      }
+      claimDeadline = parsed.toISOString();
+    }
+
+    setSponsoredActionLoading(true);
+    setOrganizerError(null);
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/competitions/${competitionId}/admin/reward-offers`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sponsorName,
+            rewardName,
+            description,
+            quantity,
+            eligibilityType: sponsoredEligibilityInput,
+            claimDeadline,
+            unclaimedPolicy: sponsoredPolicyInput,
+          }),
+        },
+      );
+      const data: any = await response.json();
+      if (!response.ok) throw new Error(data?.error ?? 'Could not create sponsored reward.');
+
+      setSponsorNameInput('');
+      setSponsoredRewardNameInput('');
+      setSponsoredDescriptionInput('');
+      setSponsoredQuantityInput('1');
+      setSponsoredDeadlineInput('');
+      await loadSponsoredRewards();
+    } catch (err) {
+      setOrganizerError(err instanceof Error ? err.message : 'Could not create sponsored reward.');
+    } finally {
+      setSponsoredActionLoading(false);
+    }
+  }, [
+    competitionId, loadSponsoredRewards, sponsoredActionLoading,
+    sponsoredDeadlineInput, sponsoredDescriptionInput, sponsoredEligibilityInput,
+    sponsoredPolicyInput, sponsoredQuantityInput, sponsoredRewardNameInput,
+    sponsorNameInput, token,
+  ]);
+
+  const changeSponsoredOfferStatus = useCallback(async (
+    offerId: string,
+    status: 'ACTIVE' | 'PAUSED' | 'CLOSED',
+  ) => {
+    if (!token || sponsoredActionLoading) return;
+    const reason = sponsoredOfferReason.trim();
+    if (!reason) {
+      setOrganizerError('Enter a reason before changing a sponsored offer status.');
+      return;
+    }
+    setSponsoredActionLoading(true);
+    setOrganizerError(null);
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/competitions/${competitionId}/admin/reward-offers/${encodeURIComponent(offerId)}`,
+        {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status, reason }),
+        },
+      );
+      const data: any = await response.json();
+      if (!response.ok) throw new Error(data?.error ?? 'Could not update reward offer.');
+      setSponsoredOfferReason('');
+      await loadSponsoredRewards();
+      await loadOrganizerAudit();
+    } catch (err) {
+      setOrganizerError(err instanceof Error ? err.message : 'Could not update reward offer.');
+    } finally {
+      setSponsoredActionLoading(false);
+    }
+  }, [competitionId, loadOrganizerAudit, loadSponsoredRewards, sponsoredActionLoading, sponsoredOfferReason, token]);
+
+  const claimSponsoredReward = useCallback(async (offerId: string) => {
+    if (!token || sponsoredActionLoading) return;
+    setSponsoredActionLoading(true);
+    setOrganizerError(null);
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/competitions/${competitionId}/reward-offers/${encodeURIComponent(offerId)}/claim`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        },
+      );
+      const data: any = await response.json();
+      if (!response.ok) throw new Error(data?.error ?? 'Could not claim this reward.');
+      await loadSponsoredRewards();
+    } catch (err) {
+      setOrganizerError(err instanceof Error ? err.message : 'Could not claim this reward.');
+    } finally {
+      setSponsoredActionLoading(false);
+    }
+  }, [competitionId, loadSponsoredRewards, sponsoredActionLoading, token]);
+
+  const changeSponsoredClaimStatus = useCallback(async (
+    claimId: string,
+    status: 'APPROVED' | 'FULFILLED' | 'CANCELLED',
+  ) => {
+    if (!token || sponsoredActionLoading) return;
+    const reason = sponsoredClaimReason.trim();
+    if (!reason) {
+      setOrganizerError('Enter a reason before updating a participant claim.');
+      return;
+    }
+    setSponsoredActionLoading(true);
+    setOrganizerError(null);
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/competitions/${competitionId}/admin/reward-claims/${encodeURIComponent(claimId)}`,
+        {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status, reason }),
+        },
+      );
+      const data: any = await response.json();
+      if (!response.ok) throw new Error(data?.error ?? 'Could not update reward claim.');
+      setSponsoredClaimReason('');
+      await loadSponsoredRewards();
+      await loadOrganizerAudit();
+    } catch (err) {
+      setOrganizerError(err instanceof Error ? err.message : 'Could not update reward claim.');
+    } finally {
+      setSponsoredActionLoading(false);
+    }
+  }, [competitionId, loadOrganizerAudit, loadSponsoredRewards, sponsoredActionLoading, sponsoredClaimReason, token]);
+
+  useEffect(() => {
+    if (competition?.status === 'COMPLETED') loadSponsoredRewards();
+  }, [competition?.status, loadSponsoredRewards]);
+
   useFocusEffect(
     useCallback(() => {
       loadCompetition();
@@ -818,6 +1187,22 @@ const CompetitionDetailsScreen = () => {
     setDraftName(competition.name ?? '');
     setDraftDescription(competition.description ?? '');
     setDraftMetric(competition.metric);
+    setDraftEntryType(competition.entry_type ?? 'FREE');
+    setDraftEntryFee(
+      competition.entry_type === 'PAID'
+        ? (Number(competition.entry_fee_paise || 0) / 100).toFixed(2)
+        : '',
+    );
+    setDraftPrizeType(competition.prize_type ?? 'NONE');
+    setDraftFirstPrize(
+      (Number(competition.prize_distribution?.first || 0) / 100).toFixed(2),
+    );
+    setDraftSecondPrize(
+      (Number(competition.prize_distribution?.second || 0) / 100).toFixed(2),
+    );
+    setDraftThirdPrize(
+      (Number(competition.prize_distribution?.third || 0) / 100).toFixed(2),
+    );
 
     const start = new Date(competition.start_at).getTime();
     const end = new Date(competition.end_at).getTime();
@@ -832,6 +1217,10 @@ const CompetitionDetailsScreen = () => {
     competition?.name,
     competition?.description,
     competition?.metric,
+    competition?.entry_type,
+    competition?.entry_fee_paise,
+    competition?.prize_type,
+    competition?.prize_distribution,
     competition?.start_at,
     competition?.end_at,
   ]);
@@ -1124,6 +1513,172 @@ const CompetitionDetailsScreen = () => {
                   'No description available for this challenge.'}
               </Text>
 
+              {/* Entry fee and prize configuration */}
+              <View
+                style={{
+                  marginTop: SPACING.lg,
+                  padding: SPACING.md,
+                  borderRadius: 16,
+                  backgroundColor: COLORS.surfaceHighlight,
+                  borderWidth: 1,
+                  borderColor: COLORS.border,
+                }}
+              >
+                <Text
+                  style={[
+                    styles.dateLabel,
+                    { marginBottom: SPACING.md },
+                  ]}
+                >
+                  ENTRY & REWARDS
+                </Text>
+
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text style={styles.dateLabel}>ENTRY</Text>
+                  <Text
+                    style={[
+                      styles.dateValue,
+                      { marginTop: 0 },
+                    ]}
+                  >
+                    {competition.entry_type === 'PAID'
+                      ? `₹${(Number(competition.entry_fee_paise || 0) / 100).toFixed(2)}`
+                      : 'FREE'}
+                  </Text>
+                </View>
+
+                <View
+                  style={{
+                    height: 1,
+                    backgroundColor: COLORS.border,
+                    marginVertical: SPACING.md,
+                  }}
+                />
+
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text style={styles.dateLabel}>PRIZE TYPE</Text>
+                  <Text
+                    style={[
+                      styles.dateValue,
+                      { marginTop: 0 },
+                    ]}
+                  >
+                    {{
+                      NONE: 'No prize',
+                      CASH: 'Cash prize',
+                      SPONSORED: 'Sponsored rewards',
+                      MIXED: 'Cash + sponsored',
+                    }[competition.prize_type || 'NONE']}
+                  </Text>
+                </View>
+
+                {(competition.prize_type === 'CASH' ||
+                  competition.prize_type === 'MIXED') && (
+                  <View style={{ marginTop: SPACING.md }}>
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Text style={styles.dateLabel}>TOTAL CASH PRIZE</Text>
+                      <Text
+                        style={[
+                          styles.dateValue,
+                          { marginTop: 0, color: COLORS.accent },
+                        ]}
+                      >
+                        ₹{(
+                          Number(competition.cash_prize_paise || 0) / 100
+                        ).toFixed(2)}
+                      </Text>
+                    </View>
+
+                    {([
+                      ['1st Place', competition.prize_distribution?.first],
+                      ['2nd Place', competition.prize_distribution?.second],
+                      ['3rd Place', competition.prize_distribution?.third],
+                    ] as const).some(([, amount]) => Number(amount || 0) > 0) && (
+                      <View style={{ marginTop: SPACING.md, gap: SPACING.sm }}>
+                        {([
+                          ['1st Place', competition.prize_distribution?.first],
+                          ['2nd Place', competition.prize_distribution?.second],
+                          ['3rd Place', competition.prize_distribution?.third],
+                        ] as const).map(([label, amount]) => (
+                          <View
+                            key={label}
+                            style={{
+                              flexDirection: 'row',
+                              justifyContent: 'space-between',
+                            }}
+                          >
+                            <Text style={styles.heroDescription}>
+                              {label}
+                            </Text>
+                            <Text style={styles.dateValue}>
+                              ₹{(Number(amount || 0) / 100).toFixed(2)}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                )}
+
+                {(competition.prize_type === 'SPONSORED' ||
+                  competition.prize_type === 'MIXED') && (
+                  <Text
+                    style={[
+                      styles.heroDescription,
+                      { marginTop: SPACING.md },
+                    ]}
+                  >
+                    Sponsored rewards are managed separately through the
+                    existing sponsored rewards system.
+                  </Text>
+                )}
+
+                {(competition.entry_type === 'PAID' ||
+                  Number(competition.cash_prize_paise || 0) > 0) && (
+                  <View
+                    style={{
+                      marginTop: SPACING.md,
+                      padding: SPACING.sm,
+                      borderRadius: 10,
+                      backgroundColor: 'rgba(255, 170, 0, 0.08)',
+                      borderWidth: 1,
+                      borderColor: 'rgba(255, 170, 0, 0.35)',
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: '#FFB84D',
+                        fontSize: 11,
+                        lineHeight: 17,
+                        fontWeight: '600',
+                      }}
+                    >
+                      Payment and cash payout features are not active yet.
+                      This challenge must remain a draft until those systems
+                      are implemented.
+                    </Text>
+                  </View>
+                )}
+              </View>
+
               <View style={styles.heroDivider} />
 
               <View style={styles.heroDates}>
@@ -1170,38 +1725,40 @@ const CompetitionDetailsScreen = () => {
               </View>
             </View>
 
-            {/* Countdown */}
-            <View style={styles.timerCard}>
-              <View style={styles.timerTop}>
-                <View style={styles.timerIndicator} />
-                <Text style={styles.timerLabel}>
-                  {remaining?.label}
+            {/* Countdown — only for published challenges */}
+            {!['DRAFT', 'CANCELLED'].includes(competition.status) && (
+              <View style={styles.timerCard}>
+                <View style={styles.timerTop}>
+                  <View style={styles.timerIndicator} />
+                  <Text style={styles.timerLabel}>{remaining?.label}</Text>
+                </View>
+
+                <Text
+                  style={[
+                    styles.timerValue,
+                    remaining?.value === 'Awaiting dates' && styles.timerValueSmall,
+                  ]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                >
+                  {remaining?.value}
+                </Text>
+
+                <Text style={styles.timerCaption}>
+                  {competition.status === 'ACTIVE'
+                    ? 'Every effort counts. Keep moving.'
+                    : competition.status === 'COMPLETED' ||
+                        competition.status === 'UNDER_REVIEW'
+                      ? 'This challenge has ended.'
+                      : 'Get ready for the challenge.'}
                 </Text>
               </View>
-
-              <Text
-                style={[
-                  styles.timerValue,
-                  remaining?.value === 'Awaiting dates' &&
-                  styles.timerValueSmall,
-                ]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-              >
-                {remaining?.value}
-              </Text>
-
-              <Text style={styles.timerCaption}>
-                {competition.status === 'ACTIVE'
-                  ? 'Every effort counts. Keep moving.'
-                  : competition.status === 'ENDED'
-                    ? 'This challenge has finished.'
-                    : 'Get ready for the challenge.'}
-              </Text>
-            </View>
+            )}
 
             {/* Personal ranking */}
-            {currentUser && (
+            {joined &&
+              currentUser &&
+              !['DRAFT', 'CANCELLED'].includes(competition.status) && (
               <View style={styles.youCard}>
                 <View style={styles.youCardTop}>
                   <Text style={styles.youEyebrow}>
@@ -1311,7 +1868,9 @@ const CompetitionDetailsScreen = () => {
             </View>
 
             {/* Participant progress */}
-            {joined && progress && (
+            {joined &&
+              progress &&
+              ['ACTIVE', 'UNDER_REVIEW', 'COMPLETED'].includes(competition.status) && (
               <View
                 style={{
                   backgroundColor: COLORS.surface,
@@ -1490,6 +2049,41 @@ const CompetitionDetailsScreen = () => {
                           {result.display_name?.trim() || result.username || 'Runner'}
                           {result.user_id === userId ? ' (You)' : ''}
                         </Text>
+                        {(result.badges ?? []).length > 0 && (
+                          <View
+                            style={{
+                              flexDirection: 'row',
+                              flexWrap: 'wrap',
+                              alignItems: 'center',
+                              marginTop: 5,
+                              gap: 5,
+                            }}
+                          >
+                            {result.badges!.map(badge => (
+                              <View
+                                key={`${result.user_id}-${badge.code}`}
+                                style={{
+                                  backgroundColor: COLORS.surfaceHighlight,
+                                  borderWidth: 1,
+                                  borderColor: COLORS.border,
+                                  borderRadius: 12,
+                                  paddingHorizontal: 7,
+                                  paddingVertical: 3,
+                                }}
+                              >
+                                <Text
+                                  style={{
+                                    color: COLORS.textSecondary,
+                                    fontSize: 9,
+                                    fontWeight: '600',
+                                  }}
+                                >
+                                  {badge.icon} {badge.name}
+                                </Text>
+                              </View>
+                            ))}
+                          </View>
+                        )}
                       </View>
                       <Text
                         style={{
@@ -1532,6 +2126,8 @@ const CompetitionDetailsScreen = () => {
                  padding: SPACING.md,
                  marginBottom: SPACING.lg,
                }}>
+                {competition.status !== 'DRAFT' && (
+                  <>
                  <Text style={{ color: COLORS.accent, fontSize: 10, fontWeight: '900', letterSpacing: 1 }}>
                    ORGANIZER CONSOLE
                  </Text>
@@ -1541,6 +2137,113 @@ const CompetitionDetailsScreen = () => {
                  <Text style={{ ...TYPOGRAPHY.caption, color: COLORS.textSecondary, marginTop: 5 }}>
                    Review participant scores and flagged activities before finalizing results.
                  </Text>
+
+                 {/* Challenge lifecycle controls */}
+                 <View
+                   style={{
+                     borderTopWidth: 1,
+                     borderTopColor: COLORS.border,
+                     marginTop: SPACING.md,
+                     paddingTop: SPACING.md,
+                   }}
+                 >
+                   <Text style={{ ...TYPOGRAPHY.label, color: COLORS.textSecondary }}>
+                     CHALLENGE FINALIZATION
+                   </Text>
+
+                   {competition.status === 'ACTIVE' && (
+                     <>
+                       <Text style={{ ...TYPOGRAPHY.caption, color: COLORS.textMuted, marginTop: 6 }}>
+                         {Date.now() < new Date(competition.end_at).getTime()
+                           ? 'Review becomes available after the challenge end time.'
+                           : 'The challenge has ended. Start the review process to verify participant scores.'}
+                       </Text>
+
+                       <TouchableOpacity
+                         onPress={startOrganizerReview}
+                         disabled={
+                           organizerActionLoading ||
+                           Date.now() < new Date(competition.end_at).getTime()
+                         }
+                         style={{
+                           alignItems: 'center',
+                           paddingVertical: 13,
+                           borderRadius: 10,
+                           marginTop: SPACING.sm,
+                           backgroundColor:
+                             Date.now() >= new Date(competition.end_at).getTime()
+                               ? COLORS.accent
+                               : COLORS.surfaceHighlight,
+                           opacity: organizerActionLoading ? 0.55 : 1,
+                         }}
+                       >
+                         <Text
+                           style={{
+                             color:
+                               Date.now() >= new Date(competition.end_at).getTime()
+                                 ? COLORS.background
+                                 : COLORS.textMuted,
+                             fontSize: 11,
+                             fontWeight: '900',
+                           }}
+                         >
+                           {organizerActionLoading ? 'PLEASE WAIT…' : 'START CHALLENGE REVIEW'}
+                         </Text>
+                       </TouchableOpacity>
+                     </>
+                   )}
+
+                   {competition.status === 'UNDER_REVIEW' && (
+                     <>
+                       <Text style={{ ...TYPOGRAPHY.caption, color: COLORS.textSecondary, marginTop: 8 }}>
+                         Unresolved flags: {organizerFlags.length}
+                       </Text>
+
+                       <Text style={{ ...TYPOGRAPHY.caption, color: COLORS.textMuted, marginTop: 4 }}>
+                         {organizerFlags.length > 0
+                           ? 'Resolve every outstanding review flag before publishing official results.'
+                           : 'All review flags are resolved. The challenge is ready for finalization.'}
+                       </Text>
+
+                       <TouchableOpacity
+                         onPress={finalizeOrganizerCompetition}
+                         disabled={organizerActionLoading || organizerFlags.length > 0}
+                         style={{
+                           alignItems: 'center',
+                           paddingVertical: 13,
+                           borderRadius: 10,
+                           marginTop: SPACING.sm,
+                           backgroundColor:
+                             organizerFlags.length === 0
+                               ? COLORS.accent
+                               : COLORS.surfaceHighlight,
+                           opacity: organizerActionLoading ? 0.55 : 1,
+                         }}
+                       >
+                         <Text
+                           style={{
+                             color:
+                               organizerFlags.length === 0
+                                 ? COLORS.background
+                                 : COLORS.textMuted,
+                             fontSize: 11,
+                             fontWeight: '900',
+                           }}
+                         >
+                           {organizerActionLoading
+                             ? 'FINALIZING…'
+                             : 'PUBLISH OFFICIAL RESULTS'}
+                         </Text>
+                       </TouchableOpacity>
+                     </>
+                   )}
+
+                   {competition.status === 'COMPLETED' && (
+                     <Text style={{ ...TYPOGRAPHY.caption, color: COLORS.success, marginTop: 8 }}>
+                       Official results have been published.
+                     </Text>
+                   )}
+                 </View>
 
                  {organizerLoading && <ActivityIndicator color={COLORS.accent} style={{ marginTop: SPACING.md }} />}
                  {organizerError && (
@@ -1826,7 +2529,9 @@ const CompetitionDetailsScreen = () => {
                    ))}
                  </View>
 
-                 
+                  </>
+                )}
+
                   {/* PHASE7_DRAFT_EDIT_PUBLISH */}
                   {competition.status === 'DRAFT' && (
                     <View style={{
@@ -1911,6 +2616,173 @@ const CompetitionDetailsScreen = () => {
                           </TouchableOpacity>
                         ))}
                       </View>
+
+                      <Text style={{
+                        ...TYPOGRAPHY.caption,
+                        color: COLORS.textSecondary,
+                        marginTop: SPACING.md,
+                      }}>
+                        Entry type
+                      </Text>
+
+                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                        {(['FREE', 'PAID'] as const).map(value => (
+                          <TouchableOpacity
+                            key={value}
+                            onPress={() => setDraftEntryType(value)}
+                            style={{
+                              flex: 1,
+                              paddingVertical: 11,
+                              borderRadius: 9,
+                              alignItems: 'center',
+                              backgroundColor: draftEntryType === value ? COLORS.accent : COLORS.surface,
+                              borderWidth: 1,
+                              borderColor: COLORS.border,
+                            }}
+                          >
+                            <Text style={{
+                              color: draftEntryType === value ? COLORS.background : COLORS.text,
+                              fontSize: 10,
+                              fontWeight: '900',
+                            }}>
+                              {value}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      {draftEntryType === 'PAID' && (
+                        <>
+                          <TextInput
+                            value={draftEntryFee}
+                            onChangeText={setDraftEntryFee}
+                            keyboardType="decimal-pad"
+                            placeholder="Entry fee in ₹"
+                            placeholderTextColor={COLORS.textMuted}
+                            style={{
+                              color: COLORS.text,
+                              backgroundColor: COLORS.background,
+                              borderColor: COLORS.border,
+                              borderWidth: 1,
+                              borderRadius: 10,
+                              paddingHorizontal: SPACING.md,
+                              paddingVertical: SPACING.sm,
+                              marginTop: SPACING.sm,
+                            }}
+                          />
+                          <Text style={{ ...TYPOGRAPHY.caption, color: '#FFB84D', marginTop: 5 }}>
+                            Payment collection is not active. Paid challenges cannot be published.
+                          </Text>
+                        </>
+                      )}
+
+                      <Text style={{
+                        ...TYPOGRAPHY.caption,
+                        color: COLORS.textSecondary,
+                        marginTop: SPACING.md,
+                      }}>
+                        Prize type
+                      </Text>
+
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 8 }}>
+                        {(['NONE', 'CASH', 'SPONSORED', 'MIXED'] as const).map(value => (
+                          <TouchableOpacity
+                            key={value}
+                            onPress={() => setDraftPrizeType(value)}
+                            style={{
+                              minWidth: '47%',
+                              flexGrow: 1,
+                              paddingVertical: 11,
+                              paddingHorizontal: 8,
+                              borderRadius: 9,
+                              alignItems: 'center',
+                              backgroundColor: draftPrizeType === value ? COLORS.accent : COLORS.surface,
+                              borderWidth: 1,
+                              borderColor: COLORS.border,
+                            }}
+                          >
+                            <Text style={{
+                              color: draftPrizeType === value ? COLORS.background : COLORS.text,
+                              fontSize: 9,
+                              fontWeight: '900',
+                            }}>
+                              {value}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      {(draftPrizeType === 'CASH' || draftPrizeType === 'MIXED') && (
+                        <>
+                          <TextInput
+                            value={draftFirstPrize}
+                            onChangeText={setDraftFirstPrize}
+                            keyboardType="decimal-pad"
+                            placeholder="1st place cash prize (₹)"
+                            placeholderTextColor={COLORS.textMuted}
+                            style={{
+                              color: COLORS.text,
+                              backgroundColor: COLORS.background,
+                              borderColor: COLORS.border,
+                              borderWidth: 1,
+                              borderRadius: 10,
+                              paddingHorizontal: SPACING.md,
+                              paddingVertical: SPACING.sm,
+                              marginTop: SPACING.sm,
+                            }}
+                          />
+                          <TextInput
+                            value={draftSecondPrize}
+                            onChangeText={setDraftSecondPrize}
+                            keyboardType="decimal-pad"
+                            placeholder="2nd place cash prize (₹)"
+                            placeholderTextColor={COLORS.textMuted}
+                            style={{
+                              color: COLORS.text,
+                              backgroundColor: COLORS.background,
+                              borderColor: COLORS.border,
+                              borderWidth: 1,
+                              borderRadius: 10,
+                              paddingHorizontal: SPACING.md,
+                              paddingVertical: SPACING.sm,
+                              marginTop: SPACING.sm,
+                            }}
+                          />
+                          <TextInput
+                            value={draftThirdPrize}
+                            onChangeText={setDraftThirdPrize}
+                            keyboardType="decimal-pad"
+                            placeholder="3rd place cash prize (₹)"
+                            placeholderTextColor={COLORS.textMuted}
+                            style={{
+                              color: COLORS.text,
+                              backgroundColor: COLORS.background,
+                              borderColor: COLORS.border,
+                              borderWidth: 1,
+                              borderRadius: 10,
+                              paddingHorizontal: SPACING.md,
+                              paddingVertical: SPACING.sm,
+                              marginTop: SPACING.sm,
+                            }}
+                          />
+                          <Text style={{ ...TYPOGRAPHY.caption, color: COLORS.textSecondary, marginTop: 5 }}>
+                            Total cash prize: ₹{(
+                              (Number(draftFirstPrize || 0) +
+                                Number(draftSecondPrize || 0) +
+                                Number(draftThirdPrize || 0))
+                            ).toFixed(2)}
+                          </Text>
+                          <Text style={{ ...TYPOGRAPHY.caption, color: '#FFB84D', marginTop: 4 }}>
+                            Cash payouts are not active. Cash-prize challenges cannot be published.
+                          </Text>
+                        </>
+                      )}
+
+                      {(draftPrizeType === 'SPONSORED' || draftPrizeType === 'MIXED') && (
+                        <Text style={{ ...TYPOGRAPHY.caption, color: COLORS.textSecondary, marginTop: SPACING.sm }}>
+                          Sponsored offers continue to be managed through the existing sponsored rewards workflow.
+                        </Text>
+                      )}
 
                       <TextInput
                         value={draftDurationDays}
@@ -2034,6 +2906,9 @@ const CompetitionDetailsScreen = () => {
 
 
              {/* JQ_PHASE7_REWARD_DELIVERY_UI */}
+             {isOrganizer &&
+               competition.status === 'COMPLETED' &&
+               competition.prize_type !== 'NONE' && (
              <View style={{ marginTop: 20, padding: 16, borderRadius: 12, backgroundColor: '#171717' }}>
                <Text style={{ color: '#FFFFFF', fontSize: 17, fontWeight: '700', marginBottom: 10 }}>
                  Rewards & Notification Operations
@@ -2142,6 +3017,156 @@ const CompetitionDetailsScreen = () => {
                  </View>
                ))}
              </View>
+             )}
+
+             {/* PHASE 8: SPONSORED REWARDS */}
+             {competition?.status === 'COMPLETED' &&
+               ['SPONSORED', 'MIXED'].includes(competition.prize_type || 'NONE') &&
+               (isOrganizer || joined) && (
+               <View style={{ backgroundColor: '#171717', borderWidth: 1, borderColor: '#333333', borderRadius: 14, padding: 14, marginBottom: 18 }}>
+                 <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '900', marginBottom: 5 }}>
+                   SPONSORED REWARDS
+                 </Text>
+                 <Text style={{ color: '#A3A3A3', fontSize: 12, marginBottom: 12 }}>
+                   Rewards are offered after official results are finalized. Claims are recorded in the challenge audit history.
+                 </Text>
+
+                 {sponsoredLoading && <ActivityIndicator color={COLORS.accent} />}
+                 {isOrganizer && (
+                   <>
+                     <Text style={{ color: '#FFFFFF', fontWeight: '800', marginTop: 8, marginBottom: 8 }}>
+                       Create reward offer
+                     </Text>
+                     {[
+                       ['Sponsor name', sponsorNameInput, setSponsorNameInput],
+                       ['Reward name', sponsoredRewardNameInput, setSponsoredRewardNameInput],
+                       ['Description', sponsoredDescriptionInput, setSponsoredDescriptionInput],
+                       ['Quantity', sponsoredQuantityInput, setSponsoredQuantityInput],
+                       ['Claim deadline (ISO date/time, optional)', sponsoredDeadlineInput, setSponsoredDeadlineInput],
+                     ].map(([label, value, setter]: any) => (
+                       <TextInput
+                         key={label}
+                         value={value}
+                         onChangeText={setter}
+                         placeholder={label}
+                         placeholderTextColor="#737373"
+                         keyboardType={label === 'Quantity' ? 'numeric' : 'default'}
+                         multiline={label === 'Description'}
+                         style={{ color: '#FFFFFF', backgroundColor: '#262626', borderRadius: 8, paddingHorizontal: 11, paddingVertical: 9, marginBottom: 8, minHeight: label === 'Description' ? 64 : 42 }}
+                       />
+                     ))}
+
+                     <Text style={{ color: '#A3A3A3', fontSize: 11, marginBottom: 6 }}>ELIGIBILITY</Text>
+                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                       {(['ALL_PARTICIPANTS', 'TOP_3', 'RANK_1', 'RANK_2', 'RANK_3'] as const).map(value => (
+                         <TouchableOpacity key={value} onPress={() => setSponsoredEligibilityInput(value)} style={{ paddingVertical: 7, paddingHorizontal: 9, borderRadius: 8, backgroundColor: sponsoredEligibilityInput === value ? '#2563EB' : '#303030' }}>
+                           <Text style={{ color: '#FFFFFF', fontSize: 10 }}>{value.replace(/_/g, ' ')}</Text>
+                         </TouchableOpacity>
+                       ))}
+                     </View>
+
+                     <Text style={{ color: '#A3A3A3', fontSize: 11, marginBottom: 6 }}>UNCLAIMED REWARD POLICY</Text>
+                     <View style={{ flexDirection: 'row', gap: 7, marginBottom: 12 }}>
+                       {(['EXPIRE', 'RETURN_TO_SPONSOR'] as const).map(value => (
+                         <TouchableOpacity key={value} onPress={() => setSponsoredPolicyInput(value)} style={{ paddingVertical: 8, paddingHorizontal: 10, borderRadius: 8, backgroundColor: sponsoredPolicyInput === value ? '#2563EB' : '#303030' }}>
+                           <Text style={{ color: '#FFFFFF', fontSize: 10 }}>{value.replace(/_/g, ' ')}</Text>
+                         </TouchableOpacity>
+                       ))}
+                     </View>
+
+                     <TouchableOpacity onPress={createSponsoredReward} disabled={sponsoredActionLoading} style={{ padding: 12, borderRadius: 8, backgroundColor: '#2563EB', opacity: sponsoredActionLoading ? 0.5 : 1 }}>
+                       <Text style={{ color: '#FFFFFF', textAlign: 'center', fontWeight: '800' }}>
+                         {sponsoredActionLoading ? 'Saving…' : 'Create sponsored reward'}
+                       </Text>
+                     </TouchableOpacity>
+
+                     <Text style={{ color: '#FFFFFF', fontWeight: '800', marginTop: 18, marginBottom: 8 }}>
+                       Offer management ({sponsoredOffers.length})
+                     </Text>
+                     <TextInput
+                       value={sponsoredOfferReason}
+                       onChangeText={setSponsoredOfferReason}
+                       placeholder="Reason required to pause, resume, or close an offer"
+                       placeholderTextColor="#737373"
+                       style={{ color: '#FFFFFF', backgroundColor: '#262626', borderRadius: 8, padding: 10, marginBottom: 8 }}
+                     />
+                     {sponsoredOffers.length === 0 ? (
+                       <Text style={{ color: '#A3A3A3', fontSize: 12 }}>No sponsored offers created yet.</Text>
+                     ) : sponsoredOffers.map((offer: any) => (
+                       <View key={offer.id} style={{ borderTopWidth: 1, borderTopColor: '#333333', paddingVertical: 10 }}>
+                         <Text style={{ color: '#FFFFFF', fontWeight: '800' }}>{offer.reward_name} · {offer.status}</Text>
+                         <Text style={{ color: '#A3A3A3', fontSize: 11 }}>{offer.sponsor_name} · {offer.claimed_count}/{offer.quantity} claimed · {offer.remaining_quantity} remaining</Text>
+                         <Text style={{ color: '#A3A3A3', fontSize: 11, marginTop: 3 }}>{offer.description}</Text>
+                         {!!offer.claim_deadline && <Text style={{ color: '#A3A3A3', fontSize: 10, marginTop: 3 }}>Deadline: {new Date(offer.claim_deadline).toLocaleString()}</Text>}
+                         {!!offer.unclaimed_processed_at && <Text style={{ color: '#A3A3A3', fontSize: 10, marginTop: 3 }}>Closed out: {offer.unclaimed_quantity} unclaimed · {offer.returned_quantity} recorded as returned</Text>}
+                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                           {offer.status === 'ACTIVE' && <TouchableOpacity onPress={() => changeSponsoredOfferStatus(offer.id, 'PAUSED')} style={{ backgroundColor: '#404040', padding: 8, borderRadius: 7 }}><Text style={{ color: '#FFFFFF', fontSize: 10 }}>PAUSE</Text></TouchableOpacity>}
+                           {offer.status === 'PAUSED' && <TouchableOpacity onPress={() => changeSponsoredOfferStatus(offer.id, 'ACTIVE')} style={{ backgroundColor: '#2563EB', padding: 8, borderRadius: 7 }}><Text style={{ color: '#FFFFFF', fontSize: 10 }}>RESUME</Text></TouchableOpacity>}
+                           {offer.status !== 'CLOSED' && <TouchableOpacity onPress={() => changeSponsoredOfferStatus(offer.id, 'CLOSED')} style={{ backgroundColor: '#7F1D1D', padding: 8, borderRadius: 7 }}><Text style={{ color: '#FFFFFF', fontSize: 10 }}>CLOSE</Text></TouchableOpacity>}
+                         </View>
+                       </View>
+                     ))}
+
+                     <Text style={{ color: '#FFFFFF', fontWeight: '800', marginTop: 16, marginBottom: 8 }}>
+                       Participant claims ({sponsoredClaims.length})
+                     </Text>
+                     <TextInput
+                       value={sponsoredClaimReason}
+                       onChangeText={setSponsoredClaimReason}
+                       placeholder="Reason required to approve, fulfill, or cancel a claim"
+                       placeholderTextColor="#737373"
+                       style={{ color: '#FFFFFF', backgroundColor: '#262626', borderRadius: 8, padding: 10, marginBottom: 8 }}
+                     />
+                     {sponsoredClaims.length === 0 ? (
+                       <Text style={{ color: '#A3A3A3', fontSize: 12 }}>No participant claims yet.</Text>
+                     ) : sponsoredClaims.map((claim: any) => (
+                       <View key={claim.id} style={{ borderTopWidth: 1, borderTopColor: '#333333', paddingVertical: 9 }}>
+                         <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>{claim.username || claim.display_name || claim.user_id} · {claim.status}</Text>
+                         <Text style={{ color: '#A3A3A3', fontSize: 11 }}>{claim.reward_name || claim.sponsor_name || 'Sponsored reward'} · {new Date(claim.claimed_at).toLocaleString()}</Text>
+                         {claim.status === 'CLAIMED' && (
+                           <View style={{ flexDirection: 'row', gap: 6, marginTop: 7 }}>
+                             <TouchableOpacity onPress={() => changeSponsoredClaimStatus(claim.id, 'APPROVED')} style={{ backgroundColor: '#2563EB', padding: 8, borderRadius: 7 }}><Text style={{ color: '#FFFFFF', fontSize: 10 }}>APPROVE</Text></TouchableOpacity>
+                             <TouchableOpacity onPress={() => changeSponsoredClaimStatus(claim.id, 'CANCELLED')} style={{ backgroundColor: '#7F1D1D', padding: 8, borderRadius: 7 }}><Text style={{ color: '#FFFFFF', fontSize: 10 }}>CANCEL</Text></TouchableOpacity>
+                           </View>
+                         )}
+                         {claim.status === 'APPROVED' && (
+                           <View style={{ flexDirection: 'row', gap: 6, marginTop: 7 }}>
+                             <TouchableOpacity onPress={() => changeSponsoredClaimStatus(claim.id, 'FULFILLED')} style={{ backgroundColor: '#166534', padding: 8, borderRadius: 7 }}><Text style={{ color: '#FFFFFF', fontSize: 10 }}>MARK FULFILLED</Text></TouchableOpacity>
+                             <TouchableOpacity onPress={() => changeSponsoredClaimStatus(claim.id, 'CANCELLED')} style={{ backgroundColor: '#7F1D1D', padding: 8, borderRadius: 7 }}><Text style={{ color: '#FFFFFF', fontSize: 10 }}>CANCEL</Text></TouchableOpacity>
+                           </View>
+                         )}
+                       </View>
+                     ))}
+                   </>
+                 )}
+
+                 {joined && (
+                   <>
+                     <Text style={{ color: '#FFFFFF', fontWeight: '800', marginTop: isOrganizer ? 18 : 8, marginBottom: 8 }}>
+                       Rewards available to you
+                     </Text>
+                     {participantSponsoredOffers.length === 0 ? (
+                       <Text style={{ color: '#A3A3A3', fontSize: 12 }}>No active sponsored rewards are currently available to you.</Text>
+                     ) : participantSponsoredOffers.map((offer: any) => (
+                       <View key={offer.id} style={{ borderTopWidth: 1, borderTopColor: '#333333', paddingVertical: 10 }}>
+                         <Text style={{ color: '#FFFFFF', fontWeight: '800' }}>{offer.reward_name} · {offer.sponsor_name}</Text>
+                         <Text style={{ color: '#A3A3A3', fontSize: 12, marginTop: 3 }}>{offer.description}</Text>
+                         <Text style={{ color: '#A3A3A3', fontSize: 10, marginTop: 4 }}>Eligibility: {offer.eligibility_type.replaceAll('_', ' ')} · Remaining: {offer.remaining_quantity}</Text>
+                         {!!offer.claim_deadline && <Text style={{ color: '#A3A3A3', fontSize: 10 }}>Claim by: {new Date(offer.claim_deadline).toLocaleString()}</Text>}
+                         {!!offer.my_claim_status && <Text style={{ color: '#93C5FD', fontSize: 11, marginTop: 4 }}>Your claim: {offer.my_claim_status}</Text>}
+                         {!offer.my_claim_status && offer.eligible && Number(offer.remaining_quantity) > 0 && offer.status === 'ACTIVE' && (
+                           <TouchableOpacity onPress={() => claimSponsoredReward(offer.id)} disabled={sponsoredActionLoading} style={{ marginTop: 8, padding: 10, borderRadius: 8, backgroundColor: '#2563EB' }}>
+                             <Text style={{ color: '#FFFFFF', textAlign: 'center', fontWeight: '800' }}>CLAIM REWARD</Text>
+                           </TouchableOpacity>
+                         )}
+                         {!offer.eligible && <Text style={{ color: '#A3A3A3', fontSize: 10, marginTop: 4 }}>Your official result does not meet this offer's eligibility rules.</Text>}
+                         {Number(offer.remaining_quantity) <= 0 && <Text style={{ color: '#FCA5A5', fontSize: 10, marginTop: 4 }}>All units have been claimed.</Text>}
+                       </View>
+                     ))}
+                   </>
+                 )}
+               </View>
+             )}
 
              {/* Leaderboard heading */}
             <View style={styles.sectionHeader}>

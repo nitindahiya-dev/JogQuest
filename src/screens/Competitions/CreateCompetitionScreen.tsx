@@ -90,6 +90,13 @@ const CreateCompetitionScreen = () => {
   const [description, setDescription] = useState('');
   const [metric, setMetric] = useState<Metric>('DISTANCE');
   const [duration, setDuration] = useState('7');
+
+  const [entryType, setEntryType] = useState<'FREE' | 'PAID'>('FREE');
+  const [entryFee, setEntryFee] = useState('');
+  const [prizeType, setPrizeType] = useState<'NONE' | 'CASH' | 'SPONSORED' | 'MIXED'>('NONE');
+  const [firstPrize, setFirstPrize] = useState('');
+  const [secondPrize, setSecondPrize] = useState('');
+  const [thirdPrize, setThirdPrize] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [competitionLocation, setCompetitionLocation] = useState<CompetitionLocation | null>(null);
@@ -157,6 +164,33 @@ const CreateCompetitionScreen = () => {
       return;
     }
 
+    const entryFeePaise = Math.round(Number(entryFee || 0) * 100);
+    const firstPrizePaise = Math.round(Number(firstPrize || 0) * 100);
+    const secondPrizePaise = Math.round(Number(secondPrize || 0) * 100);
+    const thirdPrizePaise = Math.round(Number(thirdPrize || 0) * 100);
+    const cashPrizePaise = firstPrizePaise + secondPrizePaise + thirdPrizePaise;
+
+    if (entryType === 'PAID' &&
+        (!Number.isFinite(Number(entryFee)) || entryFeePaise <= 0)) {
+      setError('Enter a valid positive entry fee in rupees.');
+      return;
+    }
+    if (prizeType === 'CASH' || prizeType === 'MIXED') {
+      if (
+        [firstPrize, secondPrize, thirdPrize].some(
+          value => value.trim() !== '' &&
+            (!Number.isFinite(Number(value)) || Number(value) < 0)
+        )
+      ) {
+        setError('Enter valid non-negative prize amounts.');
+        return;
+      }
+      if (cashPrizePaise <= 0) {
+        setError('Enter at least one cash prize allocation.');
+        return;
+      }
+    }
+
     try {
       setLoading(true);
       setError(null);
@@ -175,6 +209,18 @@ const CreateCompetitionScreen = () => {
             description: cleanDescription,
             metric,
             durationDays: days,
+            entryType,
+            entryFeePaise: entryType === 'PAID' ? entryFeePaise : 0,
+            prizeType,
+            cashPrizePaise:
+              prizeType === 'CASH' || prizeType === 'MIXED'
+                ? cashPrizePaise
+                : 0,
+            prizeDistribution: {
+              first: prizeType === 'CASH' || prizeType === 'MIXED' ? firstPrizePaise : 0,
+              second: prizeType === 'CASH' || prizeType === 'MIXED' ? secondPrizePaise : 0,
+              third: prizeType === 'CASH' || prizeType === 'MIXED' ? thirdPrizePaise : 0,
+            },
             ...(competitionLocation ? {
               latitude: competitionLocation.latitude,
               longitude: competitionLocation.longitude,
@@ -478,6 +524,137 @@ const CreateCompetitionScreen = () => {
           </View>
         </View>
 
+        {/* Entry and prizes */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeading}>
+            <View style={styles.sectionNumber}>
+              <Text style={styles.sectionNumberText}>04</Text>
+            </View>
+            <View style={styles.sectionHeadingText}>
+              <Text style={styles.sectionTitle}>Entry & prizes</Text>
+              <Text style={styles.sectionSubtitle}>
+                Configure the challenge's entry fee and rewards.
+              </Text>
+            </View>
+          </View>
+
+          <Text style={styles.label}>ENTRY TYPE</Text>
+          <View style={styles.durationGrid}>
+            {(['FREE', 'PAID'] as const).map(type => (
+              <TouchableOpacity
+                key={type}
+                style={[
+                  styles.durationCard,
+                  entryType === type && styles.durationCardActive,
+                ]}
+                onPress={() => {
+                  setEntryType(type);
+                  if (type === 'FREE') setEntryFee('');
+                }}
+              >
+                <Text style={[
+                  styles.durationLabel,
+                  entryType === type && styles.durationLabelActive,
+                ]}>
+                  {type === 'FREE' ? 'FREE ENTRY' : 'PAID ENTRY'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {entryType === 'PAID' && (
+            <View>
+              <Text style={styles.label}>ENTRY FEE (₹)</Text>
+              <TextInput
+                value={entryFee}
+                onChangeText={setEntryFee}
+                placeholder="e.g. 99"
+                placeholderTextColor={COLORS.textMuted}
+                keyboardType="decimal-pad"
+                style={styles.input}
+              />
+              <Text style={styles.sectionSubtitle}>
+                Payment collection is not active yet. This challenge will remain a draft.
+              </Text>
+            </View>
+          )}
+
+          <Text style={styles.label}>PRIZE TYPE</Text>
+          <View style={styles.metricList}>
+            {([
+              ['NONE', 'No prize'],
+              ['CASH', 'Cash prizes'],
+              ['SPONSORED', 'Sponsored rewards'],
+              ['MIXED', 'Cash + sponsored'],
+            ] as const).map(([type, label]) => (
+              <TouchableOpacity
+                key={type}
+                style={[
+                  styles.durationCard,
+                  prizeType === type && styles.durationCardActive,
+                ]}
+                onPress={() => {
+                  setPrizeType(type);
+                  if (type === 'NONE' || type === 'SPONSORED') {
+                    setFirstPrize('');
+                    setSecondPrize('');
+                    setThirdPrize('');
+                  }
+                }}
+              >
+                <Text style={[
+                  styles.durationLabel,
+                  prizeType === type && styles.durationLabelActive,
+                ]}>
+                  {label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {(prizeType === 'CASH' || prizeType === 'MIXED') && (
+            <View>
+              <Text style={styles.label}>CASH PRIZE ALLOCATION (₹)</Text>
+              <Text style={styles.sectionSubtitle}>
+                Enter the amount allocated to each finishing position.
+              </Text>
+              {([
+                ['First place', firstPrize, setFirstPrize],
+                ['Second place', secondPrize, setSecondPrize],
+                ['Third place', thirdPrize, setThirdPrize],
+              ] as const).map(([label, value, setter]) => (
+                <View key={label}>
+                  <Text style={styles.label}>{label.toUpperCase()}</Text>
+                  <TextInput
+                    value={value}
+                    onChangeText={setter}
+                    placeholder="0"
+                    placeholderTextColor={COLORS.textMuted}
+                    keyboardType="decimal-pad"
+                    style={styles.input}
+                  />
+                </View>
+              ))}
+              <Text style={styles.durationSummaryValue}>
+                Total cash prize: ₹{(
+                  (Number(firstPrize) || 0) +
+                  (Number(secondPrize) || 0) +
+                  (Number(thirdPrize) || 0)
+                ).toFixed(2)}
+              </Text>
+              <Text style={styles.sectionSubtitle}>
+                Cash payouts are not active yet. This challenge will remain a draft.
+              </Text>
+            </View>
+          )}
+
+          {prizeType === 'SPONSORED' || prizeType === 'MIXED' ? (
+            <Text style={styles.sectionSubtitle}>
+              Sponsored rewards are managed separately through the existing sponsored rewards system.
+            </Text>
+          ) : null}
+        </View>
+
         {/* Preview */}
         <View style={styles.previewCard}>
           <View style={styles.previewTop}>
@@ -508,6 +685,15 @@ const CreateCompetitionScreen = () => {
               <Text style={styles.previewMetaLabel}>DURATION</Text>
               <Text style={styles.previewMetaValue}>
                 {duration} DAYS
+              </Text>
+            </View>
+
+            <View style={styles.previewDivider} />
+
+            <View>
+              <Text style={styles.previewMetaLabel}>ENTRY</Text>
+              <Text style={styles.previewMetaValue}>
+                {entryType === 'PAID' ? `₹${entryFee || '0'}` : 'FREE'}
               </Text>
             </View>
           </View>

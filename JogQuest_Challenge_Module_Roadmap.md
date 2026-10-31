@@ -480,8 +480,4 @@ The first release of the Challenge module is ready when:
 - [ ] Production rollout and rollback procedures are documented.
 - [ ] No unresolved critical/high-severity release blocker remains.
 
-## Final working principle
-
-**Audit first. Implement one phase at a time. Test it. Record evidence. Then move to the next phase.**
-
 This roadmap is the plan, not a claim that the current code already meets these requirements. The audit determines what is complete, what needs repair, and what still needs to be built.

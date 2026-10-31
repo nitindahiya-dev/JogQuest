@@ -25,6 +25,7 @@ const ProfileScreen = () => {
   const insets = useSafeAreaInsets();
 
   const [profile, setProfile] = useState<any>(null);
+  const [competitionBadges, setCompetitionBadges] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -106,6 +107,17 @@ const ProfileScreen = () => {
       if (!response.ok) throw new Error('Failed to load');
       const data: any = await response.json();
       setProfile(data);
+      try {
+        const badgeResponse = await fetch(`${API_BASE_URL}/api/users/${user.id}/competition-badges`);
+        if (badgeResponse.ok) {
+          const badgeData: any = await badgeResponse.json();
+          setCompetitionBadges(Array.isArray(badgeData?.badges) ? badgeData.badges : []);
+        } else {
+          setCompetitionBadges([]);
+        }
+      } catch {
+        setCompetitionBadges([]);
+      }
     } catch (err) {
       setError('Could not load profile data.');
     } finally {
@@ -233,6 +245,26 @@ const ProfileScreen = () => {
           <Text style={styles.statValue}>{profile.territories_defended || 0}</Text>
           <Text style={styles.statLabel}>DEFENDED</Text>
         </View>
+      </View>
+
+      {/* Competition achievements */}
+      <View style={{ marginTop: 20, marginBottom: 18 }}>
+        <Text style={styles.sectionLabel}>CHALLENGE ACHIEVEMENTS</Text>
+        {competitionBadges.length === 0 ? (
+          <Text style={{ color: COLORS.textSecondary, fontSize: 12, marginTop: 8 }}>
+            Complete challenges to earn your first badge.
+          </Text>
+        ) : (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 10 }}>
+            {competitionBadges.map((badge: any) => (
+              <View key={badge.id} style={{ width: '48%', minHeight: 92, padding: 11, borderRadius: 13, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.surface }}>
+                <Text style={{ fontSize: 22 }}>{badge.icon}</Text>
+                <Text style={{ color: COLORS.text, fontSize: 11, fontWeight: '900', marginTop: 5 }}>{badge.name}</Text>
+                <Text style={{ color: COLORS.textSecondary, fontSize: 9, marginTop: 3 }} numberOfLines={2}>{badge.competition_name || badge.description}</Text>
+              </View>
+            ))}
+          </View>
+        )}
       </View>
 
       {/* Primary CTA */}

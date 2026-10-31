@@ -26,6 +26,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import type { RootStackParamList } from '../../navigation/types';
 
+import { useAuth } from '../../auth/AuthContext';
+
 type Navigation = NativeStackNavigationProp<
   RootStackParamList,
   'Competitions'
@@ -47,8 +49,6 @@ type Competition = {
 };
 
 type UserLocation = { latitude: number; longitude: number };
-
-
 
 const COLORS = {
   background: '#0A0A0A',
@@ -109,8 +109,12 @@ const getStatusStyle = (status: string) => {
 const CompetitionsScreen = () => {
   const navigation = useNavigation<Navigation>();
   const insets = useSafeAreaInsets();
+  const { token } = useAuth();
 
   const [competitions, setCompetitions] = useState<Competition[]>([]);
+  const [myDrafts, setMyDrafts] = useState<Competition[]>([]);
+  const [draftsLoading, setDraftsLoading] = useState(false);
+  const [draftsError, setDraftsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -175,62 +179,111 @@ const CompetitionsScreen = () => {
 
     return new Promise((resolve, reject) => {
       Geolocation.getCurrentPosition(
-        position => resolve({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        }),
-        error => reject(new Error(
-          error.code === 1
-            ? 'Location permission denied. Enable it in Android settings.'
-            : error.code === 2
-              ? 'Your location is unavailable. Enable device location and try again.'
-              : 'Could not get your location. Please try again.',
-        )),
+        position =>
+          resolve({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          }),
+        error =>
+          reject(
+            new Error(
+              error.code === 1
+                ? 'Location permission denied. Enable it in Android settings.'
+                : error.code === 2
+                  ? 'Your location is unavailable. Enable device location and try again.'
+                  : 'Could not get your location. Please try again.',
+            ),
+          ),
         { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 },
       );
     });
   }, []);
 
-  const loadCompetitions = useCallback(async (
-    location: UserLocation | null = userLocation,
-    radius = radiusKm,
-  ) => {
-    try {
-      setError(null);
+  const loadCompetitions = useCallback(
+    async (
+      location: UserLocation | null = userLocation,
+      radius = radiusKm,
+    ) => {
+      try {
+        setError(null);
 
-      const params = new URLSearchParams();
-      if (location) {
-        params.set('latitude', String(location.latitude));
-        params.set('longitude', String(location.longitude));
-        params.set('radiusKm', String(radius));
+        const params = new URLSearchParams();
+        if (location) {
+          params.set('latitude', String(location.latitude));
+          params.set('longitude', String(location.longitude));
+          params.set('radiusKm', String(radius));
+        }
+        const query = params.toString();
+        const response = await fetch(
+          `${API_BASE_URL}/api/competitions${query ? `?${query}` : ''}`,
+        );
+
+        const data: any = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data?.error ?? 'Failed to load competitions.');
+        }
+
+        setCompetitions(Array.isArray(data) ? (data as Competition[]) : []);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to load competitions.',
+        );
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-      const query = params.toString();
-      const response = await fetch(
-        `${API_BASE_URL}/api/competitions${query ? `?${query}` : ''}`,
-      );
+    },
+    [userLocation, radiusKm],
+  );
 
-      const data: any = await response.json();
+  const loadMyDrafts = useCallback(async () => {
+    if (!token) {
+      setMyDrafts([]);
+      return;
+    }
+
+    try {
+      setDraftsLoading(true);
+      setDraftsError(null);
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/competitions/my-drafts`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+      const data = (await response.json()) as
+        | { error?: string }
+        | Competition[];
 
       if (!response.ok) {
         throw new Error(
-          data?.error ?? 'Failed to load competitions.',
+          !Array.isArray(data) && data.error
+            ? data.error
+            : 'Failed to load your drafts.',
         );
       }
 
-      setCompetitions(
-        Array.isArray(data) ? (data as Competition[]) : [],
+      setMyDrafts(
+        Array.isArray(data) ? data : [],
       );
+
+      setMyDrafts(Array.isArray(data) ? (data as Competition[]) : []);
     } catch (err) {
-      setError(
+      setDraftsError(
         err instanceof Error
           ? err.message
-          : 'Failed to load competitions.',
+          : 'Failed to load your drafts.',
       );
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      setDraftsLoading(false);
     }
-  }, [userLocation, radiusKm]);
+  }, [token]);
 
   const enableNearby = useCallback(async () => {
     try {
@@ -240,7 +293,11 @@ const CompetitionsScreen = () => {
       setNearbyEnabled(true);
       await loadCompetitions(location, radiusKm);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not find nearby challenges.');
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Could not find nearby challenges.',
+      );
     }
   }, [getCurrentLocation, loadCompetitions, radiusKm]);
 
@@ -253,8 +310,17 @@ const CompetitionsScreen = () => {
   useFocusEffect(
     useCallback(() => {
       loadCompetitions();
-    }, [loadCompetitions]),
+      loadMyDrafts();
+    }, [loadCompetitions, loadMyDrafts]),
   );
+
+  const refreshAll = useCallback(async () => {
+    setRefreshing(true);
+
+    await Promise.all([loadCompetitions(), loadMyDrafts()]);
+
+    setRefreshing(false);
+  }, [loadCompetitions, loadMyDrafts]);
 
   if (loading) {
     return (
@@ -265,9 +331,7 @@ const CompetitionsScreen = () => {
         ]}
       >
         <ActivityIndicator size="large" color={COLORS.accent} />
-        <Text style={styles.loadingText}>
-          Loading competitions...
-        </Text>
+        <Text style={styles.loadingText}>Loading competitions...</Text>
       </View>
     );
   }
@@ -283,10 +347,7 @@ const CompetitionsScreen = () => {
             refreshing={refreshing}
             tintColor={COLORS.accent}
             colors={[COLORS.accent]}
-            onRefresh={() => {
-              setRefreshing(true);
-              loadCompetitions();
-            }}
+            onRefresh={refreshAll}
           />
         }
         contentContainerStyle={[
@@ -298,9 +359,7 @@ const CompetitionsScreen = () => {
             {/* Header */}
             <View style={styles.header}>
               <View style={styles.headerText}>
-                <Text style={styles.eyebrow}>
-                  COMMUNITY CHALLENGES
-                </Text>
+                <Text style={styles.eyebrow}>COMMUNITY CHALLENGES</Text>
 
                 <Text style={styles.title}>
                   COMPETE<Text style={styles.titleAccent}>.</Text>
@@ -314,9 +373,7 @@ const CompetitionsScreen = () => {
               <TouchableOpacity
                 style={styles.createButton}
                 activeOpacity={0.85}
-                onPress={() =>
-                  navigation.navigate('CreateCompetition')
-                }
+                onPress={() => navigation.navigate('CreateCompetition')}
               >
                 <Text style={styles.createButtonText}>+</Text>
                 <Text style={styles.createButtonLabel}>CREATE</Text>
@@ -327,13 +384,9 @@ const CompetitionsScreen = () => {
             <View style={styles.overviewCard}>
               <View style={styles.overviewTop}>
                 <View>
-                  <Text style={styles.overviewLabel}>
-                    YOUR NEXT CHALLENGE
-                  </Text>
+                  <Text style={styles.overviewLabel}>YOUR NEXT CHALLENGE</Text>
 
-                  <Text style={styles.overviewTitle}>
-                    Every run counts.
-                  </Text>
+                  <Text style={styles.overviewTitle}>Every run counts.</Text>
                 </View>
 
                 <View style={styles.overviewIcon}>
@@ -348,35 +401,110 @@ const CompetitionsScreen = () => {
                   <Text style={styles.overviewNumber}>
                     {competitions.length}
                   </Text>
-                  <Text style={styles.overviewStatLabel}>
-                    CHALLENGES
-                  </Text>
+                  <Text style={styles.overviewStatLabel}>CHALLENGES</Text>
                 </View>
 
                 <View>
                   <Text style={styles.overviewNumber}>
                     {
                       competitions.filter(
-                        item =>
-                          item.status?.toUpperCase() === 'ACTIVE',
+                        item => item.status?.toUpperCase() === 'ACTIVE',
                       ).length
                     }
                   </Text>
-                  <Text style={styles.overviewStatLabel}>
-                    ACTIVE NOW
-                  </Text>
+                  <Text style={styles.overviewStatLabel}>ACTIVE NOW</Text>
                 </View>
               </View>
             </View>
 
+            {/* My Drafts */}
+            <View style={styles.draftsSection}>
+              <View style={styles.sectionHeader}>
+                <View>
+                  <Text style={styles.sectionTitle}>MY DRAFTS</Text>
+                  <Text style={styles.sectionSubtitle}>
+                    Challenges you're still working on
+                  </Text>
+                </View>
+
+                <View style={styles.countBadge}>
+                  <Text style={styles.countBadgeText}>{myDrafts.length}</Text>
+                </View>
+              </View>
+
+              {draftsLoading && myDrafts.length === 0 ? (
+                <View style={styles.draftsLoading}>
+                  <ActivityIndicator color={COLORS.accent} />
+                  <Text style={styles.draftsLoadingText}>
+                    Loading your drafts...
+                  </Text>
+                </View>
+              ) : draftsError ? (
+                <View style={styles.draftsEmpty}>
+                  <Text style={styles.draftsEmptyText}>{draftsError}</Text>
+
+                  <TouchableOpacity
+                    onPress={loadMyDrafts}
+                    style={styles.draftRetryButton}
+                  >
+                    <Text style={styles.draftRetryText}>RETRY</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : myDrafts.length === 0 ? (
+                <View style={styles.draftsEmpty}>
+                  <Text style={styles.draftsEmptyTitle}>No saved drafts</Text>
+                  <Text style={styles.draftsEmptyText}>
+                    Challenges you create but haven't published will appear
+                    here.
+                  </Text>
+                </View>
+              ) : (
+                myDrafts.map(draft => (
+                  <TouchableOpacity
+                    key={draft.id}
+                    style={styles.draftCard}
+                    activeOpacity={0.85}
+                    onPress={() =>
+                      navigation.navigate('CompetitionDetails', {
+                        competitionId: draft.id,
+                      })
+                    }
+                  >
+                    <View style={styles.draftCardTop}>
+                      <View style={styles.draftBadge}>
+                        <Text style={styles.draftBadgeText}>DRAFT</Text>
+                      </View>
+
+                      <Text style={styles.draftArrow}>↗</Text>
+                    </View>
+
+                    <Text style={styles.draftName} numberOfLines={2}>
+                      {draft.name}
+                    </Text>
+
+                    <Text style={styles.draftDescription} numberOfLines={2}>
+                      {draft.description?.trim() ||
+                        'No description added yet.'}
+                    </Text>
+
+                    <View style={styles.draftFooter}>
+                      <Text style={styles.draftMetric}>
+                        {draft.metric || 'RUNNING'}
+                      </Text>
+
+                      <Text style={styles.draftAction}>
+                        CONTINUE EDITING →
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))
+              )}
+            </View>
+
             <View style={styles.sectionHeader}>
               <View>
-                <Text style={styles.sectionTitle}>
-                  ALL CHALLENGES
-                </Text>
-                <Text style={styles.sectionSubtitle}>
-                  Find your next goal
-                </Text>
+                <Text style={styles.sectionTitle}>ALL CHALLENGES</Text>
+                <Text style={styles.sectionSubtitle}>Find your next goal</Text>
               </View>
 
               <View style={styles.countBadge}>
@@ -433,10 +561,12 @@ const CompetitionsScreen = () => {
                       accessibilityRole="button"
                       accessibilityState={{ selected: radiusKm === radius }}
                     >
-                      <Text style={[
-                        styles.radiusChipText,
-                        radiusKm === radius && styles.radiusChipTextActive,
-                      ]}>
+                      <Text
+                        style={[
+                          styles.radiusChipText,
+                          radiusKm === radius && styles.radiusChipTextActive,
+                        ]}
+                      >
                         {radius} km
                       </Text>
                     </TouchableOpacity>
@@ -535,7 +665,8 @@ const CompetitionsScreen = () => {
             </View>
 
             <Text style={styles.resultsText}>
-              Showing {filteredCompetitions.length} of {competitions.length} challenges
+              Showing {filteredCompetitions.length} of {competitions.length}{' '}
+              challenges
             </Text>
 
             {error && (
@@ -551,9 +682,7 @@ const CompetitionsScreen = () => {
                   style={styles.retryButton}
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.retryButtonText}>
-                    TRY AGAIN
-                  </Text>
+                  <Text style={styles.retryButtonText}>TRY AGAIN</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -593,10 +722,7 @@ const CompetitionsScreen = () => {
                   />
 
                   <Text
-                    style={[
-                      styles.statusText,
-                      { color: statusStyle.color },
-                    ]}
+                    style={[styles.statusText, { color: statusStyle.color }]}
                   >
                     {item.status || 'UPCOMING'}
                   </Text>
@@ -607,10 +733,7 @@ const CompetitionsScreen = () => {
                 {item.name}
               </Text>
 
-              <Text
-                style={styles.cardDescription}
-                numberOfLines={2}
-              >
+              <Text style={styles.cardDescription} numberOfLines={2}>
                 {item.description?.trim() || 'No description available.'}
               </Text>
 
@@ -657,9 +780,7 @@ const CompetitionsScreen = () => {
               </View>
 
               <View style={styles.cardAction}>
-                <Text style={styles.cardActionText}>
-                  VIEW CHALLENGE
-                </Text>
+                <Text style={styles.cardActionText}>VIEW CHALLENGE</Text>
                 <Text style={styles.cardActionArrow}>↗</Text>
               </View>
             </TouchableOpacity>
@@ -672,21 +793,17 @@ const CompetitionsScreen = () => {
                 <Text style={styles.emptyIconText}>🏁</Text>
               </View>
 
-              <Text style={styles.emptyTitle}>
-                No competitions yet
-              </Text>
+              <Text style={styles.emptyTitle}>No competitions yet</Text>
 
               <Text style={styles.emptyText}>
-                Be the first to create a challenge and bring the
-                community together.
+                Be the first to create a challenge and bring the community
+                together.
               </Text>
 
               <TouchableOpacity
                 style={styles.emptyButton}
                 activeOpacity={0.85}
-                onPress={() =>
-                  navigation.navigate('CreateCompetition')
-                }
+                onPress={() => navigation.navigate('CreateCompetition')}
               >
                 <Text style={styles.emptyButtonText}>
                   CREATE FIRST CHALLENGE
@@ -1289,5 +1406,132 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
 
-});
+  // My Drafts
+  draftsSection: {
+    marginBottom: 28,
+  },
 
+  draftsLoading: {
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 16,
+    padding: SPACING.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+
+  draftsLoadingText: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+  },
+
+  draftsEmpty: {
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 16,
+    padding: SPACING.md,
+  },
+
+  draftsEmptyTitle: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  draftsEmptyText: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 5,
+  },
+
+  draftRetryButton: {
+    alignSelf: 'flex-start',
+    marginTop: 12,
+    backgroundColor: COLORS.surfaceLight,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 9,
+  },
+
+  draftRetryText: {
+    color: COLORS.accent,
+    fontSize: 10,
+    fontWeight: '900',
+  },
+
+  draftCard: {
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: 'rgba(212,255,0,0.20)',
+    borderRadius: 17,
+    padding: SPACING.md,
+    marginBottom: SPACING.sm,
+  },
+
+  draftCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  draftBadge: {
+    backgroundColor: 'rgba(212,255,0,0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 7,
+  },
+
+  draftBadgeText: {
+    color: COLORS.accent,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+  },
+
+  draftArrow: {
+    color: COLORS.accent,
+    fontSize: 19,
+    fontWeight: '800',
+  },
+
+  draftName: {
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: '900',
+    marginTop: 12,
+  },
+
+  draftDescription: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 5,
+  },
+
+  draftFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    marginTop: 14,
+    paddingTop: 12,
+  },
+
+  draftMetric: {
+    color: COLORS.textMuted,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+
+  draftAction: {
+    color: COLORS.accent,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+});
