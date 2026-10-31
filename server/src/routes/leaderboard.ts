@@ -13,6 +13,169 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
   const router = Router();
   const { pool, query, requireAuth } = context;
 
+  const REVIEW_DEADLINE_HOURS = 48;
+
+  const isPlatformAdmin = async (db: any, userId: string): Promise<boolean> => {
+    const result = await db.query(
+      `SELECT 1 FROM platform_admins WHERE user_id = $1`,
+      [userId],
+    );
+    return result.rows.length > 0;
+  };
+
+  const finalizeCompetition = async (
+    client: any,
+    competitionId: string,
+    metric: string,
+    actorUserId: string | null,
+    auditReason: string,
+  ) => {
+    // Never publish while any flag or scoring review remains unresolved.
+    const pending = await client.query(
+      `SELECT
+         (SELECT COUNT(*)::int
+          FROM competition_activity_flags
+          WHERE competition_id = $1 AND resolved_at IS NULL) AS unresolved_flags,
+         (SELECT COUNT(*)::int
+          FROM competition_activity_scores
+          WHERE competition_id = $1 AND scoring_status = 'REVIEW') AS pending_scores`,
+      [competitionId],
+    );
+
+    const unresolvedFlags = Number(pending.rows[0]?.unresolved_flags ?? 0);
+    const pendingScores = Number(pending.rows[0]?.pending_scores ?? 0);
+
+    if (unresolvedFlags > 0 || pendingScores > 0) {
+      return {
+        finalized: false,
+        unresolvedFlags,
+        pendingScores,
+      };
+    }
+
+    // Idempotency guard. The caller must hold the competition row lock.
+    const existing = await client.query(
+      `SELECT 1 FROM competition_results WHERE competition_id = $1 LIMIT 1`,
+      [competitionId],
+    );
+
+    if (existing.rows.length) {
+      return { finalized: false, alreadyFinalized: true };
+    }
+
+    await client.query(
+      `WITH participant_totals AS (
+         SELECT
+           cp.user_id,
+           COALESCE(
+             SUM(s.score) FILTER (WHERE s.scoring_status = 'SCORED'),
+             0
+           )::numeric(14,4) AS total_score,
+           u.display_name
+         FROM competition_participants cp
+         JOIN users u ON u.id = cp.user_id
+         LEFT JOIN competition_activity_scores s
+           ON s.competition_id = cp.competition_id
+          AND s.user_id = cp.user_id
+          AND s.metric = $2
+         WHERE cp.competition_id = $1
+         GROUP BY cp.user_id, u.display_name
+       ),
+       ranked AS (
+         SELECT
+           user_id,
+           total_score,
+           ROW_NUMBER() OVER (
+             ORDER BY total_score DESC, display_name ASC, user_id ASC
+           )::int AS rank_position
+         FROM participant_totals
+       )
+       INSERT INTO competition_results (
+         competition_id, user_id, rank_position, score, metric
+       )
+       SELECT $1, user_id, rank_position, total_score, $2
+       FROM ranked`,
+      [competitionId, metric],
+    );
+
+    // Preserve the existing badge-award rules.
+    await client.query(
+      `INSERT INTO user_competition_badges (user_id, badge_code, competition_id)
+       SELECT cr.user_id, badge.code, cr.competition_id
+       FROM competition_results cr
+       CROSS JOIN LATERAL (
+         SELECT 'CHALLENGE_PARTICIPANT'::varchar(40) AS code
+         UNION ALL
+         SELECT 'CHALLENGE_FINISHER'::varchar(40) WHERE cr.score > 0
+         UNION ALL
+         SELECT CASE cr.rank_position
+           WHEN 1 THEN 'CHALLENGE_GOLD'
+           WHEN 2 THEN 'CHALLENGE_SILVER'
+           WHEN 3 THEN 'CHALLENGE_BRONZE'
+         END
+         WHERE cr.rank_position BETWEEN 1 AND 3
+         UNION ALL
+         SELECT 'CHALLENGE_PERSONAL_BEST'::varchar(40)
+         WHERE EXISTS (
+           SELECT 1
+           FROM competition_results previous
+           WHERE previous.user_id = cr.user_id
+             AND previous.metric = cr.metric
+             AND previous.competition_id <> cr.competition_id
+         )
+         AND cr.score > COALESCE((
+           SELECT MAX(previous.score)
+           FROM competition_results previous
+           WHERE previous.user_id = cr.user_id
+             AND previous.metric = cr.metric
+             AND previous.competition_id <> cr.competition_id
+         ), -1)
+       ) badge
+       WHERE cr.competition_id = $1
+       ON CONFLICT (user_id, badge_code, competition_id) DO NOTHING`,
+      [competitionId],
+    );
+
+    await client.query(
+      `UPDATE competitions
+       SET status = 'COMPLETED'
+       WHERE id = $1 AND status = 'UNDER_REVIEW'`,
+      [competitionId],
+    );
+
+    await client.query(
+      `INSERT INTO competition_admin_audit (
+         competition_id, actor_user_id, action_type, reason,
+         before_data, after_data
+       )
+       VALUES (
+         $1, $2, $3, $4,
+         $5::jsonb, $6::jsonb
+       )`,
+      [
+        competitionId,
+        actorUserId,
+        actorUserId ? 'COMPETITION_MANUALLY_FINALIZED' : 'COMPETITION_AUTO_FINALIZED',
+        auditReason,
+        JSON.stringify({ status: 'UNDER_REVIEW' }),
+        JSON.stringify({ status: 'COMPLETED', metric }),
+      ],
+    );
+
+    const published = await client.query(
+      `SELECT rank_position, user_id, score, metric, finalized_at
+       FROM competition_results
+       WHERE competition_id = $1
+       ORDER BY rank_position ASC`,
+      [competitionId],
+    );
+
+    return {
+      finalized: true,
+      results: published.rows,
+    };
+  };
+
   router.get(
     '/api/leaderboard',
     (req, res, next) => {
@@ -1990,9 +2153,13 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
 
         await client.query(
           `UPDATE competitions
-         SET status = 'UNDER_REVIEW'
+         SET status = 'UNDER_REVIEW',
+             review_deadline_at = COALESCE(
+               review_deadline_at,
+               NOW() + ($2 * INTERVAL '1 hour')
+             )
          WHERE id = $1`,
-          [competitionId],
+          [competitionId, REVIEW_DEADLINE_HOURS],
         );
 
         const flags = await client.query(
@@ -2003,13 +2170,27 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
           [competitionId],
         );
 
+        const pendingScores = await client.query(
+          `SELECT COUNT(*)::int AS count
+           FROM competition_activity_scores
+           WHERE competition_id = $1
+             AND scoring_status = 'REVIEW'`,
+          [competitionId],
+        );
+
         await client.query('COMMIT');
         inTransaction = false;
 
         return res.json({
           status: 'UNDER_REVIEW',
           unresolvedFlags: Number(flags.rows[0]?.unresolved_count ?? 0),
-          canFinalize: Number(flags.rows[0]?.unresolved_count ?? 0) === 0,
+          pendingScores: Number(pendingScores.rows[0]?.count ?? 0),
+          reviewDeadlineAt: new Date(
+            Date.now() + REVIEW_DEADLINE_HOURS * 60 * 60 * 1000
+          ).toISOString(),
+          canFinalize:
+            Number(flags.rows[0]?.unresolved_count ?? 0) === 0 &&
+            Number(pendingScores.rows[0]?.count ?? 0) === 0,
         });
       } catch (error) {
         if (inTransaction) {
@@ -2106,94 +2287,48 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
           });
         }
 
-        await client.query(
-          `WITH participant_totals AS (
-           SELECT
-             cp.user_id,
-             COALESCE(
-               SUM(s.score) FILTER (WHERE s.scoring_status = 'SCORED'),
-               0
-             )::numeric(14,4) AS total_score,
-             u.display_name
-           FROM competition_participants cp
-           JOIN users u ON u.id = cp.user_id
-           LEFT JOIN competition_activity_scores s
-             ON s.competition_id = cp.competition_id
-            AND s.user_id = cp.user_id
-            AND s.metric = $2
-           WHERE cp.competition_id = $1
-           GROUP BY cp.user_id, u.display_name
-         ),
-         ranked AS (
-           SELECT
-             user_id,
-             total_score,
-             ROW_NUMBER() OVER (
-               ORDER BY total_score DESC, display_name ASC, user_id ASC
-             )::int AS rank_position
-           FROM participant_totals
-         )
-         INSERT INTO competition_results (
-           competition_id, user_id, rank_position, score, metric
-         )
-         SELECT $1, user_id, rank_position, total_score, $2
-         FROM ranked`,
-          [competitionId, challenge.metric],
-        );
-
-        // PHASE 8: award badges atomically with official result finalization.
-        await client.query(
-          `INSERT INTO user_competition_badges (user_id, badge_code, competition_id)
-         SELECT cr.user_id, badge.code, cr.competition_id
-         FROM competition_results cr
-         CROSS JOIN LATERAL (
-           SELECT 'CHALLENGE_PARTICIPANT'::varchar(40) AS code
-           UNION ALL
-           SELECT 'CHALLENGE_FINISHER'::varchar(40)
-             WHERE cr.score > 0
-           UNION ALL
-           SELECT CASE cr.rank_position
-             WHEN 1 THEN 'CHALLENGE_GOLD'
-             WHEN 2 THEN 'CHALLENGE_SILVER'
-             WHEN 3 THEN 'CHALLENGE_BRONZE'
-           END
-             WHERE cr.rank_position BETWEEN 1 AND 3
-           UNION ALL
-           SELECT 'CHALLENGE_PERSONAL_BEST'::varchar(40)
-             WHERE EXISTS (
-               SELECT 1
-               FROM competition_results previous
-               WHERE previous.user_id = cr.user_id
-                 AND previous.metric = cr.metric
-                 AND previous.competition_id <> cr.competition_id
-             )
-             AND cr.score > COALESCE((
-               SELECT MAX(previous.score)
-               FROM competition_results previous
-               WHERE previous.user_id = cr.user_id
-                 AND previous.metric = cr.metric
-                 AND previous.competition_id <> cr.competition_id
-             ), -1)
-         ) badge
-         WHERE cr.competition_id = $1
-         ON CONFLICT (user_id, badge_code, competition_id) DO NOTHING`,
+        const pendingScores = await client.query(
+          `SELECT COUNT(*)::int AS count
+           FROM competition_activity_scores
+           WHERE competition_id = $1
+             AND scoring_status = 'REVIEW'`,
           [competitionId],
         );
 
-        await client.query(
-          `UPDATE competitions
-         SET status = 'COMPLETED'
-         WHERE id = $1`,
-          [competitionId],
+        if (Number(pendingScores.rows[0]?.count ?? 0) > 0) {
+          await client.query('ROLLBACK');
+          inTransaction = false;
+          return res.status(409).json({
+            error: 'Resolve all pending scoring reviews before finalization',
+            pendingScores: Number(pendingScores.rows[0].count),
+          });
+        }
+
+        const finalization = await finalizeCompetition(
+          client,
+          competitionId,
+          challenge.metric,
+          userId,
+          'Challenge results manually finalized by organizer.',
         );
 
-        const published = await client.query(
-          `SELECT rank_position, user_id, score, metric, finalized_at
-         FROM competition_results
-         WHERE competition_id = $1
-         ORDER BY rank_position ASC`,
-          [competitionId],
-        );
+        if (!finalization.finalized && !finalization.alreadyFinalized) {
+          await client.query('ROLLBACK');
+          inTransaction = false;
+          return res.status(409).json({
+            error: 'Challenge still has unresolved review items',
+            unresolvedFlags: finalization.unresolvedFlags,
+            pendingScores: finalization.pendingScores,
+          });
+        }
+
+        if (finalization.alreadyFinalized) {
+          await client.query('ROLLBACK');
+          inTransaction = false;
+          return res.status(409).json({
+            error: 'Results already exist; refusing to overwrite official results',
+          });
+        }
 
         await client.query('COMMIT');
         inTransaction = false;
@@ -2201,7 +2336,7 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
         return res.json({
           status: 'COMPLETED',
           alreadyFinalized: false,
-          results: published.rows,
+          results: finalization.results,
         });
       } catch (error) {
         if (inTransaction) {
@@ -2278,6 +2413,121 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
 
 
   router.post(
+    '/api/competitions/:competitionId/admin/review-takeover',
+    requireAuth,
+    async (req, res) => {
+      const client = await pool.connect();
+      let inTransaction = false;
+
+      try {
+        const userId = res.locals.authenticatedUserId as string;
+        const competitionId = req.params.competitionId;
+        const reason = typeof req.body?.reason === 'string'
+          ? req.body.reason.trim()
+          : '';
+
+        if (!reason || reason.length > 1000) {
+          return res.status(400).json({
+            error: 'A takeover reason of 1–1000 characters is required',
+          });
+        }
+
+        await client.query('BEGIN');
+        inTransaction = true;
+
+        const admin = await isPlatformAdmin(client, userId);
+
+        if (!admin) {
+          await client.query('ROLLBACK');
+          inTransaction = false;
+          return res.status(403).json({ error: 'Platform administrator access required' });
+        }
+
+        const result = await client.query(
+          `SELECT id, status, review_deadline_at,
+                  review_taken_over_at, creator_id
+           FROM competitions
+           WHERE id = $1
+           FOR UPDATE`,
+          [competitionId],
+        );
+
+        if (!result.rows.length) {
+          await client.query('ROLLBACK');
+          inTransaction = false;
+          return res.status(404).json({ error: 'Challenge not found' });
+        }
+
+        const challenge = result.rows[0];
+
+        if (challenge.status !== 'UNDER_REVIEW') {
+          await client.query('ROLLBACK');
+          inTransaction = false;
+          return res.status(409).json({ error: 'Challenge is not under review' });
+        }
+
+        if (!challenge.review_deadline_at ||
+            new Date(challenge.review_deadline_at).getTime() > Date.now()) {
+          await client.query('ROLLBACK');
+          inTransaction = false;
+          return res.status(409).json({
+            error: 'The organizer review deadline has not expired',
+            reviewDeadlineAt: challenge.review_deadline_at,
+          });
+        }
+
+        if (challenge.review_taken_over_at) {
+          await client.query('ROLLBACK');
+          inTransaction = false;
+          return res.status(409).json({ error: 'Review has already been taken over' });
+        }
+
+        await client.query(
+          `UPDATE competitions
+           SET review_taken_over_at = NOW(),
+               review_taken_over_by = $2,
+               review_takeover_reason = $3
+           WHERE id = $1`,
+          [competitionId, userId, reason],
+        );
+
+        await client.query(
+          `INSERT INTO competition_admin_audit (
+             competition_id, actor_user_id, action_type,
+             reason, before_data, after_data
+           )
+           VALUES ($1, $2, 'REVIEW_TAKEOVER', $3, $4::jsonb, $5::jsonb)`,
+          [
+            competitionId,
+            userId,
+            reason,
+            JSON.stringify({ reviewTakenOver: false }),
+            JSON.stringify({ reviewTakenOver: true }),
+          ],
+        );
+
+        await client.query('COMMIT');
+        inTransaction = false;
+
+        return res.json({
+          takenOver: true,
+          competitionId,
+          takenOverBy: userId,
+        });
+      } catch (error) {
+        if (inTransaction) {
+          await client.query('ROLLBACK').catch(() => undefined);
+        }
+        console.error('Failed to take over challenge review:', error);
+        return res.status(500).json({ error: 'Failed to take over challenge review' });
+      } finally {
+        client.release();
+      }
+    },
+  );
+
+
+  router.post(
     '/api/competitions/:competitionId/review-flags/:activityId/resolve',
     requireAuth,
     async (req, res) => {
@@ -2314,26 +2564,44 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
         inTransaction = true;
 
         const owner = await client.query(
-          `SELECT id, status, metric
-         FROM competitions
-         WHERE id = $1 AND creator_id = $2
-         FOR UPDATE`,
-          [competitionId, actorUserId],
+          `SELECT c.id, c.status, c.metric, c.creator_id,
+                  c.review_taken_over_at
+           FROM competitions c
+           WHERE c.id = $1
+           FOR UPDATE`,
+          [competitionId],
         );
 
         if (!owner.rows.length) {
           await client.query('ROLLBACK');
           inTransaction = false;
-          return res.status(404).json({
-            error: 'Challenge not found or you are not its creator',
-          });
+          return res.status(404).json({ error: 'Challenge not found' });
         }
 
-        if (owner.rows[0].status !== 'UNDER_REVIEW') {
+        const challenge = owner.rows[0];
+        const platformAdmin = await isPlatformAdmin(client, actorUserId);
+
+        if (challenge.status !== 'UNDER_REVIEW') {
           await client.query('ROLLBACK');
           inTransaction = false;
           return res.status(409).json({
             error: 'Activity decisions are only allowed during challenge review',
+          });
+        }
+
+        if (challenge.review_taken_over_at) {
+          if (!platformAdmin) {
+            await client.query('ROLLBACK');
+            inTransaction = false;
+            return res.status(403).json({
+              error: 'Review has been taken over by platform administration',
+            });
+          }
+        } else if (challenge.creator_id !== actorUserId) {
+          await client.query('ROLLBACK');
+          inTransaction = false;
+          return res.status(403).json({
+            error: 'Only the challenge creator can resolve review flags before takeover',
           });
         }
 
@@ -2491,8 +2759,12 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
             competitionId,
             actorUserId,
             decision === 'APPROVED'
-              ? 'ACTIVITY_FLAG_APPROVED'
-              : 'ACTIVITY_FLAG_REJECTED',
+              ? (challenge.review_taken_over_at
+                  ? 'ADMIN_ACTIVITY_FLAG_APPROVED'
+                  : 'ACTIVITY_FLAG_APPROVED')
+              : (challenge.review_taken_over_at
+                  ? 'ADMIN_ACTIVITY_FLAG_REJECTED'
+                  : 'ACTIVITY_FLAG_REJECTED'),
             activity.user_id,
             activityId,
             note,
@@ -2552,6 +2824,111 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
       }
     },
   );
+
+
+
+  // ============================================================
+  // AUTOMATIC COMPETITION LIFECYCLE
+  // ============================================================
+
+  const processCompetitionLifecycle = async () => {
+    const client = await pool.connect();
+    let inTransaction = false;
+
+    try {
+      await client.query('BEGIN');
+      inTransaction = true;
+
+      // Multiple API instances can safely share this worker.
+      const candidates = await client.query(
+        `SELECT id, metric, start_at, end_at, status
+         FROM competitions
+         WHERE status IN ('REGISTRATION_OPEN', 'ACTIVE', 'UNDER_REVIEW')
+           AND end_at <= NOW()
+         ORDER BY end_at ASC
+         LIMIT 20
+         FOR UPDATE SKIP LOCKED`,
+      );
+
+      let processed = 0;
+      let finalized = 0;
+      let awaitingReview = 0;
+
+      for (const challenge of candidates.rows) {
+        // Rebuild scores from eligible participant activities.
+        await client.query(
+          `SELECT jq_recalculate_competition_activity(a.id)
+           FROM activities a
+           JOIN competition_participants cp
+             ON cp.user_id = a.user_id
+            AND cp.competition_id = $1
+           WHERE a.started_at >= $2
+             AND a.finished_at <= $3`,
+          [challenge.id, challenge.start_at, challenge.end_at],
+        );
+
+        // Start review once, retaining the original deadline on later sweeps.
+        await client.query(
+          `UPDATE competitions
+           SET status = 'UNDER_REVIEW',
+               review_deadline_at = COALESCE(
+                 review_deadline_at,
+                 NOW() + ($2 * INTERVAL '1 hour')
+               )
+           WHERE id = $1
+             AND status IN ('REGISTRATION_OPEN', 'ACTIVE', 'UNDER_REVIEW')`,
+          [challenge.id, REVIEW_DEADLINE_HOURS],
+        );
+
+        const result = await finalizeCompetition(
+          client,
+          challenge.id,
+          challenge.metric,
+          null,
+          'Automatically finalized after challenge end; no unresolved activity flags or scoring reviews remained.',
+        );
+
+        processed++;
+
+        if (result.finalized) {
+          finalized++;
+        } else {
+          awaitingReview++;
+        }
+      }
+
+      await client.query('COMMIT');
+      inTransaction = false;
+
+      return { processed, finalized, awaitingReview };
+    } catch (error) {
+      if (inTransaction) {
+        await client.query('ROLLBACK').catch(() => undefined);
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  };
+
+  const competitionLifecycleTimer = setInterval(() => {
+    void processCompetitionLifecycle()
+      .then(result => {
+        if (result.processed > 0) {
+          console.info('Competition lifecycle sweep:', result);
+        }
+      })
+      .catch(error => {
+        console.error('Competition lifecycle sweep failed:', error);
+      });
+  }, 60 * 1000);
+
+  // Run once shortly after the server starts.
+  void processCompetitionLifecycle().catch(error => {
+    console.error('Initial competition lifecycle sweep failed:', error);
+  });
+
+
   // Phase 7: organizer-only participant and evidence views.
   router.get(
     '/api/competitions/:competitionId/admin/participants',
