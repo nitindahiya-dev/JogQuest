@@ -60,25 +60,25 @@ const METRICS: {
   description: string;
   icon: string;
 }[] = [
-  {
-    value: 'DISTANCE',
-    title: 'Distance',
-    description: 'Compete on total distance covered.',
-    icon: '↗',
-  },
-  {
-    value: 'TERRITORY',
-    title: 'Territory',
-    description: 'Compete through territory exploration.',
-    icon: '⌖',
-  },
-  {
-    value: 'ACTIVITIES',
-    title: 'Activities',
-    description: 'Compete by completing activities.',
-    icon: '✓',
-  },
-];
+    {
+      value: 'DISTANCE',
+      title: 'Distance',
+      description: 'Compete on total distance covered.',
+      icon: '↗',
+    },
+    {
+      value: 'TERRITORY',
+      title: 'Territory',
+      description: 'Compete through territory exploration.',
+      icon: '⌖',
+    },
+    {
+      value: 'ACTIVITIES',
+      title: 'Activities',
+      description: 'Compete by completing activities.',
+      icon: '✓',
+    },
+  ];
 
 const CreateCompetitionScreen = () => {
   const { user, token } = useAuth();
@@ -217,7 +217,7 @@ const CreateCompetitionScreen = () => {
     const cashPrizePaise = firstPrizePaise + secondPrizePaise + thirdPrizePaise;
 
     if (entryType === 'PAID' &&
-        (!Number.isFinite(Number(entryFee)) || entryFeePaise <= 0)) {
+      (!Number.isFinite(Number(entryFee)) || entryFeePaise <= 0)) {
       setError('Enter a valid positive entry fee in rupees.');
       return;
     }
@@ -631,7 +631,8 @@ const CreateCompetitionScreen = () => {
             style={styles.input}
           />
           <Text style={styles.sectionSubtitle}>
-            Includes you as the creator. Maximum 100000 participants.
+            Only users who explicitly join are counted, including you.
+            Maximum 100000 participants.
           </Text>
         </View>
 
