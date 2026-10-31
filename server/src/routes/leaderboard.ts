@@ -311,7 +311,9 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
           name,
           description,
           metric,
-          durationDays,
+          startAt,
+          endAt,
+          targetDistanceKm,
           latitude,
           longitude,
           entryType = 'FREE',
@@ -379,17 +381,55 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
           });
         }
 
-        const days =
-          Number(durationDays);
+        const startDate = new Date(startAt);
+        const endDate = new Date(endAt);
 
         if (
-          !Number.isFinite(days) ||
-          days < 1 ||
-          days > 90
+          !startAt ||
+          !endAt ||
+          !Number.isFinite(startDate.getTime()) ||
+          !Number.isFinite(endDate.getTime()) ||
+          endDate.getTime() <= startDate.getTime()
         ) {
           return res.status(400).json({
-            error:
-              'durationDays must be between 1 and 90',
+            error: 'A valid start date and an end date after the start date are required',
+          });
+        }
+
+        if (
+          endDate.getTime() - startDate.getTime() > 90 * 86400000
+        ) {
+          return res.status(400).json({
+            error: 'Challenge duration cannot exceed 90 days',
+          });
+        }
+
+        const cleanTargetDistanceKm =
+          targetDistanceKm === undefined ||
+          targetDistanceKm === null ||
+          targetDistanceKm === ''
+            ? null
+            : Number(targetDistanceKm);
+
+        if (
+          metric === 'DISTANCE' &&
+          (
+            !Number.isFinite(cleanTargetDistanceKm) ||
+            cleanTargetDistanceKm! <= 0 ||
+            cleanTargetDistanceKm! > 100000
+          )
+        ) {
+          return res.status(400).json({
+            error: 'Distance challenges require a target distance greater than 0 and no more than 100000 km',
+          });
+        }
+
+        if (
+          metric !== 'DISTANCE' &&
+          cleanTargetDistanceKm !== null
+        ) {
+          return res.status(400).json({
+            error: 'Target distance is only valid for distance challenges',
           });
         }
 
@@ -506,6 +546,7 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
           metric,
           start_at,
           end_at,
+          target_distance_km,
           status,
           registration_opens_at,
           registration_closes_at,
@@ -520,13 +561,13 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
         )
         VALUES (
           $1, $2, $3, $4,
-          NOW() + INTERVAL '1 day',
-          NOW() + ((1 + $5) * INTERVAL '1 day'),
-          'DRAFT', NULL, NULL, $6, $7,
-          $8, $9, $10, $11, $12::jsonb, 'INR'
+          $5, $6, $7,
+          'DRAFT', NULL, NULL, $8, $9,
+          $10, $11, $12, $13, $14::jsonb, 'INR'
         )
         RETURNING
-          id, name, description, creator_id, metric, start_at, end_at, status,
+          id, name, description, creator_id, metric, start_at, end_at,
+          target_distance_km, status,
           registration_opens_at, registration_closes_at, max_participants,
           is_public, created_at, latitude, longitude, entry_type,
           entry_fee_paise, prize_type, cash_prize_paise, prize_distribution, currency
@@ -536,7 +577,9 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
             cleanDescription,
             userId,
             metric,
-            days,
+            startDate,
+            endDate,
+            cleanTargetDistanceKm,
             cleanLatitude,
             cleanLongitude,
             normalizedEntryType,
@@ -596,7 +639,9 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
           name?: unknown;
           description?: unknown;
           metric?: unknown;
-          durationDays?: unknown;
+          startAt?: unknown;
+          endAt?: unknown;
+          targetDistanceKm?: unknown;
           entryType?: unknown;
           entryFeePaise?: unknown;
           prizeType?: unknown;
@@ -608,7 +653,15 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
         const description =
           typeof body.description === 'string' ? body.description.trim() : '';
         const metric = body.metric;
-        const days = Number(body.durationDays);
+        const startAt =
+          typeof body.startAt === 'string' ? new Date(body.startAt) : new Date('');
+        const endAt =
+          typeof body.endAt === 'string' ? new Date(body.endAt) : new Date('');
+        const targetDistanceKm =
+          body.targetDistanceKm === null || body.targetDistanceKm === undefined ||
+          body.targetDistanceKm === ''
+            ? null
+            : Number(body.targetDistanceKm);
 
         if (!name || name.length > 120) {
           return res.status(400).json({
@@ -624,9 +677,31 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
         if (!['DISTANCE', 'TERRITORY', 'ACTIVITIES'].includes(String(metric))) {
           return res.status(400).json({ error: 'Invalid competition metric' });
         }
-        if (!Number.isInteger(days) || days < 1 || days > 90) {
+        if (
+          Number.isNaN(startAt.getTime()) ||
+          Number.isNaN(endAt.getTime()) ||
+          endAt.getTime() <= startAt.getTime()
+        ) {
           return res.status(400).json({
-            error: 'durationDays must be an integer between 1 and 90',
+            error: 'A valid start date and end date after the start date are required',
+          });
+        }
+
+        if (
+          metric === 'DISTANCE' &&
+          (targetDistanceKm === null ||
+            !Number.isFinite(targetDistanceKm) ||
+            targetDistanceKm <= 0 ||
+            targetDistanceKm > 100000)
+        ) {
+          return res.status(400).json({
+            error: 'Distance challenges require a target distance greater than 0 km',
+          });
+        }
+
+        if (metric !== 'DISTANCE' && targetDistanceKm !== null) {
+          return res.status(400).json({
+            error: 'Target distance is only valid for distance challenges',
           });
         }
 
@@ -713,8 +788,8 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
 
         const current = await client.query(
           `SELECT id, creator_id, name, description, metric, status, start_at, end_at,
-                entry_type, entry_fee_paise, prize_type, cash_prize_paise,
-                prize_distribution
+                target_distance_km, entry_type, entry_fee_paise, prize_type,
+                cash_prize_paise, prize_distribution
          FROM competitions
          WHERE id = $1
          FOR UPDATE`,
@@ -743,25 +818,28 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
          SET name = $2,
              description = $3,
              metric = $4,
-             start_at = NOW() + INTERVAL '1 day',
-             end_at = NOW() + (($5::int + 1) * INTERVAL '1 day'),
-             entry_type = $6,
-             entry_fee_paise = $7,
-             prize_type = $8,
-             cash_prize_paise = $9,
-             prize_distribution = $10::jsonb
+             start_at = $5,
+             end_at = $6,
+             target_distance_km = $7,
+             entry_type = $8,
+             entry_fee_paise = $9,
+             prize_type = $10,
+             cash_prize_paise = $11,
+             prize_distribution = $12::jsonb
          WHERE id = $1
          RETURNING id, name, description, creator_id, metric, start_at, end_at,
-                   status, registration_opens_at, registration_closes_at,
-                   max_participants, is_public, created_at, latitude, longitude,
-                   entry_type, entry_fee_paise, prize_type, cash_prize_paise,
-                   prize_distribution, currency`,
+                   target_distance_km, status, registration_opens_at,
+                   registration_closes_at, max_participants, is_public,
+                   created_at, latitude, longitude, entry_type, entry_fee_paise,
+                   prize_type, cash_prize_paise, prize_distribution, currency`,
           [
             competitionId,
             name,
             description,
             metric,
-            days,
+            startAt.toISOString(),
+            endAt.toISOString(),
+            targetDistanceKm,
             entryType,
             entryFeePaise,
             prizeType,
@@ -784,6 +862,7 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
               metric: before.metric,
               start_at: before.start_at,
               end_at: before.end_at,
+              target_distance_km: before.target_distance_km,
               entry_type: before.entry_type,
               entry_fee_paise: before.entry_fee_paise,
               prize_type: before.prize_type,
@@ -796,6 +875,7 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
               metric,
               start_at: updated.rows[0].start_at,
               end_at: updated.rows[0].end_at,
+              target_distance_km: targetDistanceKm,
               entry_type: entryType,
               entry_fee_paise: entryFeePaise,
               prize_type: prizeType,
@@ -833,7 +913,8 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
         inTransaction = true;
 
         const current = await client.query(
-          `SELECT id, creator_id, status, start_at, end_at,
+          `SELECT id, creator_id, status, metric, start_at, end_at,
+                target_distance_km,
                 entry_type, entry_fee_paise, cash_prize_paise
          FROM competitions
          WHERE id = $1
@@ -881,6 +962,21 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
           });
         }
 
+        if (
+          draft.metric === 'DISTANCE' &&
+          (
+            !Number.isFinite(Number(draft.target_distance_km)) ||
+            Number(draft.target_distance_km) <= 0
+          )
+        ) {
+          await client.query('ROLLBACK');
+          inTransaction = false;
+          return res.status(409).json({
+            error: 'Distance challenges require a valid target distance before publishing',
+            code: 'DISTANCE_TARGET_REQUIRED',
+          });
+        }
+
         const published = await client.query(
           `UPDATE competitions
          SET status = 'REGISTRATION_OPEN',
@@ -888,6 +984,7 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
              registration_closes_at = start_at
          WHERE id = $1
          RETURNING id, name, description, creator_id, metric, start_at, end_at,
+                   target_distance_km,
                    status, registration_opens_at, registration_closes_at,
                    max_participants, is_public, created_at, latitude, longitude`,
           [competitionId],
@@ -937,6 +1034,7 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
           c.metric,
           c.start_at,
           c.end_at,
+          c.target_distance_km,
           c.created_at,
           c.latitude,
           c.longitude,
@@ -987,6 +1085,7 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
           c.metric,
           c.start_at,
           c.end_at,
+          c.target_distance_km,
           c.registration_opens_at,
           c.registration_closes_at,
           c.max_participants,
@@ -2045,7 +2144,7 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
  JOIN users u ON u.id = cr.user_id
  WHERE cr.competition_id = $1
    AND c.status = 'COMPLETED'
- ORDER BY cr.rank_position ASC`
+ ORDER BY cr.rank_position ASC`,
           [competitionId],
         );
 

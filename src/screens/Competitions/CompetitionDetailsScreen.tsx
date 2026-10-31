@@ -1,5 +1,6 @@
 import { API_BASE_URL } from '../../config/api';
 import React, { useCallback, useEffect, useState } from 'react';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 import {
   ActivityIndicator,
@@ -34,6 +35,7 @@ type Competition = {
   metric: Metric;
   start_at: string;
   end_at: string;
+  target_distance_km?: number | string | null;
   registration_opens_at?: string | null;
   registration_closes_at?: string | null;
   max_participants?: number | null;
@@ -188,7 +190,16 @@ const CompetitionDetailsScreen = () => {
   const [draftName, setDraftName] = useState('');
   const [draftDescription, setDraftDescription] = useState('');
   const [draftMetric, setDraftMetric] = useState<Metric>('DISTANCE');
-  const [draftDurationDays, setDraftDurationDays] = useState('7');
+  const [draftStartAt, setDraftStartAt] = useState(
+    new Date(Date.now() + 24 * 60 * 60 * 1000),
+  );
+  const [draftEndAt, setDraftEndAt] = useState(
+    new Date(Date.now() + 8 * 24 * 60 * 60 * 1000),
+  );
+  const [draftTargetDistance, setDraftTargetDistance] = useState('');
+  const [activeDraftPicker, setActiveDraftPicker] = useState<
+    'startDate' | 'startTime' | 'endDate' | 'endTime' | null
+  >(null);
   const [draftEntryType, setDraftEntryType] = useState<'FREE' | 'PAID'>('FREE');
   const [draftEntryFee, setDraftEntryFee] = useState('');
   const [draftPrizeType, setDraftPrizeType] = useState<'NONE' | 'CASH' | 'SPONSORED' | 'MIXED'>('NONE');
@@ -252,6 +263,15 @@ const CompetitionDetailsScreen = () => {
       }
 
       setCompetition(competitionData as Competition);
+      const loadedStart = new Date(competitionData.start_at);
+      const loadedEnd = new Date(competitionData.end_at);
+      if (!Number.isNaN(loadedStart.getTime())) setDraftStartAt(loadedStart);
+      if (!Number.isNaN(loadedEnd.getTime())) setDraftEndAt(loadedEnd);
+      setDraftTargetDistance(
+        competitionData.target_distance_km == null
+          ? ''
+          : String(competitionData.target_distance_km),
+      );
       setLeaderboard(
         Array.isArray(leaderboardData) ? leaderboardData : [],
       );
@@ -648,7 +668,8 @@ const CompetitionDetailsScreen = () => {
 
     const name = draftName.trim();
     const description = draftDescription.trim();
-    const durationDays = Number(draftDurationDays);
+    const targetDistanceKm =
+      draftMetric === 'DISTANCE' ? Number(draftTargetDistance) : null;
 
     if (!name || name.length > 120) {
       setOrganizerError('Name is required and must not exceed 120 characters.');
@@ -658,8 +679,23 @@ const CompetitionDetailsScreen = () => {
       setOrganizerError('Description must not exceed 500 characters.');
       return;
     }
-    if (!Number.isInteger(durationDays) || durationDays < 1 || durationDays > 90) {
-      setOrganizerError('Duration must be a whole number between 1 and 90.');
+    if (
+      Number.isNaN(draftStartAt.getTime()) ||
+      Number.isNaN(draftEndAt.getTime()) ||
+      draftEndAt.getTime() <= draftStartAt.getTime()
+    ) {
+      setOrganizerError('End date and time must be after the start date and time.');
+      return;
+    }
+
+    if (
+      draftMetric === 'DISTANCE' &&
+      (!Number.isFinite(targetDistanceKm) ||
+        targetDistanceKm === null ||
+        targetDistanceKm <= 0 ||
+        targetDistanceKm > 100000)
+    ) {
+      setOrganizerError('Enter a valid target distance greater than 0 km.');
       return;
     }
 
@@ -728,7 +764,9 @@ const CompetitionDetailsScreen = () => {
             name,
             description,
             metric: draftMetric,
-            durationDays,
+            startAt: draftStartAt.toISOString(),
+            endAt: draftEndAt.toISOString(),
+            targetDistanceKm,
             entryType: draftEntryType,
             entryFeePaise,
             prizeType: draftPrizeType,
@@ -753,8 +791,9 @@ const CompetitionDetailsScreen = () => {
     }
   }, [
     token, competition, isOrganizer, draftSaving, draftName, draftDescription,
-    draftDurationDays, draftMetric, draftEntryType, draftEntryFee,
-    draftPrizeType, draftFirstPrize, draftSecondPrize, draftThirdPrize,
+    draftStartAt, draftEndAt, draftMetric, draftTargetDistance,
+    draftEntryType, draftEntryFee, draftPrizeType,
+    draftFirstPrize, draftSecondPrize, draftThirdPrize,
     competitionId, loadCompetition, loadOrganizerPanel, loadOrganizerAudit,
   ]);
 
@@ -1204,13 +1243,17 @@ const CompetitionDetailsScreen = () => {
       (Number(competition.prize_distribution?.third || 0) / 100).toFixed(2),
     );
 
-    const start = new Date(competition.start_at).getTime();
-    const end = new Date(competition.end_at).getTime();
-    const days = Number.isFinite(start) && Number.isFinite(end)
-      ? Math.max(1, Math.min(90, Math.ceil((end - start) / 86400000) - 1))
-      : 7;
+    const start = new Date(competition.start_at);
+    const end = new Date(competition.end_at);
 
-    setDraftDurationDays(String(days));
+    if (!Number.isNaN(start.getTime())) setDraftStartAt(start);
+    if (!Number.isNaN(end.getTime())) setDraftEndAt(end);
+
+    setDraftTargetDistance(
+      competition.target_distance_km == null
+        ? ''
+        : String(competition.target_distance_km),
+    );
   }, [
     competition?.id,
     competition?.status,
@@ -1223,6 +1266,7 @@ const CompetitionDetailsScreen = () => {
     competition?.prize_distribution,
     competition?.start_at,
     competition?.end_at,
+    competition?.target_distance_km,
   ]);
 
   useEffect(() => {
@@ -2784,23 +2828,190 @@ const CompetitionDetailsScreen = () => {
                         </Text>
                       )}
 
-                      <TextInput
-                        value={draftDurationDays}
-                        onChangeText={setDraftDurationDays}
-                        keyboardType="number-pad"
-                        placeholder="Duration in days (1–90)"
-                        placeholderTextColor={COLORS.textMuted}
-                        style={{
-                          color: COLORS.text,
-                          backgroundColor: COLORS.background,
-                          borderColor: COLORS.border,
-                          borderWidth: 1,
-                          borderRadius: 10,
-                          paddingHorizontal: SPACING.md,
-                          paddingVertical: SPACING.sm,
-                          marginTop: SPACING.sm,
-                        }}
-                      />
+                      {draftMetric === 'DISTANCE' && (
+                        <>
+                          <Text style={{
+                            ...TYPOGRAPHY.caption,
+                            color: COLORS.textSecondary,
+                            marginTop: SPACING.md,
+                          }}>
+                            Target distance (km)
+                          </Text>
+                          <TextInput
+                            value={draftTargetDistance}
+                            onChangeText={setDraftTargetDistance}
+                            keyboardType="decimal-pad"
+                            placeholder="e.g. 50"
+                            placeholderTextColor={COLORS.textMuted}
+                            style={{
+                              color: COLORS.text,
+                              backgroundColor: COLORS.background,
+                              borderColor: COLORS.border,
+                              borderWidth: 1,
+                              borderRadius: 10,
+                              paddingHorizontal: SPACING.md,
+                              paddingVertical: SPACING.sm,
+                              marginTop: SPACING.sm,
+                            }}
+                          />
+                        </>
+                      )}
+
+                      <Text style={{
+                        ...TYPOGRAPHY.caption,
+                        color: COLORS.textSecondary,
+                        marginTop: SPACING.md,
+                      }}>
+                        Challenge start
+                      </Text>
+                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                        <TouchableOpacity
+                          onPress={() => setActiveDraftPicker('startDate')}
+                          style={{
+                            flex: 1,
+                            padding: 12,
+                            borderRadius: 10,
+                            borderWidth: 1,
+                            borderColor: COLORS.border,
+                            backgroundColor: COLORS.background,
+                          }}
+                        >
+                          <Text style={{ color: COLORS.textSecondary, fontSize: 10 }}>
+                            START DATE
+                          </Text>
+                          <Text style={{ color: COLORS.text, marginTop: 5 }}>
+                            {draftStartAt.toLocaleDateString()}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => setActiveDraftPicker('startTime')}
+                          style={{
+                            flex: 1,
+                            padding: 12,
+                            borderRadius: 10,
+                            borderWidth: 1,
+                            borderColor: COLORS.border,
+                            backgroundColor: COLORS.background,
+                          }}
+                        >
+                          <Text style={{ color: COLORS.textSecondary, fontSize: 10 }}>
+                            START TIME
+                          </Text>
+                          <Text style={{ color: COLORS.text, marginTop: 5 }}>
+                            {draftStartAt.toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      <Text style={{
+                        ...TYPOGRAPHY.caption,
+                        color: COLORS.textSecondary,
+                        marginTop: SPACING.md,
+                      }}>
+                        Challenge end
+                      </Text>
+                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                        <TouchableOpacity
+                          onPress={() => setActiveDraftPicker('endDate')}
+                          style={{
+                            flex: 1,
+                            padding: 12,
+                            borderRadius: 10,
+                            borderWidth: 1,
+                            borderColor: COLORS.border,
+                            backgroundColor: COLORS.background,
+                          }}
+                        >
+                          <Text style={{ color: COLORS.textSecondary, fontSize: 10 }}>
+                            END DATE
+                          </Text>
+                          <Text style={{ color: COLORS.text, marginTop: 5 }}>
+                            {draftEndAt.toLocaleDateString()}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => setActiveDraftPicker('endTime')}
+                          style={{
+                            flex: 1,
+                            padding: 12,
+                            borderRadius: 10,
+                            borderWidth: 1,
+                            borderColor: COLORS.border,
+                            backgroundColor: COLORS.background,
+                          }}
+                        >
+                          <Text style={{ color: COLORS.textSecondary, fontSize: 10 }}>
+                            END TIME
+                          </Text>
+                          <Text style={{ color: COLORS.text, marginTop: 5 }}>
+                            {draftEndAt.toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {activeDraftPicker !== null && (
+                        <DateTimePicker
+                          value={
+                            activeDraftPicker.startsWith('start')
+                              ? draftStartAt
+                              : draftEndAt
+                          }
+                          mode={
+                            activeDraftPicker.endsWith('Date') ? 'date' : 'time'
+                          }
+                          display="default"
+                          onChange={(_event, selectedDate) => {
+                            if (selectedDate) {
+                              if (activeDraftPicker.startsWith('start')) {
+                                setDraftStartAt(previous => {
+                                  const next = new Date(previous);
+                                  if (activeDraftPicker === 'startDate') {
+                                    next.setFullYear(
+                                      selectedDate.getFullYear(),
+                                      selectedDate.getMonth(),
+                                      selectedDate.getDate(),
+                                    );
+                                  } else {
+                                    next.setHours(
+                                      selectedDate.getHours(),
+                                      selectedDate.getMinutes(),
+                                      0,
+                                      0,
+                                    );
+                                  }
+                                  return next;
+                                });
+                              } else {
+                                setDraftEndAt(previous => {
+                                  const next = new Date(previous);
+                                  if (activeDraftPicker === 'endDate') {
+                                    next.setFullYear(
+                                      selectedDate.getFullYear(),
+                                      selectedDate.getMonth(),
+                                      selectedDate.getDate(),
+                                    );
+                                  } else {
+                                    next.setHours(
+                                      selectedDate.getHours(),
+                                      selectedDate.getMinutes(),
+                                      0,
+                                      0,
+                                    );
+                                  }
+                                  return next;
+                                });
+                              }
+                            }
+                            setActiveDraftPicker(null);
+                          }}
+                        />
+                      )}
 
                       <TouchableOpacity
                         onPress={saveOrganizerDraft}

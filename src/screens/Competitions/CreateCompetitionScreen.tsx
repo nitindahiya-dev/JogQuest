@@ -1,6 +1,7 @@
 import { API_BASE_URL } from '../../config/api';
 import React, { useState } from 'react';
 import Geolocation from '@react-native-community/geolocation';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 import {
   ActivityIndicator,
@@ -79,8 +80,6 @@ const METRICS: {
   },
 ];
 
-const DURATIONS = ['3', '7', '14', '30', '60', '90'];
-
 const CreateCompetitionScreen = () => {
   const { user, token } = useAuth();
   const navigation = useNavigation<Navigation>();
@@ -89,7 +88,16 @@ const CreateCompetitionScreen = () => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [metric, setMetric] = useState<Metric>('DISTANCE');
-  const [duration, setDuration] = useState('7');
+  const [startAt, setStartAt] = useState(
+    () => new Date(Date.now() + 24 * 60 * 60 * 1000),
+  );
+  const [endAt, setEndAt] = useState(
+    () => new Date(Date.now() + 8 * 24 * 60 * 60 * 1000),
+  );
+  const [targetDistanceKm, setTargetDistanceKm] = useState('');
+  const [activeDatePicker, setActiveDatePicker] = useState<
+    'startDate' | 'startTime' | 'endDate' | 'endTime' | null
+  >(null);
 
   const [entryType, setEntryType] = useState<'FREE' | 'PAID'>('FREE');
   const [entryFee, setEntryFee] = useState('');
@@ -152,15 +160,40 @@ const CreateCompetitionScreen = () => {
 
     const cleanName = name.trim();
     const cleanDescription = description.trim();
-    const days = Number(duration);
+    const cleanTargetDistanceKm =
+      targetDistanceKm.trim() === '' ? null : Number(targetDistanceKm);
 
     if (!cleanName) {
       setError('Competition name is required.');
       return;
     }
 
-    if (!Number.isInteger(days) || days < 1 || days > 90) {
-      setError('Duration must be between 1 and 90 days.');
+    if (
+      !Number.isFinite(startAt.getTime()) ||
+      !Number.isFinite(endAt.getTime()) ||
+      endAt.getTime() <= startAt.getTime()
+    ) {
+      setError('Choose a valid end date and time after the start date and time.');
+      return;
+    }
+
+    if (
+      endAt.getTime() - startAt.getTime() > 90 * 86400000
+    ) {
+      setError('Challenge duration cannot exceed 90 days.');
+      return;
+    }
+
+    if (
+      metric === 'DISTANCE' &&
+      (
+        cleanTargetDistanceKm === null ||
+        !Number.isFinite(cleanTargetDistanceKm) ||
+        cleanTargetDistanceKm <= 0 ||
+        cleanTargetDistanceKm > 100000
+      )
+    ) {
+      setError('Enter a distance target greater than 0 and no more than 100000 km.');
       return;
     }
 
@@ -208,7 +241,9 @@ const CreateCompetitionScreen = () => {
             name: cleanName,
             description: cleanDescription,
             metric,
-            durationDays: days,
+            startAt: startAt.toISOString(),
+            endAt: endAt.toISOString(),
+            targetDistanceKm: cleanTargetDistanceKm,
             entryType,
             entryFeePaise: entryType === 'PAID' ? entryFeePaise : 0,
             prizeType,
@@ -458,70 +493,119 @@ const CreateCompetitionScreen = () => {
           </View>
         </View>
 
-        {/* Duration */}
+        {/* Schedule and target */}
         <View style={styles.section}>
           <View style={styles.sectionHeading}>
             <View style={styles.sectionNumber}>
               <Text style={styles.sectionNumberText}>03</Text>
             </View>
-
             <View style={styles.sectionHeadingText}>
-              <Text style={styles.sectionTitle}>
-                Set the duration
-              </Text>
+              <Text style={styles.sectionTitle}>Schedule the challenge</Text>
               <Text style={styles.sectionSubtitle}>
-                Choose how long the challenge runs.
+                Choose exactly when the challenge starts and ends.
               </Text>
             </View>
           </View>
 
-          <View style={styles.durationGrid}>
-            {DURATIONS.map(days => {
-              const selected = duration === days;
+          <Text style={styles.label}>START DATE</Text>
+          <TouchableOpacity
+            style={styles.durationCard}
+            onPress={() => setActiveDatePicker('startDate')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.durationLabel}>
+              {startAt.toLocaleDateString()}
+            </Text>
+          </TouchableOpacity>
 
-              return (
-                <TouchableOpacity
-                  key={days}
-                  style={[
-                    styles.durationCard,
-                    selected && styles.durationCardActive,
-                  ]}
-                  onPress={() => setDuration(days)}
-                  activeOpacity={0.85}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected }}
-                >
-                  <Text
-                    style={[
-                      styles.durationNumber,
-                      selected && styles.durationNumberActive,
-                    ]}
-                  >
-                    {days}
-                  </Text>
+          <Text style={styles.label}>START TIME</Text>
+          <TouchableOpacity
+            style={styles.durationCard}
+            onPress={() => setActiveDatePicker('startTime')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.durationLabel}>
+              {startAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </Text>
+          </TouchableOpacity>
 
-                  <Text
-                    style={[
-                      styles.durationLabel,
-                      selected && styles.durationLabelActive,
-                    ]}
-                  >
-                    {Number(days) === 1 ? 'DAY' : 'DAYS'}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+          <Text style={styles.label}>END DATE</Text>
+          <TouchableOpacity
+            style={styles.durationCard}
+            onPress={() => setActiveDatePicker('endDate')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.durationLabel}>
+              {endAt.toLocaleDateString()}
+            </Text>
+          </TouchableOpacity>
+
+          <Text style={styles.label}>END TIME</Text>
+          <TouchableOpacity
+            style={styles.durationCard}
+            onPress={() => setActiveDatePicker('endTime')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.durationLabel}>
+              {endAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </Text>
+          </TouchableOpacity>
+
+          {activeDatePicker !== null && (
+            <DateTimePicker
+              value={
+                activeDatePicker.startsWith('start')
+                  ? startAt
+                  : endAt
+              }
+              mode={
+                activeDatePicker.endsWith('Date') ? 'date' : 'time'
+              }
+              minimumDate={
+                activeDatePicker.startsWith('end') ? startAt : undefined
+              }
+              onChange={(event, selectedDate) => {
+                if (event.type === 'dismissed') {
+                  setActiveDatePicker(null);
+                  return;
+                }
+
+                if (selectedDate) {
+                  if (activeDatePicker.startsWith('start')) {
+                    setStartAt(selectedDate);
+                  } else {
+                    setEndAt(selectedDate);
+                  }
+                }
+
+                setActiveDatePicker(null);
+              }}
+            />
+          )}
 
           <View style={styles.durationSummary}>
-            <Text style={styles.durationSummaryLabel}>
-              CHALLENGE LENGTH
-            </Text>
-
+            <Text style={styles.durationSummaryLabel}>CHALLENGE WINDOW</Text>
             <Text style={styles.durationSummaryValue}>
-              {duration} {Number(duration) === 1 ? 'day' : 'days'}
+              {startAt.toLocaleString()} — {endAt.toLocaleString()}
             </Text>
           </View>
+
+          {metric === 'DISTANCE' && (
+            <View>
+              <Text style={styles.label}>TARGET DISTANCE (KM)</Text>
+              <TextInput
+                value={targetDistanceKm}
+                onChangeText={setTargetDistanceKm}
+                placeholder="e.g. 50"
+                placeholderTextColor={COLORS.textMuted}
+                keyboardType="decimal-pad"
+                style={styles.input}
+              />
+              <Text style={styles.sectionSubtitle}>
+                Participants compete to reach this total distance.
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Entry and prizes */}
@@ -682,9 +766,9 @@ const CreateCompetitionScreen = () => {
             <View style={styles.previewDivider} />
 
             <View>
-              <Text style={styles.previewMetaLabel}>DURATION</Text>
+              <Text style={styles.previewMetaLabel}>SCHEDULE</Text>
               <Text style={styles.previewMetaValue}>
-                {duration} DAYS
+                {startAt.toLocaleDateString()} – {endAt.toLocaleDateString()}
               </Text>
             </View>
 
