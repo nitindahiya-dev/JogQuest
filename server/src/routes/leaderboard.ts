@@ -314,6 +314,7 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
           startAt,
           endAt,
           targetDistanceKm,
+          maxParticipants,
           latitude,
           longitude,
           entryType = 'FREE',
@@ -410,6 +411,24 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
           targetDistanceKm === ''
             ? null
             : Number(targetDistanceKm);
+
+        const cleanMaxParticipants =
+          maxParticipants === undefined ||
+          maxParticipants === null ||
+          maxParticipants === ''
+            ? null
+            : Number(maxParticipants);
+
+        if (
+          cleanMaxParticipants !== null &&
+          (!Number.isSafeInteger(cleanMaxParticipants) ||
+            cleanMaxParticipants < 1 ||
+            cleanMaxParticipants > 100000)
+        ) {
+          return res.status(400).json({
+            error: 'Maximum participants must be a whole number between 1 and 100000',
+          });
+        }
 
         if (
           metric === 'DISTANCE' &&
@@ -547,6 +566,7 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
           start_at,
           end_at,
           target_distance_km,
+          max_participants,
           status,
           registration_opens_at,
           registration_closes_at,
@@ -561,9 +581,9 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
         )
         VALUES (
           $1, $2, $3, $4,
-          $5, $6, $7,
-          'DRAFT', NULL, NULL, $8, $9,
-          $10, $11, $12, $13, $14::jsonb, 'INR'
+          $5, $6, $7, $8,
+          'DRAFT', NULL, NULL, $9, $10,
+          $11, $12, $13, $14, $15::jsonb, 'INR'
         )
         RETURNING
           id, name, description, creator_id, metric, start_at, end_at,
@@ -580,6 +600,7 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
             startDate,
             endDate,
             cleanTargetDistanceKm,
+            cleanMaxParticipants,
             cleanLatitude,
             cleanLongitude,
             normalizedEntryType,
@@ -642,6 +663,7 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
           startAt?: unknown;
           endAt?: unknown;
           targetDistanceKm?: unknown;
+          maxParticipants?: unknown;
           entryType?: unknown;
           entryFeePaise?: unknown;
           prizeType?: unknown;
@@ -662,6 +684,24 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
           body.targetDistanceKm === ''
             ? null
             : Number(body.targetDistanceKm);
+
+        const maxParticipants =
+          body.maxParticipants === null ||
+          body.maxParticipants === undefined ||
+          body.maxParticipants === ''
+            ? null
+            : Number(body.maxParticipants);
+
+        if (
+          maxParticipants !== null &&
+          (!Number.isSafeInteger(maxParticipants) ||
+            maxParticipants < 1 ||
+            maxParticipants > 100000)
+        ) {
+          return res.status(400).json({
+            error: 'Maximum participants must be a whole number between 1 and 100000',
+          });
+        }
 
         if (!name || name.length > 120) {
           return res.status(400).json({
@@ -788,8 +828,8 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
 
         const current = await client.query(
           `SELECT id, creator_id, name, description, metric, status, start_at, end_at,
-                target_distance_km, entry_type, entry_fee_paise, prize_type,
-                cash_prize_paise, prize_distribution
+                target_distance_km, max_participants, entry_type,
+                entry_fee_paise, prize_type, cash_prize_paise, prize_distribution
          FROM competitions
          WHERE id = $1
          FOR UPDATE`,
@@ -821,11 +861,12 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
              start_at = $5,
              end_at = $6,
              target_distance_km = $7,
-             entry_type = $8,
-             entry_fee_paise = $9,
-             prize_type = $10,
-             cash_prize_paise = $11,
-             prize_distribution = $12::jsonb
+             max_participants = $8,
+             entry_type = $9,
+             entry_fee_paise = $10,
+             prize_type = $11,
+             cash_prize_paise = $12,
+             prize_distribution = $13::jsonb
          WHERE id = $1
          RETURNING id, name, description, creator_id, metric, start_at, end_at,
                    target_distance_km, status, registration_opens_at,
@@ -840,6 +881,7 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
             startAt.toISOString(),
             endAt.toISOString(),
             targetDistanceKm,
+            maxParticipants,
             entryType,
             entryFeePaise,
             prizeType,
@@ -863,6 +905,7 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
               start_at: before.start_at,
               end_at: before.end_at,
               target_distance_km: before.target_distance_km,
+              max_participants: before.max_participants,
               entry_type: before.entry_type,
               entry_fee_paise: before.entry_fee_paise,
               prize_type: before.prize_type,
@@ -876,6 +919,7 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
               start_at: updated.rows[0].start_at,
               end_at: updated.rows[0].end_at,
               target_distance_km: targetDistanceKm,
+              max_participants: maxParticipants,
               entry_type: entryType,
               entry_fee_paise: entryFeePaise,
               prize_type: prizeType,

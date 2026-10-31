@@ -197,6 +197,7 @@ const CompetitionDetailsScreen = () => {
     new Date(Date.now() + 8 * 24 * 60 * 60 * 1000),
   );
   const [draftTargetDistance, setDraftTargetDistance] = useState('');
+  const [draftMaxParticipants, setDraftMaxParticipants] = useState('');
   const [activeDraftPicker, setActiveDraftPicker] = useState<
     'startDate' | 'startTime' | 'endDate' | 'endTime' | null
   >(null);
@@ -271,6 +272,11 @@ const CompetitionDetailsScreen = () => {
         competitionData.target_distance_km == null
           ? ''
           : String(competitionData.target_distance_km),
+      );
+      setDraftMaxParticipants(
+        competitionData.max_participants == null
+          ? ''
+          : String(competitionData.max_participants),
       );
       setLeaderboard(
         Array.isArray(leaderboardData) ? leaderboardData : [],
@@ -670,6 +676,10 @@ const CompetitionDetailsScreen = () => {
     const description = draftDescription.trim();
     const targetDistanceKm =
       draftMetric === 'DISTANCE' ? Number(draftTargetDistance) : null;
+    const maxParticipants =
+      draftMaxParticipants.trim() === ''
+        ? null
+        : Number(draftMaxParticipants);
 
     if (!name || name.length > 120) {
       setOrganizerError('Name is required and must not exceed 120 characters.');
@@ -696,6 +706,16 @@ const CompetitionDetailsScreen = () => {
         targetDistanceKm > 100000)
     ) {
       setOrganizerError('Enter a valid target distance greater than 0 km.');
+      return;
+    }
+
+    if (
+      maxParticipants !== null &&
+      (!Number.isSafeInteger(maxParticipants) ||
+        maxParticipants < 1 ||
+        maxParticipants > 100000)
+    ) {
+      setOrganizerError('Maximum participants must be a whole number between 1 and 100000, or left blank for unlimited.');
       return;
     }
 
@@ -767,6 +787,7 @@ const CompetitionDetailsScreen = () => {
             startAt: draftStartAt.toISOString(),
             endAt: draftEndAt.toISOString(),
             targetDistanceKm,
+            maxParticipants,
             entryType: draftEntryType,
             entryFeePaise,
             prizeType: draftPrizeType,
@@ -792,7 +813,7 @@ const CompetitionDetailsScreen = () => {
   }, [
     token, competition, isOrganizer, draftSaving, draftName, draftDescription,
     draftStartAt, draftEndAt, draftMetric, draftTargetDistance,
-    draftEntryType, draftEntryFee, draftPrizeType,
+    draftMaxParticipants, draftEntryType, draftEntryFee, draftPrizeType,
     draftFirstPrize, draftSecondPrize, draftThirdPrize,
     competitionId, loadCompetition, loadOrganizerPanel, loadOrganizerAudit,
   ]);
@@ -2856,6 +2877,38 @@ const CompetitionDetailsScreen = () => {
                           />
                         </>
                       )}
+
+                      <Text style={{
+                        ...TYPOGRAPHY.caption,
+                        color: COLORS.textSecondary,
+                        marginTop: SPACING.md,
+                      }}>
+                        Maximum participants (optional)
+                      </Text>
+                      <TextInput
+                        value={draftMaxParticipants}
+                        onChangeText={setDraftMaxParticipants}
+                        keyboardType="number-pad"
+                        placeholder="Leave blank for unlimited"
+                        placeholderTextColor={COLORS.textMuted}
+                        style={{
+                          color: COLORS.text,
+                          backgroundColor: COLORS.background,
+                          borderColor: COLORS.border,
+                          borderWidth: 1,
+                          borderRadius: 10,
+                          paddingHorizontal: SPACING.md,
+                          paddingVertical: SPACING.sm,
+                          marginTop: SPACING.sm,
+                        }}
+                      />
+                      <Text style={{
+                        ...TYPOGRAPHY.caption,
+                        color: COLORS.textSecondary,
+                        marginTop: 5,
+                      }}>
+                        Includes the creator. Maximum 100000 participants.
+                      </Text>
 
                       <Text style={{
                         ...TYPOGRAPHY.caption,

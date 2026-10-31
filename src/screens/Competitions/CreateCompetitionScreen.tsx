@@ -95,6 +95,7 @@ const CreateCompetitionScreen = () => {
     () => new Date(Date.now() + 8 * 24 * 60 * 60 * 1000),
   );
   const [targetDistanceKm, setTargetDistanceKm] = useState('');
+  const [maxParticipants, setMaxParticipants] = useState('');
   const [activeDatePicker, setActiveDatePicker] = useState<
     'startDate' | 'startTime' | 'endDate' | 'endTime' | null
   >(null);
@@ -162,6 +163,8 @@ const CreateCompetitionScreen = () => {
     const cleanDescription = description.trim();
     const cleanTargetDistanceKm =
       targetDistanceKm.trim() === '' ? null : Number(targetDistanceKm);
+    const cleanMaxParticipants =
+      maxParticipants.trim() === '' ? null : Number(maxParticipants);
 
     if (!cleanName) {
       setError('Competition name is required.');
@@ -194,6 +197,16 @@ const CreateCompetitionScreen = () => {
       )
     ) {
       setError('Enter a distance target greater than 0 and no more than 100000 km.');
+      return;
+    }
+
+    if (
+      cleanMaxParticipants !== null &&
+      (!Number.isSafeInteger(cleanMaxParticipants) ||
+        cleanMaxParticipants < 1 ||
+        cleanMaxParticipants > 100000)
+    ) {
+      setError('Maximum participants must be a whole number between 1 and 100000, or left blank for unlimited.');
       return;
     }
 
@@ -244,6 +257,7 @@ const CreateCompetitionScreen = () => {
             startAt: startAt.toISOString(),
             endAt: endAt.toISOString(),
             targetDistanceKm: cleanTargetDistanceKm,
+            maxParticipants: cleanMaxParticipants,
             entryType,
             entryFeePaise: entryType === 'PAID' ? entryFeePaise : 0,
             prizeType,
@@ -606,6 +620,19 @@ const CreateCompetitionScreen = () => {
               </Text>
             </View>
           )}
+
+          <Text style={styles.label}>MAXIMUM PARTICIPANTS (OPTIONAL)</Text>
+          <TextInput
+            value={maxParticipants}
+            onChangeText={setMaxParticipants}
+            placeholder="Leave blank for unlimited"
+            placeholderTextColor={COLORS.textMuted}
+            keyboardType="number-pad"
+            style={styles.input}
+          />
+          <Text style={styles.sectionSubtitle}>
+            Includes you as the creator. Maximum 100000 participants.
+          </Text>
         </View>
 
         {/* Entry and prizes */}
