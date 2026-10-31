@@ -1204,7 +1204,7 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
 
         const competitionResult = await query(
           `
-        SELECT id, metric
+        SELECT id, metric, status
         FROM competitions
         WHERE id = $1
         `,
@@ -1258,11 +1258,40 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
             user_id,
             total_score,
             review_count,
-            ROW_NUMBER() OVER (
-              ORDER BY total_score DESC, display_name ASC, user_id ASC, user_id ASC
-            )::int AS rank,
-            COUNT(*) OVER ()::int AS participant_count
-          FROM participant_totals
+            rank,
+            participant_count
+          FROM (
+            -- Active challenges use the current calculated score rows.
+            SELECT
+              user_id,
+              total_score,
+              review_count,
+              ROW_NUMBER() OVER (
+                ORDER BY total_score DESC, display_name ASC, user_id ASC
+              )::int AS rank,
+              COUNT(*) OVER ()::int AS participant_count
+            FROM participant_totals
+            WHERE $3::text <> 'COMPLETED'
+
+            UNION ALL
+
+            -- Completed challenges use the immutable official result snapshot.
+            SELECT
+              cr.user_id,
+              cr.score::numeric AS total_score,
+              COALESCE((
+                SELECT COUNT(*)::int
+                FROM competition_activity_scores cas
+                WHERE cas.competition_id = cr.competition_id
+                  AND cas.user_id = cr.user_id
+                  AND cas.scoring_status = 'REVIEW'
+              ), 0)::int AS review_count,
+              cr.rank_position::int AS rank,
+              COUNT(*) OVER ()::int AS participant_count
+            FROM competition_results cr
+            WHERE cr.competition_id = $1
+              AND $3::text = 'COMPLETED'
+          ) ranking_sources
         ),
         breakdown AS (
           SELECT
@@ -1303,7 +1332,7 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
         FROM ranked r
         WHERE r.user_id = $2
         `,
-          [competitionId, userId],
+          [competitionId, userId, competitionResult.rows[0].status],
         );
 
         return res.json({
@@ -1401,7 +1430,8 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
             id,
             metric,
             start_at,
-            end_at
+            end_at,
+            status
           FROM competitions
           WHERE id = $1
           `,
@@ -1422,37 +1452,72 @@ export function registerLeaderboardRoutes<T extends RouteContext>(
 
         const result = await query(
           `
-        SELECT
-          ROW_NUMBER() OVER (
-            ORDER BY COALESCE(scores.total_score, 0) DESC,
-                     u.display_name ASC,
-                     u.id ASC
-          )::int AS rank,
-          cp.user_id,
-          u.username,
-          u.display_name,
-          u.avatar_url,
-          COALESCE(scores.total_score, 0)::double precision AS score,
-          COALESCE(scores.review_count, 0)::int AS review_count
-        FROM competition_participants cp
-        JOIN users u ON u.id = cp.user_id
-        LEFT JOIN LATERAL (
+        WITH ranking_sources AS (
+          -- Live ranking for all challenges that are not finalized.
           SELECT
-            SUM(s.score) FILTER (
-              WHERE s.scoring_status = 'SCORED'
-            ) AS total_score,
-            COUNT(*) FILTER (
-              WHERE s.scoring_status = 'REVIEW'
-            ) AS review_count
-          FROM competition_activity_scores s
-          WHERE s.competition_id = cp.competition_id
-            AND s.user_id = cp.user_id
-            AND s.metric = $2
-        ) scores ON TRUE
-        WHERE cp.competition_id = $1
+            ROW_NUMBER() OVER (
+              ORDER BY COALESCE(scores.total_score, 0) DESC,
+                       u.display_name ASC,
+                       u.id ASC
+            )::int AS rank,
+            cp.user_id,
+            u.username,
+            u.display_name,
+            u.avatar_url,
+            COALESCE(scores.total_score, 0)::double precision AS score,
+            COALESCE(scores.review_count, 0)::int AS review_count
+          FROM competition_participants cp
+          JOIN users u ON u.id = cp.user_id
+          LEFT JOIN LATERAL (
+            SELECT
+              SUM(s.score) FILTER (
+                WHERE s.scoring_status = 'SCORED'
+              ) AS total_score,
+              COUNT(*) FILTER (
+                WHERE s.scoring_status = 'REVIEW'
+              ) AS review_count
+            FROM competition_activity_scores s
+            WHERE s.competition_id = cp.competition_id
+              AND s.user_id = cp.user_id
+              AND s.metric = $2
+          ) scores ON TRUE
+          WHERE cp.competition_id = $1
+            AND $3::text <> 'COMPLETED'
+
+          UNION ALL
+
+          -- Published ranking for completed challenges.
+          SELECT
+            cr.rank_position::int AS rank,
+            cr.user_id,
+            u.username,
+            u.display_name,
+            u.avatar_url,
+            cr.score::double precision AS score,
+            COALESCE((
+              SELECT COUNT(*)::int
+              FROM competition_activity_scores s
+              WHERE s.competition_id = cr.competition_id
+                AND s.user_id = cr.user_id
+                AND s.scoring_status = 'REVIEW'
+            ), 0)::int AS review_count
+          FROM competition_results cr
+          JOIN users u ON u.id = cr.user_id
+          WHERE cr.competition_id = $1
+            AND $3::text = 'COMPLETED'
+        )
+        SELECT
+          rank,
+          user_id,
+          username,
+          display_name,
+          avatar_url,
+          score,
+          review_count
+        FROM ranking_sources
         ORDER BY rank ASC
         `,
-          [competitionId, competition.metric],
+          [competitionId, competition.metric, competition.status],
         );
 
         res.json(result.rows);

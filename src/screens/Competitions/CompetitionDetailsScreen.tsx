@@ -2182,7 +2182,7 @@ const CompetitionDetailsScreen = () => {
             )}
 
             {/* Organizer review tools */}
-             {isOrganizer && (
+             {isOrganizer && competition.status !== 'CANCELLED' && (
                <View style={{
                  backgroundColor: COLORS.surface,
                  borderColor: COLORS.border,
