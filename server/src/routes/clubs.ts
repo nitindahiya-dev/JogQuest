@@ -241,6 +241,7 @@ router.post('/api/clubs', requireAuth, async (req, res) => {
 
 router.get(
   '/api/clubs/:clubId',
+  requireAuth,
   async (req, res) => {
     try {
       const {
@@ -326,6 +327,7 @@ router.get(
 
 router.get(
   '/api/clubs/:clubId/members',
+  requireAuth,
   async (req, res) => {
     try {
       const { clubId } = req.params;
