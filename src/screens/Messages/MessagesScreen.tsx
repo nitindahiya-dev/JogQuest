@@ -23,15 +23,21 @@ type Conversation = {
   last_message: string | null;
   last_message_at: string | null;
   unread_count: number;
+  is_muted?: boolean;
+  is_archived?: boolean;
 };
+
+type InboxView = 'inbox' | 'archived';
 
 const MessagesScreen = () => {
   const { token } = useAuth();
   const navigation = useNavigation<any>();
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [view, setView] = useState<InboxView>('inbox');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const loadConversations = useCallback(async (refresh = false) => {
     if (!token) {
@@ -46,10 +52,13 @@ const MessagesScreen = () => {
     try {
       setError('');
       const response = await fetch(
-        `${API_BASE_URL}/api/messages/conversations`,
+        `${API_BASE_URL}/api/messages/conversations?view=${view}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
-      const data = (await response.json().catch(() => ({}))) as { error?: string; conversations?: Conversation[] };
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        conversations?: Conversation[];
+      };
 
       if (!response.ok) {
         throw new Error(data.error || 'Could not load conversations.');
@@ -62,7 +71,7 @@ const MessagesScreen = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [token]);
+  }, [token, view]);
 
   useFocusEffect(
     useCallback(() => {
@@ -78,6 +87,62 @@ const MessagesScreen = () => {
       otherDisplayName: item.other_display_name || item.other_username,
       otherAvatarUrl: item.other_avatar_url,
     });
+  };
+
+  const updateConversation = async (
+    item: Conversation,
+    changes: { muted?: boolean; archived?: boolean },
+  ) => {
+    if (!token || busyId) return;
+    setBusyId(item.id);
+    setError('');
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/messages/conversations/${item.id}/settings`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(changes),
+        },
+      );
+      const data = await response.json().catch(() => ({})) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Could not update conversation.');
+      }
+      await loadConversations(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not update conversation.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const hideConversation = async (item: Conversation) => {
+    if (!token || busyId) return;
+    setBusyId(item.id);
+    setError('');
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/messages/conversations/${item.id}`,
+        { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } },
+      );
+      const data = await response.json().catch(() => ({})) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Could not remove conversation.');
+      }
+      setConversations(current => current.filter(conversation => conversation.id !== item.id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not remove conversation.');
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const formatDate = (value: string | null) => {
@@ -114,6 +179,29 @@ const MessagesScreen = () => {
         </Pressable>
       </View>
 
+      <View style={styles.viewTabs}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ selected: view === 'inbox' }}
+          onPress={() => setView('inbox')}
+          style={[styles.viewTab, view === 'inbox' && styles.viewTabActive]}
+        >
+          <Text style={[styles.viewTabText, view === 'inbox' && styles.viewTabTextActive]}>
+            INBOX
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ selected: view === 'archived' }}
+          onPress={() => setView('archived')}
+          style={[styles.viewTab, view === 'archived' && styles.viewTabActive]}
+        >
+          <Text style={[styles.viewTabText, view === 'archived' && styles.viewTabTextActive]}>
+            ARCHIVED
+          </Text>
+        </Pressable>
+      </View>
+
       {!!error && (
         <Text accessibilityRole="alert" style={styles.error}>{error}</Text>
       )}
@@ -133,21 +221,22 @@ const MessagesScreen = () => {
           <View style={styles.empty}>
             <Text style={styles.emptyIcon}>{error ? '!' : '✉'}</Text>
             <Text style={styles.emptyTitle}>
-              {error ? 'Could not load conversations' : 'No conversations yet'}
+              {error
+                ? 'Could not load conversations'
+                : view === 'archived' ? 'No archived conversations' : 'No conversations yet'}
             </Text>
             <Text style={styles.muted}>
               {error
                 ? 'Something went wrong while loading your messages. Please try again.'
-                : 'Open another runner’s profile and tap Message to start a conversation.'}
+                : view === 'archived'
+                  ? 'Conversations you archive will appear here.'
+                  : 'Open another runner’s profile and tap Message to start a conversation.'}
             </Text>
             {!!error && (
               <Pressable
                 accessibilityRole="button"
                 onPress={() => loadConversations()}
-                style={({ pressed }) => [
-                  styles.retryButton,
-                  pressed && styles.pressed,
-                ]}
+                style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}
               >
                 <Text style={styles.retryText}>TRY AGAIN</Text>
               </Pressable>
@@ -156,45 +245,87 @@ const MessagesScreen = () => {
         }
         renderItem={({ item }) => {
           const displayName = item.other_display_name || item.other_username || 'Runner';
+          const busy = busyId === item.id;
+
           return (
-            <Pressable
-              onPress={() => openConversation(item)}
-              style={({ pressed }) => [styles.conversation, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel={`Message ${displayName}`}
-            >
-              <View style={styles.avatar}>
-                {item.other_avatar_url ? (
-                  <Image
-                    source={{ uri: item.other_avatar_url }}
-                    style={styles.avatarImage}
-                    resizeMode="cover"
-                  />
-                ) : (
-                  <Text style={styles.avatarText}>
-                    {displayName.charAt(0).toUpperCase()}
-                  </Text>
-                )}
-              </View>
-              <View style={styles.conversationBody}>
-                <View style={styles.row}>
-                  <Text numberOfLines={1} style={styles.name}>{displayName}</Text>
-                  <Text style={styles.time}>{formatDate(item.last_message_at)}</Text>
-                </View>
-                <View style={styles.row}>
-                  <Text numberOfLines={1} style={styles.preview}>
-                    {item.last_message || `@${item.other_username}`}
-                  </Text>
-                  {Number(item.unread_count) > 0 && (
-                    <View style={styles.unreadBadge}>
-                      <Text style={styles.unreadText}>
-                        {Number(item.unread_count) > 99 ? '99+' : item.unread_count}
-                      </Text>
-                    </View>
+            <View style={styles.conversation}>
+              <Pressable
+                onPress={() => openConversation(item)}
+                style={({ pressed }) => [styles.conversationMain, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel={`Message ${displayName}`}
+              >
+                <View style={styles.avatar}>
+                  {item.other_avatar_url ? (
+                    <Image
+                      source={{ uri: item.other_avatar_url }}
+                      style={styles.avatarImage}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <Text style={styles.avatarText}>
+                      {displayName.charAt(0).toUpperCase()}
+                    </Text>
                   )}
                 </View>
+                <View style={styles.conversationBody}>
+                  <View style={styles.row}>
+                    <Text numberOfLines={1} style={styles.name}>{displayName}</Text>
+                    <Text style={styles.time}>{formatDate(item.last_message_at)}</Text>
+                  </View>
+                  <View style={styles.row}>
+                    <Text numberOfLines={1} style={styles.preview}>
+                      {item.last_message || `@${item.other_username}`}
+                    </Text>
+                    {Number(item.unread_count) > 0 && (
+                      <View style={styles.unreadBadge}>
+                        <Text style={styles.unreadText}>
+                          {Number(item.unread_count) > 99 ? '99+' : item.unread_count}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  {(item.is_muted || item.is_archived) && (
+                    <Text style={styles.statusText}>
+                      {item.is_muted ? 'MUTED' : ''}
+                      {item.is_muted && item.is_archived ? '  ·  ' : ''}
+                      {item.is_archived ? 'ARCHIVED' : ''}
+                    </Text>
+                  )}
+                </View>
+              </Pressable>
+
+              <View style={styles.rowActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={busy}
+                  onPress={() => updateConversation(item, { muted: !item.is_muted })}
+                  style={[styles.actionButton, busy && styles.disabled]}
+                >
+                  <Text style={styles.actionText}>
+                    {item.is_muted ? 'UNMUTE' : 'MUTE'}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={busy}
+                  onPress={() => updateConversation(item, { archived: !item.is_archived })}
+                  style={[styles.actionButton, busy && styles.disabled]}
+                >
+                  <Text style={styles.actionText}>
+                    {item.is_archived ? 'UNARCHIVE' : 'ARCHIVE'}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={busy}
+                  onPress={() => hideConversation(item)}
+                  style={[styles.actionButton, styles.removeButton, busy && styles.disabled]}
+                >
+                  <Text style={styles.removeText}>REMOVE</Text>
+                </Pressable>
               </View>
-            </Pressable>
+            </View>
           );
         }}
       />
@@ -210,19 +341,13 @@ const styles = StyleSheet.create({
   title: { ...TYPOGRAPHY.h1, color: COLORS.text, marginTop: 4 },
   refreshButton: { borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9 },
   refreshText: { ...TYPOGRAPHY.label, color: COLORS.accent, fontSize: 10 },
-  retryButton: {
-    marginTop: SPACING.lg,
-    borderWidth: 1,
-    borderColor: COLORS.accent,
-    borderRadius: 12,
-    paddingHorizontal: 22,
-    paddingVertical: 11,
-  },
-  retryText: {
-    ...TYPOGRAPHY.label,
-    color: COLORS.accent,
-    fontSize: 11,
-  },
+  viewTabs: { flexDirection: 'row', gap: 10, marginBottom: SPACING.md },
+  viewTab: { paddingVertical: 9, paddingHorizontal: 16, borderRadius: 18, borderWidth: 1, borderColor: COLORS.border },
+  viewTabActive: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
+  viewTabText: { color: COLORS.textMuted, fontWeight: '700', fontSize: 11 },
+  viewTabTextActive: { color: COLORS.background },
+  retryButton: { marginTop: SPACING.lg, borderWidth: 1, borderColor: COLORS.accent, borderRadius: 12, paddingHorizontal: 22, paddingVertical: 11 },
+  retryText: { ...TYPOGRAPHY.label, color: COLORS.accent, fontSize: 11 },
   list: { paddingBottom: 30 },
   emptyList: { flexGrow: 1, justifyContent: 'center' },
   empty: { alignItems: 'center', paddingHorizontal: SPACING.lg },
@@ -230,7 +355,8 @@ const styles = StyleSheet.create({
   emptyTitle: { ...TYPOGRAPHY.h2, color: COLORS.text, marginBottom: SPACING.sm },
   muted: { ...TYPOGRAPHY.body, color: COLORS.textMuted, textAlign: 'center', marginTop: SPACING.sm },
   error: { ...TYPOGRAPHY.body, color: COLORS.danger, marginBottom: SPACING.md },
-  conversation: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border, gap: 12 },
+  conversation: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  conversationMain: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   pressed: { opacity: 0.7 },
   avatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: COLORS.accent, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarImage: { width: '100%', height: '100%' },
@@ -240,6 +366,13 @@ const styles = StyleSheet.create({
   name: { ...TYPOGRAPHY.h3, color: COLORS.text, flex: 1 },
   time: { ...TYPOGRAPHY.body, color: COLORS.textMuted, fontSize: 11 },
   preview: { ...TYPOGRAPHY.body, color: COLORS.textMuted, flex: 1, fontSize: 13 },
+  statusText: { color: COLORS.accent, fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
+  rowActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 9, marginLeft: 60 },
+  actionButton: { paddingHorizontal: 9, paddingVertical: 6, borderRadius: 12, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border },
+  actionText: { color: COLORS.textMuted, fontSize: 9, fontWeight: '800' },
+  removeButton: { borderColor: COLORS.danger },
+  removeText: { color: COLORS.danger, fontSize: 9, fontWeight: '800' },
+  disabled: { opacity: 0.4 },
   unreadBadge: { minWidth: 21, height: 21, borderRadius: 11, paddingHorizontal: 5, backgroundColor: COLORS.accent, alignItems: 'center', justifyContent: 'center' },
   unreadText: { color: COLORS.background, fontSize: 10, fontWeight: '900' },
 });

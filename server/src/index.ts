@@ -213,7 +213,7 @@ export const fetchRouteWithRetry =
     throw lastError;
   };
 
-const routeContext: Record<string, any> = {
+const routeContext: Parameters<typeof registerRoutes>[1] & Record<string, any> = {
   avatarUpload,
   calculateRouteDistance,
   cors,
@@ -317,7 +317,7 @@ io.on('connection', (socket) => {
       }
 
       const membership = await query(
-        `SELECT 1
+        `SELECT c.user_one_id, c.user_two_id
          FROM conversation_participants cp
          JOIN conversations c ON c.id = cp.conversation_id
          WHERE cp.conversation_id = $1
@@ -337,12 +337,109 @@ io.on('connection', (socket) => {
         return;
       }
 
-      await socket.join(`conversation:${conversationId}`);
-      acknowledge?.({ ok: true });
+      const room = `conversation:${conversationId}`;
+      await socket.join(room);
+
+      // Close the race where a block is created between the first
+      // membership check and joining the conversation room.
+      const accessStillAllowed = await query(
+        `SELECT 1
+         FROM conversation_participants cp
+         JOIN conversations c ON c.id = cp.conversation_id
+         WHERE cp.conversation_id = $1
+           AND cp.user_id = $2
+           AND NOT EXISTS (
+             SELECT 1
+             FROM user_blocks b
+             WHERE (b.blocker_id = c.user_one_id AND b.blocked_id = c.user_two_id)
+                OR (b.blocker_id = c.user_two_id AND b.blocked_id = c.user_one_id)
+           )
+         LIMIT 1`,
+        [conversationId, userId],
+      );
+
+      if (!accessStillAllowed.rowCount) {
+        await socket.leave(room);
+        acknowledge?.({ ok: false, error: 'Conversation unavailable' });
+        return;
+      }
+
+      const participant = membership.rows[0];
+      const otherUserId =
+        participant.user_one_id === userId
+          ? participant.user_two_id
+          : participant.user_one_id;
+
+      const otherRoomSockets = await io
+        .in(`conversation:${conversationId}`)
+        .fetchSockets();
+
+      const otherUserOnline = otherRoomSockets.some(
+        activeSocket => activeSocket.data.userId === otherUserId,
+      );
+
+      const thisUserAlreadyOnline = otherRoomSockets.some(
+        activeSocket =>
+          activeSocket.id !== socket.id &&
+          activeSocket.data.userId === userId,
+      );
+
+      if (!thisUserAlreadyOnline) {
+        socket.to(room).emit('presence:update', {
+          userId,
+          online: true,
+        });
+      }
+
+      acknowledge?.({ ok: true, otherUserOnline });
     } catch (error) {
       console.error('Socket conversation join failed:', error);
       acknowledge?.({ ok: false, error: 'Could not join conversation' });
     }
+  });
+
+  const validConversationId = (value: unknown): value is string =>
+    typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+  const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  const stopTyping = (conversationId: string) => {
+    const room = `conversation:${conversationId}`;
+    const timerKey = `${socket.id}:${conversationId}`;
+    const timer = typingTimers.get(timerKey);
+
+    if (timer) clearTimeout(timer);
+    typingTimers.delete(timerKey);
+
+    if (socket.rooms.has(room)) {
+      socket.to(room).emit('typing:stop', { conversationId, userId });
+    }
+  };
+
+  socket.on('typing:start', (payload: unknown) => {
+    const conversationId = (payload as any)?.conversationId;
+    if (!validConversationId(conversationId)) return;
+
+    const room = `conversation:${conversationId}`;
+    if (!socket.rooms.has(room)) return;
+
+    const timerKey = `${socket.id}:${conversationId}`;
+    const existing = typingTimers.get(timerKey);
+    if (existing) clearTimeout(existing);
+
+    socket.to(room).emit('typing:start', { conversationId, userId });
+
+    // Automatically clear stale typing state if the client disappears.
+    typingTimers.set(timerKey, setTimeout(() => {
+      stopTyping(conversationId);
+    }, 5000));
+  });
+
+  socket.on('typing:stop', (payload: unknown) => {
+    const conversationId = (payload as any)?.conversationId;
+    if (!validConversationId(conversationId)) return;
+    stopTyping(conversationId);
   });
 
   socket.on('conversation:leave', (payload: unknown) => {
@@ -351,9 +448,51 @@ io.on('connection', (socket) => {
         ? payload
         : (payload as any)?.conversationId;
 
-    if (typeof conversationId === 'string') {
-      void socket.leave(`conversation:${conversationId}`);
+    if (validConversationId(conversationId)) {
+      const room = `conversation:${conversationId}`;
+      stopTyping(conversationId);
+
+      void (async () => {
+        await socket.leave(room);
+
+        const remainingSockets = await io.in(room).fetchSockets();
+        const userStillPresent = remainingSockets.some(
+          activeSocket => activeSocket.data.userId === userId,
+        );
+
+        if (!userStillPresent) {
+          io.to(room).emit('presence:update', {
+            userId,
+            online: false,
+          });
+        }
+      })();
     }
+  });
+
+  socket.on('disconnect', async () => {
+    const conversationRooms = [...socket.rooms].filter(room =>
+      room.startsWith('conversation:'),
+    );
+
+    for (const room of conversationRooms) {
+      stopTyping(room.slice('conversation:'.length));
+
+      const remainingSockets = await io.in(room).fetchSockets();
+      const userStillPresent = remainingSockets.some(
+        activeSocket => activeSocket.data.userId === userId,
+      );
+
+      if (!userStillPresent) {
+        io.to(room).emit('presence:update', {
+          userId,
+          online: false,
+        });
+      }
+    }
+
+    for (const timer of typingTimers.values()) clearTimeout(timer);
+    typingTimers.clear();
   });
 });
 
@@ -370,18 +509,12 @@ async function shutdown(signal: string): Promise<void> {
     process.exit(1);
   }, 15000);
 
-  // Keep the shutdown timeout active; clear it when shutdown completes.
-
-  io.close();
-  server.close(async (serverError) => {
-    clearTimeout(forceExitTimer);
-    if (serverError) {
-      console.error('HTTP server shutdown failed:', serverError);
-      process.exitCode = 1;
-    }
-
+  // Socket.IO closes its attached HTTP server. Do not call server.close()
+  // separately, because that would attempt to close the same server twice.
+  io.close(async () => {
     try {
       await pool.end();
+      console.log('Socket.IO and HTTP server closed.');
       console.log('PostgreSQL pool closed.');
     } catch (error) {
       console.error('Failed to close PostgreSQL pool:', error);

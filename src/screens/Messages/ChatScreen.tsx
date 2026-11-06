@@ -1,5 +1,7 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
+import { launchImageLibrary } from 'react-native-image-picker';
+import { pick, types, isErrorWithCode, errorCodes } from '@react-native-documents/picker';
 import {
   ActivityIndicator,
   FlatList,
@@ -19,7 +21,29 @@ import { API_BASE_URL } from '../../config/api';
 import { COLORS, SPACING, TYPOGRAPHY } from '../../theme';
 import { useJogQuestAlert } from '../../components/JogQuestAlert';
 
+type MessageAttachment = {
+  url: string;
+  mime_type?: string;
+  file_size_bytes?: number;
+  original_name?: string | null;
+};
+
+type SelectedImage = {
+  uri: string;
+  type: string;
+  fileName: string;
+  fileSize?: number;
+};
+
+type SelectedDocument = {
+  uri: string;
+  type: string;
+  fileName: string;
+  fileSize?: number;
+};
+
 type Message = {
+  attachment?: MessageAttachment | null;
   id: string;
   sender_id: string;
   body: string;
@@ -33,6 +57,11 @@ type Message = {
     body: string;
     deleted_at?: string | null;
   } | null;
+  reactions?: Array<{
+    emoji: string;
+    count: number;
+    reactedByMe: boolean;
+  }>;
 };
 
 type ChatApiResponse = {
@@ -41,6 +70,12 @@ type ChatApiResponse = {
   blockedByMe?: boolean;
   blockedMe?: boolean;
   message?: Message;
+  messageId?: string;
+  reactions?: Array<{
+    emoji: string;
+    count: number;
+    reactedByMe: boolean;
+  }>;
 };
 
 const getLocalDateKey = (value: string | Date) => {
@@ -78,11 +113,25 @@ const ChatScreen = () => {
 
   const [messages, setMessages] = useState<Message[]>([]);
   const messagesListRef = useRef<FlatList<Message>>(null);
+  const messagingSocketRef = useRef<Socket | null>(null);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const remoteTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const localTypingRef = useRef(false);
+  const [otherUserTyping, setOtherUserTyping] = useState(false);
+  const [otherUserOnline, setOtherUserOnline] = useState(false);
   const [draft, setDraft] = useState('');
+  const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(null);
+  const [selectedDocument, setSelectedDocument] = useState<SelectedDocument | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const sendLockRef = useRef(false);
-  const pendingSendRef = useRef<{ key: string; body: string; replyToMessageId: string | null } | null>(null);
+  const pendingSendRef = useRef<{
+    key: string;
+    body: string;
+    replyToMessageId: string | null;
+    imageUri: string | null;
+    documentUri: string | null;
+  } | null>(null);
   const [error, setError] = useState('');
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
@@ -91,6 +140,7 @@ const ChatScreen = () => {
     blockedMe: boolean;
   } | null>(null);
   const [blockBusy, setBlockBusy] = useState(false);
+  const conversationBlockedRef = useRef(false);
 
   const loadMessages = useCallback(async () => {
     if (!token || !conversationId) {
@@ -110,7 +160,9 @@ const ChatScreen = () => {
       if (!response.ok) {
         throw new Error(data.error || 'Could not load messages.');
       }
-      setMessages(Array.isArray(data.messages) ? data.messages : []);
+      if (!conversationBlockedRef.current) {
+        setMessages(Array.isArray(data.messages) ? data.messages : []);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load messages.');
     } finally {
@@ -152,6 +204,8 @@ const ChatScreen = () => {
 
       if (!token || !conversationId) return undefined;
 
+      conversationBlockedRef.current = false;
+
       // Socket connections are scoped to the focused conversation.
       const messagingSocket: Socket = io(API_BASE_URL, {
         transports: ['websocket'],
@@ -161,21 +215,29 @@ const ChatScreen = () => {
         reconnectionDelay: 1000,
         reconnectionDelayMax: 10000,
       });
+      messagingSocketRef.current = messagingSocket;
 
       const joinConversation = () => {
         messagingSocket.emit(
           'conversation:join',
           { conversationId },
-          (result: { ok?: boolean; error?: string } | undefined) => {
+          (
+            result:
+              | { ok?: boolean; error?: string; otherUserOnline?: boolean }
+              | undefined,
+          ) => {
             if (!result?.ok) {
               console.warn('Could not join live conversation:', result?.error);
+              return;
             }
+
+            setOtherUserOnline(result.otherUserOnline === true);
           },
         );
       };
 
       const appendIncomingMessage = (incoming: Message) => {
-        if (!incoming?.id) return;
+        if (conversationBlockedRef.current || !incoming?.id) return;
         setMessages(current => {
           if (current.some(message => message.id === incoming.id)) return current;
           return [...current, incoming].sort(
@@ -185,13 +247,14 @@ const ChatScreen = () => {
       };
 
       const updateIncomingMessage = (incoming: Partial<Message> & { id: string }) => {
+        if (conversationBlockedRef.current) return;
         setMessages(current => current.map(message =>
           message.id === incoming.id ? { ...message, ...incoming } : message,
         ));
       };
 
       const deleteIncomingMessage = (event: { id: string; deleted_at?: string }) => {
-        if (!event?.id) return;
+        if (conversationBlockedRef.current || !event?.id) return;
         setMessages(current => current.map(message =>
           message.id === event.id
             ? { ...message, body: '', deleted_at: event.deleted_at ?? new Date().toISOString() }
@@ -199,18 +262,279 @@ const ChatScreen = () => {
         ));
       };
 
+      const handleConversationBlocked = (event: {
+        conversationId?: string;
+        blockedByUserId?: string;
+      }) => {
+        if (
+          event?.conversationId !== conversationId ||
+          conversationBlockedRef.current
+        ) return;
+
+        conversationBlockedRef.current = true;
+        setBlockStatus({
+          blockedByMe: event.blockedByUserId === user?.id,
+          blockedMe: event.blockedByUserId !== user?.id,
+        });
+        setMessages([]);
+        if (remoteTypingTimerRef.current) {
+          clearTimeout(remoteTypingTimerRef.current);
+        }
+        remoteTypingTimerRef.current = null;
+        setOtherUserTyping(false);
+        setOtherUserOnline(false);
+        setDraft('');
+        setReplyingTo(null);
+        setEditingMessage(null);
+        pendingSendRef.current = null;
+        setError('Messaging is unavailable because one participant blocked the other.');
+        setLoading(false);
+        messagingSocket.disconnect();
+      };
+
       messagingSocket.on('connect', joinConversation);
       messagingSocket.on('message:new', appendIncomingMessage);
       messagingSocket.on('message:updated', updateIncomingMessage);
       messagingSocket.on('message:deleted', deleteIncomingMessage);
 
+      const handleReactionUpdate = (event: {
+        messageId?: string;
+        reactions?: Array<{ emoji: string; count: number }>;
+        reactedByUserId?: string;
+        userReactionEmoji?: string | null;
+      }) => {
+        if (
+          conversationBlockedRef.current ||
+          !event?.messageId ||
+          !Array.isArray(event.reactions)
+        ) return;
+
+        setMessages(current => current.map(message => {
+          if (message.id !== event.messageId) return message;
+
+          // Preserve this device's own reaction when the other user reacts.
+          const ownEmoji =
+            event.reactedByUserId === user?.id
+              ? event.userReactionEmoji
+              : message.reactions?.find(r => r.reactedByMe)?.emoji ?? null;
+
+          return {
+            ...message,
+            reactions: event.reactions!.map(reaction => ({
+              ...reaction,
+              reactedByMe: reaction.emoji === ownEmoji,
+            })),
+          };
+        }));
+      };
+
+      messagingSocket.on('message:reactions:updated', handleReactionUpdate);
+
+      const handleOtherTyping = (event: { conversationId?: string }) => {
+        if (
+          event?.conversationId !== conversationId ||
+          conversationBlockedRef.current
+        ) return;
+
+        setOtherUserTyping(true);
+
+        if (remoteTypingTimerRef.current) {
+          clearTimeout(remoteTypingTimerRef.current);
+        }
+
+        remoteTypingTimerRef.current = setTimeout(() => {
+          setOtherUserTyping(false);
+          remoteTypingTimerRef.current = null;
+        }, 5000);
+      };
+
+      const handleOtherStoppedTyping = (event: { conversationId?: string }) => {
+        if (event?.conversationId === conversationId) {
+          if (remoteTypingTimerRef.current) {
+            clearTimeout(remoteTypingTimerRef.current);
+          }
+          remoteTypingTimerRef.current = null;
+          setOtherUserTyping(false);
+        }
+      };
+
+      const handlePresenceUpdate = (event: {
+        userId?: string;
+        online?: boolean;
+      }) => {
+        if (event?.userId !== otherUserId) return;
+        setOtherUserOnline(event.online === true);
+      };
+
+      messagingSocket.on('conversation:blocked', handleConversationBlocked);
+      messagingSocket.on('typing:start', handleOtherTyping);
+      messagingSocket.on('typing:stop', handleOtherStoppedTyping);
+      messagingSocket.on('presence:update', handlePresenceUpdate);
+
       return () => {
+        if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+        if (remoteTypingTimerRef.current) {
+          clearTimeout(remoteTypingTimerRef.current);
+        }
+        typingTimerRef.current = null;
+        remoteTypingTimerRef.current = null;
+        localTypingRef.current = false;
+        setOtherUserTyping(false);
+        setOtherUserOnline(false);
+        messagingSocket.emit('typing:stop', { conversationId });
         messagingSocket.emit('conversation:leave', { conversationId });
         messagingSocket.removeAllListeners();
         messagingSocket.disconnect();
+        if (messagingSocketRef.current === messagingSocket) {
+          messagingSocketRef.current = null;
+        }
       };
     }, [conversationId, token, loadMessages, loadBlockStatus]),
   );
+
+  const chooseImage = async () => {
+    if (sending || editingMessage || conversationBlockedRef.current) return;
+
+    try {
+      const result = await launchImageLibrary({
+        mediaType: 'photo',
+        selectionLimit: 1,
+        quality: 0.8,
+        maxWidth: 2048,
+        maxHeight: 2048,
+      });
+
+      if (result.didCancel) return;
+
+      if (result.errorCode) {
+        throw new Error(result.errorMessage || 'Could not open your photo library.');
+      }
+
+      const asset = result.assets?.[0];
+      if (!asset?.uri) {
+        throw new Error('The selected image could not be opened.');
+      }
+
+      const mimeType = asset.type || 'image/jpeg';
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) {
+        throw new Error('Choose a JPEG, PNG, or WebP image.');
+      }
+
+      if (asset.fileSize && asset.fileSize > 10 * 1024 * 1024) {
+        throw new Error('Images must be 10 MB or smaller.');
+      }
+
+      setSelectedDocument(null);
+      setSelectedImage({
+        uri: asset.uri,
+        type: mimeType,
+        fileName: asset.fileName || `chat-image-${Date.now()}.${mimeType.split('/')[1] || 'jpg'}`,
+        fileSize: asset.fileSize,
+      });
+      setError('');
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Could not select image.';
+      setError(message);
+    }
+  };
+
+  const chooseDocument = async () => {
+    if (sending || editingMessage || conversationBlockedRef.current) return;
+
+    try {
+      const [asset] = await pick({ type: [types.allFiles] });
+      if (!asset?.uri) {
+        throw new Error('The selected document could not be opened.');
+      }
+
+      const name = asset.name || '';
+      const extension = name.split('.').pop()?.toLowerCase() || '';
+
+      const supportedDocuments: Record<string, string> = {
+        txt: 'text/plain',
+        csv: 'text/csv',
+        docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        pdf: 'application/pdf',
+      };
+
+      const mimeType = supportedDocuments[extension];
+
+      if (!mimeType) {
+        throw new Error('Supported documents: PDF, TXT, CSV, DOCX, XLSX and PPTX.');
+      }
+
+      if (
+        asset.type &&
+        asset.type.toLowerCase() !== mimeType &&
+        !(extension === 'csv' && asset.type.toLowerCase() === 'text/comma-separated-values')
+      ) {
+        throw new Error('The selected file extension and document type do not match.');
+      }
+
+      if (asset.size != null && asset.size > 10 * 1024 * 1024) {
+        throw new Error('Documents must be 10 MB or smaller.');
+      }
+
+      setSelectedImage(null);
+      setSelectedDocument({
+        uri: asset.uri,
+        type: mimeType,
+        fileName: name,
+        fileSize: asset.size ?? undefined,
+      });
+      setError('');
+    } catch (e) {
+      if (isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
+        return;
+      }
+      setError(e instanceof Error ? e.message : 'Could not select PDF.');
+    }
+  };
+
+  const formatAttachmentSize = (bytes?: number) => {
+    if (bytes == null) return 'Document';
+    return bytes >= 1024 * 1024
+      ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+      : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  };
+
+  const handleDraftChange = (value: string) => {
+    setDraft(value);
+
+    const socket = messagingSocketRef.current;
+    if (!socket?.connected || conversationBlockedRef.current) return;
+
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+
+    if (value.trim()) {
+      if (!localTypingRef.current) {
+        localTypingRef.current = true;
+        socket.emit('typing:start', { conversationId });
+      }
+
+      typingTimerRef.current = setTimeout(() => {
+        localTypingRef.current = false;
+        socket.emit('typing:stop', { conversationId });
+        typingTimerRef.current = null;
+      }, 1500);
+    } else if (localTypingRef.current) {
+      localTypingRef.current = false;
+      socket.emit('typing:stop', { conversationId });
+      typingTimerRef.current = null;
+    }
+  };
+
+  const stopLocalTyping = () => {
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = null;
+
+    if (localTypingRef.current) {
+      localTypingRef.current = false;
+      messagingSocketRef.current?.emit('typing:stop', { conversationId });
+    }
+  };
 
   const changeBlockStatus = async () => {
     if (!token || !otherUserId || blockBusy || !blockStatus) return;
@@ -275,9 +599,14 @@ const ChatScreen = () => {
 
   const sendMessage = async () => {
     const body = draft.trim();
+    const image = selectedImage;
+    const document = selectedDocument;
+    const attachment = image || document;
 
     if (
-      !body ||
+      (!body && !attachment) ||
+      editingMessage ||
+      conversationBlockedRef.current ||
       sendLockRef.current ||
       sending ||
       !token ||
@@ -300,34 +629,68 @@ const ChatScreen = () => {
     if (
       !pendingSendRef.current ||
       pendingSendRef.current.body !== body ||
-      pendingSendRef.current.replyToMessageId !== replyToMessageId
+      pendingSendRef.current.replyToMessageId !== replyToMessageId ||
+      pendingSendRef.current.imageUri !== (image?.uri ?? null) ||
+      pendingSendRef.current.documentUri !== (document?.uri ?? null)
     ) {
       const key = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, char => {
         const random = Math.floor(Math.random() * 16);
         return (char === 'x' ? random : (random & 0x3) | 0x8).toString(16);
       });
-      pendingSendRef.current = { key, body, replyToMessageId };
+      pendingSendRef.current = {
+        key,
+        body,
+        replyToMessageId,
+        imageUri: image?.uri ?? null,
+        documentUri: document?.uri ?? null,
+      };
     }
 
     const idempotencyKey = pendingSendRef.current.key;
 
     // Lock synchronously so rapid taps cannot start duplicate requests.
+    stopLocalTyping();
     sendLockRef.current = true;
     setSending(true);
     setError('');
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/messages/conversations/${conversationId}/messages`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
+      let response: Response;
+
+      if (attachment) {
+        const formData = new FormData();
+        formData.append('body', body);
+        formData.append('idempotencyKey', idempotencyKey);
+        if (replyToMessageId) {
+          formData.append('replyToMessageId', replyToMessageId);
+        }
+        formData.append('attachment', {
+          uri: attachment.uri,
+          type: attachment.type,
+          name: attachment.fileName,
+        } as any);
+
+        response = await fetch(
+          `${API_BASE_URL}/api/messages/conversations/${conversationId}/attachments`,
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+            body: formData as any,
           },
-          body: JSON.stringify({ body, idempotencyKey, replyToMessageId }),
-        },
-      );
+        );
+      } else {
+        response = await fetch(
+          `${API_BASE_URL}/api/messages/conversations/${conversationId}/messages`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ body, idempotencyKey, replyToMessageId }),
+          },
+        );
+      }
       const data = (await response.json().catch(() => ({}))) as ChatApiResponse;
 
       if (!response.ok) {
@@ -348,6 +711,8 @@ const ChatScreen = () => {
       // Clear the pending key and draft only after server confirmation.
       pendingSendRef.current = null;
       setDraft('');
+      setSelectedImage(null);
+      setSelectedDocument(null);
       setReplyingTo(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not send message.');
@@ -362,11 +727,13 @@ const ChatScreen = () => {
     setReplyingTo(null);
     setEditingMessage(null);
     setDraft('');
+    setSelectedImage(null);
+    setSelectedDocument(null);
   };
 
   const saveEditedMessage = async () => {
     const body = draft.trim();
-    if (!body || !editingMessage || !token || !conversationId || sending) return;
+    if (!body || !editingMessage || !token || !conversationId || sending || conversationBlockedRef.current) return;
     if (body.length > 2000) {
       setError('Messages must be 2,000 characters or fewer.');
       return;
@@ -411,7 +778,7 @@ const ChatScreen = () => {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          if (!token || !conversationId) return;
+          if (!token || !conversationId || conversationBlockedRef.current) return;
           try {
             const response = await fetch(
               `${API_BASE_URL}/api/messages/conversations/${conversationId}/messages/${message.id}`,
@@ -432,6 +799,61 @@ const ChatScreen = () => {
     ]);
   };
 
+  const toggleReaction = async (message: Message, emoji: string) => {
+    if (
+      !token ||
+      !conversationId ||
+      message.deleted_at ||
+      conversationBlockedRef.current
+    ) return;
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/messages/conversations/${conversationId}/messages/${message.id}/reactions`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ emoji }),
+        },
+      );
+
+      const data = (await response.json().catch(() => ({}))) as ChatApiResponse;
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Could not update reaction.');
+      }
+
+      if (Array.isArray(data.reactions)) {
+        setMessages(current => current.map(item =>
+          item.id === message.id
+            ? { ...item, reactions: data.reactions }
+            : item,
+        ));
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not update reaction.');
+    }
+  };
+
+  const chooseReaction = (message: Message) => {
+    const emojis = ['❤️', '😂', '👍', '😮', '😢', '🔥'];
+
+    alert(
+      'React to message',
+      'Choose a reaction. Select it again to remove it.',
+      [
+        ...emojis.map(emoji => ({
+          text: emoji,
+          onPress: () => { void toggleReaction(message, emoji); },
+        })),
+        { text: 'Cancel', style: 'cancel' as const },
+      ],
+    );
+  };
+
   const openMessageActions = (message: Message) => {
     const ownMessage = message.sender_id === user?.id;
     const buttons: Array<{
@@ -439,6 +861,9 @@ const ChatScreen = () => {
       style?: 'default' | 'cancel' | 'destructive';
       onPress?: () => void;
     }> = [
+      ...(!message.deleted_at
+        ? [{ text: 'React', onPress: () => chooseReaction(message) }]
+        : []),
       { text: 'Reply', onPress: () => { setEditingMessage(null); setReplyingTo(message); } },
     ];
 
@@ -493,7 +918,11 @@ const ChatScreen = () => {
           <Text style={styles.chatStatus}>
             {blockStatus?.blockedByMe || blockStatus?.blockedMe
               ? 'Messaging unavailable'
-              : 'JogQuest runner'}
+              : otherUserTyping
+                ? 'Typing…'
+                : otherUserOnline
+                  ? 'Online'
+                  : 'Offline'}
           </Text>
         </View>
         <Pressable
@@ -599,7 +1028,48 @@ const ChatScreen = () => {
                           This message was deleted
                         </Text>
                       ) : (
-                        <Text style={[styles.messageText, isMine(item) && styles.mineText]}>
+                        <>
+                          {item.attachment?.url && !item.attachment.mime_type?.startsWith('image/') ? (
+                            <Pressable
+                              onPress={() => {
+                                void Linking.openURL(item.attachment!.url).catch(() => {
+                                  setError('Could not open this PDF attachment.');
+                                });
+                              }}
+                              accessibilityRole="link"
+                              accessibilityLabel={`Open attachment ${item.attachment.original_name || 'document'}`}
+                              style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                padding: 12,
+                                marginBottom: 6,
+                                borderRadius: 10,
+                                backgroundColor: 'rgba(128,128,128,0.16)',
+                              }}
+                            >
+                              <Text style={{ fontSize: 25, marginRight: 10 }}>📄</Text>
+                              <View style={{ flex: 1 }}>
+                                <Text
+                                  style={[styles.messageText, isMine(item) && styles.mineText]}
+                                  numberOfLines={2}
+                                >
+                                  {item.attachment.original_name || 'Document'}
+                                </Text>
+                                <Text style={{ color: COLORS.textMuted, fontSize: 11 }}>
+                                  {(item.attachment.mime_type || 'Document').split('/').pop()?.toUpperCase()} · {formatAttachmentSize(item.attachment.file_size_bytes)}
+                                </Text>
+                              </View>
+                              <Text style={[styles.messageText, isMine(item) && styles.mineText]}>↗</Text>
+                            </Pressable>
+                          ) : item.attachment?.url ? (
+                            <Image
+                              source={{ uri: item.attachment.url }}
+                              style={styles.messageAttachment}
+                              resizeMode="cover"
+                              accessibilityLabel="Image attachment"
+                            />
+                          ) : null}
+                          {!!item.body && <Text style={[styles.messageText, isMine(item) && styles.mineText]}>
                           {item.body.split(/(https?:\/\/[^\s]+)/gi).map((part, partIndex) => {
                             if (!/^https?:\/\//i.test(part)) {
                               return part;
@@ -626,11 +1096,15 @@ const ChatScreen = () => {
                               </React.Fragment>
                             );
                           })}
-                        </Text>
+                        </Text>}
+                        </>
                       )}
                       {item.edited_at && !item.deleted_at && (
                         <Text style={[styles.editedLabel, isMine(item) && styles.mineTimestamp]}>
-                          Edited
+                          Edited {new Date(item.edited_at).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
                         </Text>
                       )}
                       <Text style={[styles.timestamp, isMine(item) && styles.mineTimestamp]}>
@@ -640,6 +1114,26 @@ const ChatScreen = () => {
                         })}
                       </Text>
                     </View>
+                    {!!item.reactions?.length && (
+                      <View style={[
+                        styles.reactionsRow,
+                        isMine(item) ? styles.reactionsMine : styles.reactionsTheirs,
+                      ]}>
+                        {item.reactions.map(reaction => (
+                          <View
+                            key={`${item.id}-${reaction.emoji}`}
+                            style={[
+                              styles.reactionChip,
+                              reaction.reactedByMe && styles.reactionChipMine,
+                            ]}
+                          >
+                            <Text style={styles.reactionText}>
+                              {reaction.emoji} {reaction.count}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
                   </Pressable>
                 </View>
               </View>
@@ -698,11 +1192,91 @@ const ChatScreen = () => {
           </Pressable>
         </View>
       )}
+      {selectedImage && !editingMessage && (
+        <View style={styles.imagePreviewRow}>
+          <Image
+            source={{ uri: selectedImage.uri }}
+            style={styles.imagePreview}
+            resizeMode="cover"
+            accessibilityLabel="Selected image preview"
+          />
+          <View style={styles.imagePreviewInfo}>
+            <Text style={styles.imagePreviewTitle}>Image ready to send</Text>
+            <Text style={styles.imagePreviewName} numberOfLines={1}>
+              {selectedImage.fileName}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => setSelectedImage(null)}
+            disabled={sending}
+            accessibilityRole="button"
+            accessibilityLabel="Remove selected image"
+            style={styles.removeImageButton}
+          >
+            <Text style={styles.removeImageText}>×</Text>
+          </Pressable>
+        </View>
+      )}
+      {selectedDocument && !editingMessage && (
+        <View style={styles.imagePreviewRow}>
+          <View style={{
+            width: 48,
+            height: 48,
+            borderRadius: 8,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: 'rgba(128,128,128,0.18)',
+          }}>
+            <Text style={{ fontSize: 24 }}>📄</Text>
+          </View>
+          <View style={styles.imagePreviewInfo}>
+            <Text style={styles.imagePreviewTitle}>Document ready to send</Text>
+            <Text style={styles.imagePreviewName} numberOfLines={1}>
+              {selectedDocument.fileName} · {formatAttachmentSize(selectedDocument.fileSize)}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => setSelectedDocument(null)}
+            disabled={sending}
+            accessibilityRole="button"
+            accessibilityLabel="Remove selected PDF"
+            style={styles.removeImageButton}
+          >
+            <Text style={styles.removeImageText}>×</Text>
+          </Pressable>
+        </View>
+      )}
       <View style={styles.composer}>
+        <Pressable
+          onPress={chooseImage}
+          disabled={sending || !!editingMessage || !blockStatus || blockStatus.blockedByMe || blockStatus.blockedMe}
+          accessibilityRole="button"
+          accessibilityLabel="Attach an image"
+          style={({ pressed }) => [
+            styles.attachButton,
+            (sending || !!editingMessage || !blockStatus || blockStatus.blockedByMe || blockStatus.blockedMe) && styles.sendDisabled,
+            pressed && styles.sendPressed,
+          ]}
+        >
+          <Text style={styles.attachButtonText}>＋</Text>
+        </Pressable>
+        <Pressable
+          onPress={chooseDocument}
+          disabled={sending || !!editingMessage || !blockStatus || blockStatus.blockedByMe || blockStatus.blockedMe}
+          accessibilityRole="button"
+          accessibilityLabel="Attach a document"
+          style={({ pressed }) => [
+            styles.attachButton,
+            (sending || !!editingMessage || !blockStatus || blockStatus.blockedByMe || blockStatus.blockedMe) && styles.sendDisabled,
+            pressed && styles.sendPressed,
+          ]}
+        >
+          <Text style={styles.attachButtonText}>PDF</Text>
+        </Pressable>
         <View style={styles.composerInputWrap}>
           <TextInput
             value={draft}
-            onChangeText={setDraft}
+            onChangeText={handleDraftChange}
             placeholder="Write a message…"
             placeholderTextColor={COLORS.textMuted}
             style={styles.input}
@@ -728,12 +1302,12 @@ const ChatScreen = () => {
         </View>
         <Pressable
           onPress={editingMessage ? saveEditedMessage : sendMessage}
-          disabled={sending || !draft.trim() || !blockStatus || blockStatus.blockedByMe || blockStatus.blockedMe}
+          disabled={sending || (!draft.trim() && !selectedImage && !selectedDocument) || !blockStatus || blockStatus.blockedByMe || blockStatus.blockedMe}
           accessibilityRole="button"
           accessibilityState={{
             disabled:
               sending ||
-              !draft.trim() ||
+              (!draft.trim() && !selectedImage && !selectedDocument) ||
               !blockStatus ||
               blockStatus.blockedByMe ||
               blockStatus.blockedMe,
@@ -741,7 +1315,7 @@ const ChatScreen = () => {
           }}
           style={({ pressed }) => [
             styles.sendButton,
-            (!draft.trim() || sending || !blockStatus || blockStatus.blockedByMe || blockStatus.blockedMe) && styles.sendDisabled,
+            ((!draft.trim() && !selectedImage && !selectedDocument) || sending || !blockStatus || blockStatus.blockedByMe || blockStatus.blockedMe) && styles.sendDisabled,
             pressed && styles.sendPressed,
           ]}
         >
@@ -867,6 +1441,32 @@ const styles = StyleSheet.create({
     color: COLORS.background,
     textDecorationLine: 'underline',
   },
+  reactionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 5,
+    maxWidth: '86%',
+    marginTop: 5,
+  },
+  reactionsMine: { alignSelf: 'flex-end' },
+  reactionsTheirs: { alignSelf: 'flex-start' },
+  reactionChip: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  reactionChipMine: {
+    borderColor: COLORS.accent,
+    backgroundColor: COLORS.surface,
+  },
+  reactionText: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
   timestamp: {
     color: COLORS.textMuted,
     fontSize: 10,
@@ -894,6 +1494,55 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 0.5,
   },
+  imagePreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    gap: 10,
+    backgroundColor: COLORS.surface,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  imagePreview: {
+    width: 58,
+    height: 58,
+    borderRadius: 10,
+    backgroundColor: COLORS.background,
+  },
+  imagePreviewInfo: { flex: 1, minWidth: 0 },
+  imagePreviewTitle: { color: COLORS.text, fontSize: 12, fontWeight: '800' },
+  imagePreviewName: { color: COLORS.textMuted, fontSize: 10, marginTop: 3 },
+  removeImageButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  removeImageText: { color: COLORS.text, fontSize: 22, lineHeight: 25 },
+  messageAttachment: {
+    width: 230,
+    height: 190,
+    maxWidth: '100%',
+    borderRadius: 12,
+    marginBottom: 7,
+    backgroundColor: COLORS.background,
+  },
+  attachButton: {
+    width: 42,
+    height: 48,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.surface,
+  },
+  attachButtonText: { color: COLORS.accent, fontSize: 27, lineHeight: 30 },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
