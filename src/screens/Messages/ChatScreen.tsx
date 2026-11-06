@@ -536,6 +536,67 @@ const ChatScreen = () => {
     }
   };
 
+
+  const submitUserReport = async (message?: Message) => {
+    if (!token || !otherUserId || otherUserId === user?.id) return;
+
+    const reasons = [
+      { label: 'Harassment', value: 'HARASSMENT' },
+      { label: 'Spam', value: 'SPAM' },
+      { label: 'Inappropriate content', value: 'INAPPROPRIATE_CONTENT' },
+      { label: 'Threats', value: 'THREATS' },
+      { label: 'Other', value: 'OTHER' },
+    ];
+
+    alert(
+      message ? 'Report this message' : 'Report this runner',
+      'Choose the reason that best describes the issue.',
+      [
+        ...reasons.map(reason => ({
+          text: reason.label,
+          onPress: async () => {
+            try {
+              const response = await fetch(
+                `${API_BASE_URL}/api/messages/reports`,
+                {
+                  method: 'POST',
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    reportedUserId: otherUserId,
+                    ...(message ? { messageId: message.id } : {}),
+                    reason: reason.value,
+                  }),
+                },
+              );
+
+              const data = await response.json().catch(() => ({})) as {
+                error?: string;
+              };
+
+              if (!response.ok) {
+                throw new Error(data.error || 'Could not submit report.');
+              }
+
+              alert(
+                'Report submitted',
+                'Thank you. Your report has been sent for review.',
+              );
+            } catch (e) {
+              alert(
+                'Report failed',
+                e instanceof Error ? e.message : 'Could not submit report.',
+              );
+            }
+          },
+        })),
+        { text: 'Cancel', style: 'cancel' as const },
+      ],
+    );
+  };
+
   const changeBlockStatus = async () => {
     if (!token || !otherUserId || blockBusy || !blockStatus) return;
 
@@ -882,6 +943,13 @@ const ChatScreen = () => {
         onPress: () => deleteMessage(message),
       });
     }
+    if (!ownMessage && !message.deleted_at) {
+      buttons.push({
+        text: 'Report Message',
+        style: 'destructive',
+        onPress: () => submitUserReport(message),
+      });
+    }
     buttons.push({ text: 'Cancel', style: 'cancel' });
     alert('Message actions', 'Choose an action for this message.', buttons);
   };
@@ -935,6 +1003,21 @@ const ChatScreen = () => {
           accessibilityLabel="Refresh chat"
         >
           <Text style={styles.refreshText}>↻</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => submitUserReport()}
+          disabled={!token || !otherUserId || blockStatus?.blockedByMe === true}
+          accessibilityRole="button"
+          accessibilityLabel="Report runner"
+          style={[
+            styles.blockButton,
+            { borderColor: COLORS.border },
+            (!token || !otherUserId || blockStatus?.blockedByMe === true) && styles.sendDisabled,
+          ]}
+        >
+          <Text style={[styles.blockButtonText, { color: COLORS.textMuted }]}>
+            REPORT
+          </Text>
         </Pressable>
         <Pressable
           onPress={changeBlockStatus}

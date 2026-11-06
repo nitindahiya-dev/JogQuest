@@ -14,6 +14,43 @@ export function registerMessagingRoutes<T extends RouteContext>(
   const { pool, query, requireAuth, createClient, multer, randomUUID } = context;
   const getIO = () => context.io;
 
+  const isUserViewingConversation = async (
+    conversationId: string,
+    recipientId: string,
+  ): Promise<boolean> => {
+    const io = getIO();
+    if (!io) return false;
+    try {
+      const sockets = await io.in(`conversation:${conversationId}`).fetchSockets();
+      return sockets.some((socket: any) => socket.data?.userId === recipientId);
+    } catch (error) {
+      console.warn('Could not check conversation presence:', error);
+      return false;
+    }
+  };
+
+  const emitNotificationUpdates = async (
+    recipientId: string,
+    notification: any,
+  ) => {
+    if (!notification) return;
+    getIO()?.to(`user:${recipientId}`).emit('notification:new', { notification });
+    try {
+      const unread = await query(
+        `SELECT COUNT(*)::int AS count
+         FROM notifications
+         WHERE user_id = $1 AND read_at IS NULL`,
+        [recipientId],
+      );
+      getIO()?.to(`user:${recipientId}`).emit(
+        'notifications:unread-count',
+        { unreadCount: Number(unread.rows[0]?.count ?? 0) },
+      );
+    } catch (error) {
+      console.error('Failed to emit notification unread count:', error);
+    }
+  };
+
   const attachmentUpload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 10 * 1024 * 1024, files: 1 },
@@ -440,7 +477,40 @@ router.get('/api/messages/conversations', requireAuth, async (req, res) => {
             ],
           );
         }
+        const incomingMessageIds = result.rows
+          .filter((row: any) => row.sender_id !== userId)
+          .map((row: any) => row.id);
+
+        if (incomingMessageIds.length > 0) {
+          await client.query(
+            `UPDATE notifications
+             SET read_at = COALESCE(read_at, NOW())
+             WHERE user_id = $1
+               AND type = 'NEW_MESSAGE'
+               AND conversation_id = $2
+               AND message_id = ANY($3::uuid[])`,
+            [userId, req.params.conversationId, incomingMessageIds],
+          );
+        }
+
         await client.query('COMMIT');
+
+        if (incomingMessageIds.length > 0) {
+          try {
+            const unread = await query(
+              `SELECT COUNT(*)::int AS count
+               FROM notifications
+               WHERE user_id = $1 AND read_at IS NULL`,
+              [userId],
+            );
+            getIO()?.to(`user:${userId}`).emit(
+              'notifications:unread-count',
+              { unreadCount: Number(unread.rows[0]?.count ?? 0) },
+            );
+          } catch (error) {
+            console.error('Failed to emit unread notification count:', error);
+          }
+        }
 
         const hasAttachments = result.rows.some((row: any) => !!row.attachment);
         const storage = hasAttachments ? getStorageClient() : null;
@@ -711,18 +781,39 @@ router.get('/api/messages/conversations', requireAuth, async (req, res) => {
           [req.params.conversationId, otherUserId],
         );
 
-        await client.query(
-          `INSERT INTO notifications (user_id, type, title, message, dedupe_key)
-           SELECT $1, 'NEW_MESSAGE', 'New message', 'You received a new message.', $2
-           WHERE NOT EXISTS (
-             SELECT 1 FROM conversation_participants
-             WHERE conversation_id = $3
-               AND user_id = $1
-               AND muted_at IS NOT NULL
-           )
-           ON CONFLICT (dedupe_key) DO NOTHING`,
-          [otherUserId, `message:${message.id}`, req.params.conversationId],
+        let createdNotification = null;
+        const recipientViewing = await isUserViewingConversation(
+          req.params.conversationId,
+          otherUserId,
         );
+
+        if (!recipientViewing) {
+          const notificationResult = await client.query(
+            `INSERT INTO notifications (
+               user_id, type, title, message, dedupe_key,
+               conversation_id, message_id
+             )
+             SELECT $1, 'NEW_MESSAGE', 'New message',
+                    'You received a new message.', $2, $3, $4
+             WHERE NOT EXISTS (
+               SELECT 1 FROM conversation_participants
+               WHERE conversation_id = $3
+                 AND user_id = $1
+                 AND muted_at IS NOT NULL
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM user_blocks
+               WHERE (blocker_id = $1 AND blocked_id = $5)
+                  OR (blocker_id = $5 AND blocked_id = $1)
+             )
+             ON CONFLICT (dedupe_key) DO NOTHING
+             RETURNING id, user_id, type, title, message,
+                       conversation_id, message_id, created_at, read_at`,
+            [otherUserId, `message:${message.id}`,
+             req.params.conversationId, message.id, userId],
+          );
+          createdNotification = notificationResult.rows[0] ?? null;
+        }
 
         await client.query('COMMIT');
 
@@ -730,6 +821,8 @@ router.get('/api/messages/conversations', requireAuth, async (req, res) => {
           ...message,
           attachment: await signedAttachment(storage, attachmentResult.rows[0]),
         };
+
+        await emitNotificationUpdates(otherUserId, createdNotification);
 
         getIO()?.to(`conversation:${req.params.conversationId}`)
           .emit('message:new', responseMessage);
@@ -901,23 +994,46 @@ router.get('/api/messages/conversations', requireAuth, async (req, res) => {
             [req.params.conversationId, otherUserId],
           );
 
-          await client.query(
-            `INSERT INTO notifications (user_id, type, title, message, dedupe_key)
-             SELECT $1, 'NEW_MESSAGE', 'New message', 'You received a new message.', $2
-             WHERE NOT EXISTS (
-               SELECT 1 FROM conversation_participants
-               WHERE conversation_id = $3
-                 AND user_id = $1
-                 AND muted_at IS NOT NULL
-             )
-             ON CONFLICT (dedupe_key) DO NOTHING`,
-            [otherUserId, `message:${message.id}`, req.params.conversationId],
+          const recipientViewing = await isUserViewingConversation(
+            req.params.conversationId,
+            otherUserId,
           );
+
+          var createdNotification = null;
+          if (!recipientViewing) {
+            const notificationResult = await client.query(
+              `INSERT INTO notifications (
+                 user_id, type, title, message, dedupe_key,
+                 conversation_id, message_id
+               )
+               SELECT $1, 'NEW_MESSAGE', 'New message',
+                      'You received a new message.', $2, $3, $4
+               WHERE NOT EXISTS (
+                 SELECT 1 FROM conversation_participants
+                 WHERE conversation_id = $3
+                   AND user_id = $1
+                   AND muted_at IS NOT NULL
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM user_blocks
+                 WHERE (blocker_id = $1 AND blocked_id = $5)
+                    OR (blocker_id = $5 AND blocked_id = $1)
+               )
+               ON CONFLICT (dedupe_key) DO NOTHING
+               RETURNING id, user_id, type, title, message,
+                         conversation_id, message_id, created_at, read_at`,
+              [otherUserId, `message:${message.id}`,
+               req.params.conversationId, message.id, userId],
+            );
+            createdNotification = notificationResult.rows[0] ?? null;
+          }
         }
 
         await client.query('COMMIT');
 
         if (isNewMessage) {
+          await emitNotificationUpdates(otherUserId, createdNotification);
+
           getIO()?.to(`conversation:${req.params.conversationId}`)
             .emit('message:new', message);
           getIO()?.to(`user:${otherUserId}`)
@@ -1243,6 +1359,263 @@ router.get('/api/messages/conversations', requireAuth, async (req, res) => {
     } catch (error) {
       console.error('Unblock user failed:', error);
       res.status(500).json({ error: 'Failed to unblock user' });
+    }
+  });
+
+
+  // Submit a report about a runner or a message in an existing conversation.
+  router.post('/api/messages/reports', requireAuth, async (req, res) => {
+    const reporterId = res.locals.authenticatedUserId as string;
+    const { reportedUserId, messageId, reason, details } = req.body ?? {};
+    const allowedReasons = [
+      'HARASSMENT',
+      'SPAM',
+      'INAPPROPRIATE_CONTENT',
+      'THREATS',
+      'IMPERSONATION',
+      'OTHER',
+    ];
+
+    const isUuid = (value: unknown): value is string =>
+      typeof value === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+    if (
+      !isUuid(reportedUserId) ||
+      (messageId !== undefined && messageId !== null && !isUuid(messageId))
+    ) {
+      return res.status(400).json({ error: 'Invalid user or message ID' });
+    }
+
+    if (reportedUserId === reporterId) {
+      return res.status(400).json({ error: 'You cannot report yourself' });
+    }
+
+    if (typeof reason !== 'string' || !allowedReasons.includes(reason)) {
+      return res.status(400).json({ error: 'Select a valid report reason' });
+    }
+
+    if (
+      details !== undefined &&
+      details !== null &&
+      (typeof details !== 'string' || details.length > 1000)
+    ) {
+      return res.status(400).json({
+        error: 'Report details must be 1000 characters or fewer',
+      });
+    }
+
+    try {
+      const target = await query(
+        'SELECT id FROM users WHERE id = $1 LIMIT 1',
+        [reportedUserId],
+      );
+
+      if (target.rows.length === 0) {
+        return res.status(404).json({ error: 'Reported user not found' });
+      }
+
+      if (messageId) {
+        const message = await query(
+          `SELECT m.id
+           FROM messages m
+           INNER JOIN conversations c ON c.id = m.conversation_id
+           WHERE m.id = $1
+             AND m.sender_id = $2
+             AND (c.user_one_id = $3 OR c.user_two_id = $3)
+           LIMIT 1`,
+          [messageId, reportedUserId, reporterId],
+        );
+
+        if (message.rows.length === 0) {
+          return res.status(404).json({
+            error: 'Message not found or not available in your conversation',
+          });
+        }
+      }
+
+      const inserted = await query(
+        `INSERT INTO user_reports (
+           reporter_id, reported_user_id, message_id, reason, details
+         )
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT DO NOTHING
+         RETURNING id, reported_user_id, message_id, reason, status, created_at`,
+        [
+          reporterId,
+          reportedUserId,
+          messageId ?? null,
+          reason,
+          typeof details === 'string' ? details.trim() || null : null,
+        ],
+      );
+
+      if (inserted.rows.length === 0) {
+        return res.status(409).json({
+          error: 'You have already submitted this report',
+        });
+      }
+
+      return res.status(201).json({
+        ok: true,
+        report: inserted.rows[0],
+      });
+    } catch (error) {
+      console.error('Create user report failed:', error);
+      return res.status(500).json({ error: 'Failed to submit report' });
+    }
+  });
+
+  // A runner can only see reports submitted by their own account.
+  router.get('/api/messages/reports/mine', requireAuth, async (_req, res) => {
+    try {
+      const reporterId = res.locals.authenticatedUserId as string;
+      const result = await query(
+        `SELECT
+           r.id,
+           r.reported_user_id AS "reportedUserId",
+           u.username AS "reportedUsername",
+           r.message_id AS "messageId",
+           r.reason,
+           r.details,
+           r.status,
+           r.created_at AS "createdAt",
+           r.updated_at AS "updatedAt"
+         FROM user_reports r
+         INNER JOIN users u ON u.id = r.reported_user_id
+         WHERE r.reporter_id = $1
+         ORDER BY r.created_at DESC
+         LIMIT 100`,
+        [reporterId],
+      );
+
+      return res.json({ reports: result.rows });
+    } catch (error) {
+      console.error('Get submitted reports failed:', error);
+      return res.status(500).json({ error: 'Failed to load submitted reports' });
+    }
+  });
+
+  // Moderation queue: access is restricted to trusted platform administrators.
+  router.get('/api/messages/moderation/reports', requireAuth, async (req, res) => {
+    try {
+      const moderatorId = res.locals.authenticatedUserId as string;
+      const access = await query(
+        'SELECT 1 FROM platform_admins WHERE user_id = $1 LIMIT 1',
+        [moderatorId],
+      );
+
+      if (access.rows.length === 0) {
+        return res.status(403).json({ error: 'Platform moderator access required' });
+      }
+
+      const status =
+        typeof req.query.status === 'string' ? req.query.status : 'OPEN';
+      const allowedStatuses = ['OPEN', 'UNDER_REVIEW', 'RESOLVED', 'DISMISSED'];
+
+      if (!allowedStatuses.includes(status)) {
+        return res.status(400).json({ error: 'Invalid report status filter' });
+      }
+
+      const result = await query(
+        `SELECT
+           r.id,
+           r.reporter_id AS "reporterId",
+           reporter.username AS "reporterUsername",
+           r.reported_user_id AS "reportedUserId",
+           reported.username AS "reportedUsername",
+           r.message_id AS "messageId",
+           r.reason,
+           r.details,
+           r.status,
+           r.moderator_id AS "moderatorId",
+           r.moderator_notes AS "moderatorNotes",
+           r.reviewed_at AS "reviewedAt",
+           r.created_at AS "createdAt",
+           r.updated_at AS "updatedAt"
+         FROM user_reports r
+         INNER JOIN users reporter ON reporter.id = r.reporter_id
+         INNER JOIN users reported ON reported.id = r.reported_user_id
+         WHERE ($1 = 'ALL' OR r.status = $1)
+         ORDER BY
+           CASE WHEN r.status = 'OPEN' THEN 0 ELSE 1 END,
+           r.created_at ASC
+         LIMIT 200`,
+        [status],
+      );
+
+      return res.json({ reports: result.rows });
+    } catch (error) {
+      console.error('Load moderation queue failed:', error);
+      return res.status(500).json({ error: 'Failed to load moderation queue' });
+    }
+  });
+
+  // Update report status and record the administrator responsible for review.
+  router.patch('/api/messages/moderation/reports/:reportId', requireAuth, async (req, res) => {
+    const moderatorId = res.locals.authenticatedUserId as string;
+    const { status, moderatorNotes } = req.body ?? {};
+    const allowedStatuses = ['UNDER_REVIEW', 'RESOLVED', 'DISMISSED'];
+
+    const isUuid = (value: unknown): value is string =>
+      typeof value === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+    if (!isUuid(req.params.reportId)) {
+      return res.status(400).json({ error: 'Invalid report ID' });
+    }
+
+    if (typeof status !== 'string' || !allowedStatuses.includes(status)) {
+      return res.status(400).json({ error: 'Select a valid moderation status' });
+    }
+
+    if (
+      moderatorNotes !== undefined &&
+      moderatorNotes !== null &&
+      (typeof moderatorNotes !== 'string' || moderatorNotes.length > 2000)
+    ) {
+      return res.status(400).json({
+        error: 'Moderator notes must be 2000 characters or fewer',
+      });
+    }
+
+    try {
+      const access = await query(
+        'SELECT 1 FROM platform_admins WHERE user_id = $1 LIMIT 1',
+        [moderatorId],
+      );
+
+      if (access.rows.length === 0) {
+        return res.status(403).json({ error: 'Platform moderator access required' });
+      }
+
+      const updated = await query(
+        `UPDATE user_reports
+         SET status = $2,
+             moderator_id = $3,
+             moderator_notes = $4,
+             reviewed_at = NOW(),
+             updated_at = NOW()
+         WHERE id = $1
+         RETURNING id, status, moderator_id AS "moderatorId",
+                   moderator_notes AS "moderatorNotes",
+                   reviewed_at AS "reviewedAt", updated_at AS "updatedAt"`,
+        [
+          req.params.reportId,
+          status,
+          moderatorId,
+          typeof moderatorNotes === 'string' ? moderatorNotes.trim() || null : null,
+        ],
+      );
+
+      if (updated.rows.length === 0) {
+        return res.status(404).json({ error: 'Report not found' });
+      }
+
+      return res.json({ ok: true, report: updated.rows[0] });
+    } catch (error) {
+      console.error('Update moderation report failed:', error);
+      return res.status(500).json({ error: 'Failed to update report' });
     }
   });
 

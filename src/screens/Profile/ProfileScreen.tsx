@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { io } from 'socket.io-client';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../auth/AuthContext';
 import { COLORS, SPACING, TYPOGRAPHY, SHADOWS } from '../../theme';
@@ -139,10 +140,23 @@ const ProfileScreen = () => {
     }
   }, [user?.id, token]);
 
-  useFocusEffect(useCallback(() => { 
-    loadProfile(); 
+  useFocusEffect(useCallback(() => {
+    loadProfile();
     loadUnreadCount();
-  }, [loadProfile, loadUnreadCount]));
+    if (!token) return undefined;
+
+    const socket = io(API_BASE_URL, {
+      transports: ['websocket'],
+      auth: { token },
+    });
+
+    socket.on('notifications:unread-count', (payload: any) => {
+      setUnreadCount(Number(payload?.unreadCount ?? 0));
+    });
+    socket.on('notification:new', () => loadUnreadCount());
+
+    return () => socket.disconnect();
+  }, [loadProfile, loadUnreadCount, token]));
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={COLORS.accent} size="large" /></View>;
   if (error || !profile) return <View style={styles.center}><Text style={styles.errorText}>{error}</Text></View>;

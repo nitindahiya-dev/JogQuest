@@ -13,6 +13,23 @@ export function registerSocialRoutes<T extends RouteContext>(
   const router = Router();
   const { query, requireAuth } = context;
 
+  const emitNotificationUnreadCount = async (userId: string) => {
+    try {
+      const result = await query(
+        `SELECT COUNT(*)::int AS count
+         FROM notifications
+         WHERE user_id = $1 AND read_at IS NULL`,
+        [userId],
+      );
+      context.io?.to(`user:${userId}`).emit(
+        'notifications:unread-count',
+        { unreadCount: Number(result.rows[0]?.count ?? 0) },
+      );
+    } catch (error) {
+      console.error('Failed to broadcast notification unread count:', error);
+    }
+  };
+
 router.get(
   '/api/users/:userId/notifications',
   requireAuth,
@@ -39,19 +56,22 @@ router.get(
       const result = await query(
         `
         SELECT
-          id,
-          type,
-          title,
-          message,
-          territory_id,
-          challenge_id,
-          activity_id,
-          competition_id,
-          created_at,
-          read_at
-        FROM notifications
-        WHERE user_id = $1
-        ORDER BY created_at DESC
+          n.id, n.type, n.title, n.message,
+          n.territory_id, n.challenge_id, n.activity_id, n.competition_id,
+          n.conversation_id, n.message_id, n.created_at, n.read_at,
+          other_user.id AS other_user_id,
+          other_user.username AS other_username,
+          other_user.display_name AS other_display_name,
+          other_user.avatar_url AS other_avatar_url
+        FROM notifications n
+        LEFT JOIN conversations c ON c.id = n.conversation_id
+        LEFT JOIN users other_user
+          ON other_user.id = CASE
+            WHEN c.user_one_id = n.user_id THEN c.user_two_id
+            ELSE c.user_one_id
+          END
+        WHERE n.user_id = $1
+        ORDER BY n.created_at DESC
         LIMIT $2
         `,
         [userId, limit],
@@ -113,6 +133,10 @@ router.patch(
         });
       }
 
+      await emitNotificationUnreadCount(
+        res.locals.authenticatedUserId as string,
+      );
+
       res.json({
         ok: true,
         notification: result.rows[0],
@@ -150,6 +174,8 @@ router.patch(
         `,
         [userId],
       );
+
+      await emitNotificationUnreadCount(userId);
 
       res.json({
         ok: true,

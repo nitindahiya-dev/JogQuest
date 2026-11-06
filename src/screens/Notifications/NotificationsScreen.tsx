@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { io } from 'socket.io-client';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../auth/AuthContext';
 import { COLORS, SPACING, TYPOGRAPHY, SHADOWS } from '../../theme';
@@ -66,7 +67,20 @@ const NotificationsScreen = () => {
   useFocusEffect(
     useCallback(() => {
       loadNotifications();
-    }, [loadNotifications]),
+      if (!token) return undefined;
+
+      const socket = io(API_BASE_URL, {
+        transports: ['websocket'],
+        auth: { token },
+      });
+
+      socket.on('notification:new', () => loadNotifications());
+      socket.on('notifications:unread-count', (payload: any) => {
+        setUnreadCount(Number(payload?.unreadCount ?? 0));
+      });
+
+      return () => socket.disconnect();
+    }, [loadNotifications, token]),
   );
 
   const markAllRead = async () => {
@@ -128,6 +142,22 @@ const NotificationsScreen = () => {
       } catch (error) {
         console.error('Failed to mark notification as read:', error);
       }
+    }
+
+    if (
+      item.type === 'NEW_MESSAGE' &&
+      item.conversation_id &&
+      item.other_user_id
+    ) {
+      navigation.navigate('Chat', {
+        conversationId: item.conversation_id,
+        otherUserId: item.other_user_id,
+        otherUsername: item.other_username || 'user',
+        otherDisplayName:
+          item.other_display_name || item.other_username || 'User',
+        otherAvatarUrl: item.other_avatar_url ?? null,
+      });
+      return;
     }
 
     if (item.competition_id) {
