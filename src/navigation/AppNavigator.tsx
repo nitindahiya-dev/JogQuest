@@ -220,7 +220,7 @@ const MainTabs = () => {
       <Tab.Screen
         name="Activity"
         component={ActivityScreen}
-        options={{ tabBarLabel: 'START' }}
+        options={{ tabBarLabel: 'ACTIVITY' }}
       />
 
       <Tab.Screen

@@ -2,6 +2,7 @@ import dns from 'node:dns';
 dns.setDefaultResultOrder('ipv4first');
 import 'dotenv/config';
 import express from 'express';
+import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
 import { rateLimit } from 'express-rate-limit';
 import { pool, query } from './db.js';
@@ -212,7 +213,7 @@ export const fetchRouteWithRetry =
     throw lastError;
   };
 
-registerRoutes(app, {
+const routeContext: Record<string, any> = {
   avatarUpload,
   calculateRouteDistance,
   cors,
@@ -231,12 +232,15 @@ registerRoutes(app, {
   randomBytes,
   randomUUID,
   requireAuth,
+  io: undefined,
   scryptSync,
   sendTransactionalEmail,
   timingSafeEqual,
   validateActivityGps,
   verifyPassword
-});
+};
+
+registerRoutes(app, routeContext);
 
 const PORT =
   Number(process.env.PORT) || 4000;
@@ -250,6 +254,108 @@ const server = app.listen(
     );
   },
 );
+
+
+// Socket.IO real-time messaging.
+// REST remains responsible for persistence; sockets only deliver committed events.
+const io = new SocketIOServer(server, {
+  cors: {
+    origin: (origin, callback) => {
+      callback(null, !origin || allowedOrigins.has(origin));
+    },
+    methods: ['GET', 'POST'],
+  },
+  transports: ['websocket', 'polling'],
+});
+
+io.use(async (socket, next) => {
+  try {
+    const token = String(socket.handshake.auth?.token ?? '').trim();
+    if (!token) return next(new Error('Authentication required'));
+
+    const session = await query<{ user_id: string }>(
+      `SELECT user_id
+       FROM user_sessions
+       WHERE token_hash = $1 AND expires_at > NOW()
+       LIMIT 1`,
+      [hashSessionToken(token)],
+    );
+
+    if (!session.rows.length) {
+      return next(new Error('Invalid or expired session'));
+    }
+
+    socket.data.userId = session.rows[0].user_id;
+    next();
+  } catch (error) {
+    console.error('Socket authentication failed:', error);
+    next(new Error('Authentication verification failed'));
+  }
+});
+
+routeContext.io = io;
+
+io.on('connection', (socket) => {
+  const userId = socket.data.userId as string;
+
+  // A private per-user room can be used for inbox-level events later.
+  socket.join(`user:${userId}`);
+
+  socket.on('conversation:join', async (payload: unknown, acknowledge?: (result: any) => void) => {
+    try {
+      const conversationId =
+        typeof payload === 'string'
+          ? payload
+          : (payload as any)?.conversationId;
+
+      if (
+        typeof conversationId !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(conversationId)
+      ) {
+        acknowledge?.({ ok: false, error: 'Invalid conversation' });
+        return;
+      }
+
+      const membership = await query(
+        `SELECT 1
+         FROM conversation_participants cp
+         JOIN conversations c ON c.id = cp.conversation_id
+         WHERE cp.conversation_id = $1
+           AND cp.user_id = $2
+           AND NOT EXISTS (
+             SELECT 1
+             FROM user_blocks b
+             WHERE (b.blocker_id = c.user_one_id AND b.blocked_id = c.user_two_id)
+                OR (b.blocker_id = c.user_two_id AND b.blocked_id = c.user_one_id)
+           )
+         LIMIT 1`,
+        [conversationId, userId],
+      );
+
+      if (!membership.rowCount) {
+        acknowledge?.({ ok: false, error: 'Conversation unavailable' });
+        return;
+      }
+
+      await socket.join(`conversation:${conversationId}`);
+      acknowledge?.({ ok: true });
+    } catch (error) {
+      console.error('Socket conversation join failed:', error);
+      acknowledge?.({ ok: false, error: 'Could not join conversation' });
+    }
+  });
+
+  socket.on('conversation:leave', (payload: unknown) => {
+    const conversationId =
+      typeof payload === 'string'
+        ? payload
+        : (payload as any)?.conversationId;
+
+    if (typeof conversationId === 'string') {
+      void socket.leave(`conversation:${conversationId}`);
+    }
+  });
+});
 
 let isShuttingDown = false;
 
@@ -266,6 +372,7 @@ async function shutdown(signal: string): Promise<void> {
 
   // Keep the shutdown timeout active; clear it when shutdown completes.
 
+  io.close();
   server.close(async (serverError) => {
     clearTimeout(forceExitTimer);
     if (serverError) {

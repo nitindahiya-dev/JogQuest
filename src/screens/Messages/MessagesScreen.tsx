@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -130,11 +131,27 @@ const MessagesScreen = () => {
         contentContainerStyle={conversations.length ? styles.list : styles.emptyList}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={styles.emptyIcon}>✉</Text>
-            <Text style={styles.emptyTitle}>No conversations yet</Text>
-            <Text style={styles.muted}>
-              Open another runner’s profile and tap Message to start a conversation.
+            <Text style={styles.emptyIcon}>{error ? '!' : '✉'}</Text>
+            <Text style={styles.emptyTitle}>
+              {error ? 'Could not load conversations' : 'No conversations yet'}
             </Text>
+            <Text style={styles.muted}>
+              {error
+                ? 'Something went wrong while loading your messages. Please try again.'
+                : 'Open another runner’s profile and tap Message to start a conversation.'}
+            </Text>
+            {!!error && (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => loadConversations()}
+                style={({ pressed }) => [
+                  styles.retryButton,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={styles.retryText}>TRY AGAIN</Text>
+              </Pressable>
+            )}
           </View>
         }
         renderItem={({ item }) => {
@@ -147,9 +164,17 @@ const MessagesScreen = () => {
               accessibilityLabel={`Message ${displayName}`}
             >
               <View style={styles.avatar}>
-                <Text style={styles.avatarText}>
-                  {displayName.charAt(0).toUpperCase()}
-                </Text>
+                {item.other_avatar_url ? (
+                  <Image
+                    source={{ uri: item.other_avatar_url }}
+                    style={styles.avatarImage}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <Text style={styles.avatarText}>
+                    {displayName.charAt(0).toUpperCase()}
+                  </Text>
+                )}
               </View>
               <View style={styles.conversationBody}>
                 <View style={styles.row}>
@@ -185,6 +210,19 @@ const styles = StyleSheet.create({
   title: { ...TYPOGRAPHY.h1, color: COLORS.text, marginTop: 4 },
   refreshButton: { borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9 },
   refreshText: { ...TYPOGRAPHY.label, color: COLORS.accent, fontSize: 10 },
+  retryButton: {
+    marginTop: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+    borderRadius: 12,
+    paddingHorizontal: 22,
+    paddingVertical: 11,
+  },
+  retryText: {
+    ...TYPOGRAPHY.label,
+    color: COLORS.accent,
+    fontSize: 11,
+  },
   list: { paddingBottom: 30 },
   emptyList: { flexGrow: 1, justifyContent: 'center' },
   empty: { alignItems: 'center', paddingHorizontal: SPACING.lg },
@@ -194,7 +232,8 @@ const styles = StyleSheet.create({
   error: { ...TYPOGRAPHY.body, color: COLORS.danger, marginBottom: SPACING.md },
   conversation: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.border, gap: 12 },
   pressed: { opacity: 0.7 },
-  avatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: COLORS.accent, alignItems: 'center', justifyContent: 'center' },
+  avatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: COLORS.accent, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  avatarImage: { width: '100%', height: '100%' },
   avatarText: { color: COLORS.background, fontSize: 19, fontWeight: '900' },
   conversationBody: { flex: 1, gap: 6 },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
