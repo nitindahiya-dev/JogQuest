@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { io, type Socket } from 'socket.io-client';
 import { useAuth } from '../../auth/AuthContext';
 import { API_BASE_URL } from '../../config/api';
 import { COLORS, SPACING, TYPOGRAPHY } from '../../theme';
@@ -38,6 +39,7 @@ const MessagesScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const conversationsRequestRef = useRef(0);
 
   const loadConversations = useCallback(async (refresh = false) => {
     if (!token) {
@@ -46,6 +48,7 @@ const MessagesScreen = () => {
       return;
     }
 
+    const requestId = ++conversationsRequestRef.current;
     if (refresh) setRefreshing(true);
     else setLoading(true);
 
@@ -64,19 +67,51 @@ const MessagesScreen = () => {
         throw new Error(data.error || 'Could not load conversations.');
       }
 
+      if (requestId !== conversationsRequestRef.current) return;
       setConversations(Array.isArray(data.conversations) ? data.conversations : []);
     } catch (e) {
+      if (requestId !== conversationsRequestRef.current) return;
       setError(e instanceof Error ? e.message : 'Could not load messages.');
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestId === conversationsRequestRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [token, view]);
 
   useFocusEffect(
     useCallback(() => {
-      loadConversations();
-    }, [loadConversations]),
+      void loadConversations();
+      if (!token) return undefined;
+
+      const socket: Socket = io(API_BASE_URL, {
+        transports: ['websocket'],
+        auth: { token },
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 10000,
+      });
+
+      const refreshInbox = () => {
+        void loadConversations(true);
+      };
+
+      // Reconcile the inbox after initial connection and every reconnect.
+      socket.on('connect', refreshInbox);
+      // This event is emitted to the recipient's user room for every new message,
+      // including when an in-app notification is suppressed for an active chat.
+      socket.on('conversation:updated', refreshInbox);
+      socket.on('conversation:settings-updated', refreshInbox);
+      socket.on('conversation:hidden', refreshInbox);
+
+      return () => {
+        conversationsRequestRef.current += 1;
+        socket.removeAllListeners();
+        socket.disconnect();
+      };
+    }, [loadConversations, token]),
   );
 
   const openConversation = (item: Conversation) => {
