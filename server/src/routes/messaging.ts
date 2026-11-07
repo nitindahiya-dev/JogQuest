@@ -202,6 +202,11 @@ export function registerMessagingRoutes<T extends RouteContext>(
         return res.status(404).json({ error: 'Conversation not found' });
       }
 
+      getIO()?.to(`user:${userId}`).emit('conversation:settings-updated', {
+        conversationId,
+        ...result.rows[0],
+      });
+
       return res.json({ conversation: result.rows[0] });
     } catch (error) {
       console.error('Update conversation settings failed:', error);
@@ -224,6 +229,10 @@ export function registerMessagingRoutes<T extends RouteContext>(
       if (!result.rowCount) {
         return res.status(404).json({ error: 'Conversation not found' });
       }
+
+      getIO()?.to(`user:${userId}`).emit('conversation:hidden', {
+        conversationId: req.params.conversationId,
+      });
 
       return res.json({ success: true });
     } catch (error) {
@@ -831,6 +840,11 @@ router.get('/api/messages/conversations', requireAuth, async (req, res) => {
             conversationId: req.params.conversationId,
             message: responseMessage,
           });
+        getIO()?.to(`user:${userId}`)
+          .emit('conversation:updated', {
+            conversationId: req.params.conversationId,
+            message: responseMessage,
+          });
 
         return res.status(201).json({ message: responseMessage });
       } catch (error) {
@@ -1041,6 +1055,11 @@ router.get('/api/messages/conversations', requireAuth, async (req, res) => {
               conversationId: req.params.conversationId,
               message,
             });
+          getIO()?.to(`user:${userId}`)
+            .emit('conversation:updated', {
+              conversationId: req.params.conversationId,
+              message,
+            });
         }
 
         res.status(isNewMessage ? 201 : 200).json({ message });
@@ -1202,9 +1221,21 @@ router.get('/api/messages/conversations', requireAuth, async (req, res) => {
           'UPDATE conversations SET updated_at = NOW() WHERE id = $1',
           [req.params.conversationId],
         );
+        const participantUsers = await client.query(
+          `SELECT user_id FROM conversation_participants
+           WHERE conversation_id = $1`,
+          [req.params.conversationId],
+        );
         await client.query('COMMIT');
         getIO()?.to(`conversation:${req.params.conversationId}`)
           .emit('message:updated', updated.rows[0]);
+
+        for (const participant of participantUsers.rows) {
+          getIO()?.to(`user:${participant.user_id}`)
+            .emit('conversation:updated', {
+              conversationId: req.params.conversationId,
+            });
+        }
         res.json({ message: updated.rows[0] });
       } catch (error) {
         await client.query('ROLLBACK').catch(() => undefined);
@@ -1266,6 +1297,12 @@ router.get('/api/messages/conversations', requireAuth, async (req, res) => {
           );
         }
 
+        const participantUsers = await client.query(
+          `SELECT user_id FROM conversation_participants
+           WHERE conversation_id = $1`,
+          [req.params.conversationId],
+        );
+
         await client.query('COMMIT');
         // Cleanup is retryable; a Storage failure does not undo message deletion.
         await processAttachmentCleanup();
@@ -1274,6 +1311,14 @@ router.get('/api/messages/conversations', requireAuth, async (req, res) => {
             id: req.params.messageId,
             deleted_at: new Date().toISOString(),
           });
+
+        for (const participant of participantUsers.rows) {
+          getIO()?.to(`user:${participant.user_id}`)
+            .emit('conversation:updated', {
+              conversationId: req.params.conversationId,
+            });
+        }
+
         res.json({ ok: true });
       } catch (error) {
         await client.query('ROLLBACK').catch(() => undefined);

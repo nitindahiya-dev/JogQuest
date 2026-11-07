@@ -113,6 +113,15 @@ const ChatScreen = () => {
 
   const [messages, setMessages] = useState<Message[]>([]);
   const messagesListRef = useRef<FlatList<Message>>(null);
+  const messagesLoadRequestRef = useRef(0);
+  const messageRealtimeVersionRef = useRef(0);
+  const messageRealtimeVersionsRef = useRef(new Map<string, number>());
+  const markRealtimeMessageChange = useCallback((messageId: string) => {
+    messageRealtimeVersionsRef.current.set(
+      messageId,
+      ++messageRealtimeVersionRef.current,
+    );
+  }, []);
   const messagingSocketRef = useRef<Socket | null>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const remoteTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -149,6 +158,9 @@ const ChatScreen = () => {
       return;
     }
 
+    const requestId = ++messagesLoadRequestRef.current;
+    const realtimeVersionAtRequest = messageRealtimeVersionRef.current;
+
     try {
       setError('');
       const response = await fetch(
@@ -160,13 +172,42 @@ const ChatScreen = () => {
       if (!response.ok) {
         throw new Error(data.error || 'Could not load messages.');
       }
+      if (requestId !== messagesLoadRequestRef.current) return;
       if (!conversationBlockedRef.current) {
-        setMessages(Array.isArray(data.messages) ? data.messages : []);
+        const fetchedMessages = Array.isArray(data.messages) ? data.messages : [];
+        setMessages(current => {
+          const currentById = new Map(current.map(message => [message.id, message]));
+          const fetchedIds = new Set(fetchedMessages.map(message => message.id));
+          const merged = fetchedMessages.map(message => {
+            const currentMessage = currentById.get(message.id);
+            const changedDuringRequest =
+              (messageRealtimeVersionsRef.current.get(message.id) ?? 0) >
+              realtimeVersionAtRequest;
+            return changedDuringRequest && currentMessage
+              ? currentMessage
+              : message;
+          });
+          for (const currentMessage of current) {
+            const changedDuringRequest =
+              (messageRealtimeVersionsRef.current.get(currentMessage.id) ?? 0) >
+              realtimeVersionAtRequest;
+            if (changedDuringRequest && !fetchedIds.has(currentMessage.id)) {
+              merged.push(currentMessage);
+            }
+          }
+          return merged.sort(
+            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+          );
+        });
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load messages.');
+      if (requestId === messagesLoadRequestRef.current) {
+        setError(e instanceof Error ? e.message : 'Could not load messages.');
+      }
     } finally {
-      setLoading(false);
+      if (requestId === messagesLoadRequestRef.current) {
+        setLoading(false);
+      }
     }
   }, [conversationId, token]);
 
@@ -232,12 +273,15 @@ const ChatScreen = () => {
             }
 
             setOtherUserOnline(result.otherUserOnline === true);
+            // Recover messages missed during a disconnect or reconnect.
+            void loadMessages();
           },
         );
       };
 
       const appendIncomingMessage = (incoming: Message) => {
         if (conversationBlockedRef.current || !incoming?.id) return;
+        markRealtimeMessageChange(incoming.id);
         setMessages(current => {
           if (current.some(message => message.id === incoming.id)) return current;
           return [...current, incoming].sort(
@@ -248,6 +292,7 @@ const ChatScreen = () => {
 
       const updateIncomingMessage = (incoming: Partial<Message> & { id: string }) => {
         if (conversationBlockedRef.current) return;
+        markRealtimeMessageChange(incoming.id);
         setMessages(current => current.map(message =>
           message.id === incoming.id ? { ...message, ...incoming } : message,
         ));
@@ -255,6 +300,7 @@ const ChatScreen = () => {
 
       const deleteIncomingMessage = (event: { id: string; deleted_at?: string }) => {
         if (conversationBlockedRef.current || !event?.id) return;
+        markRealtimeMessageChange(event.id);
         setMessages(current => current.map(message =>
           message.id === event.id
             ? { ...message, body: '', deleted_at: event.deleted_at ?? new Date().toISOString() }
@@ -309,6 +355,7 @@ const ChatScreen = () => {
           !Array.isArray(event.reactions)
         ) return;
 
+        markRealtimeMessageChange(event.messageId);
         setMessages(current => current.map(message => {
           if (message.id !== event.messageId) return message;
 
@@ -372,6 +419,8 @@ const ChatScreen = () => {
       messagingSocket.on('presence:update', handlePresenceUpdate);
 
       return () => {
+        // Ignore any history request still in flight after leaving this chat.
+        messagesLoadRequestRef.current += 1;
         if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
         if (remoteTypingTimerRef.current) {
           clearTimeout(remoteTypingTimerRef.current);
@@ -389,7 +438,7 @@ const ChatScreen = () => {
           messagingSocketRef.current = null;
         }
       };
-    }, [conversationId, token, loadMessages, loadBlockStatus]),
+    }, [conversationId, token, loadMessages, loadBlockStatus, markRealtimeMessageChange]),
   );
 
   const chooseImage = async () => {

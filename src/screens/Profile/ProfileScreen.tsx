@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '../../config/api';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -28,6 +28,7 @@ const ProfileScreen = () => {
   const [profile, setProfile] = useState<any>(null);
   const [competitionBadges, setCompetitionBadges] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const unreadCountRequestRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -127,6 +128,7 @@ const ProfileScreen = () => {
   }, [user?.id]);
 
   const loadUnreadCount = useCallback(async () => {
+    const requestId = ++unreadCountRequestRef.current;
     if (!user?.id) return;
     try {
       const response = await fetch(`${API_BASE_URL}/api/users/${user.id}/notifications`, {
@@ -134,9 +136,12 @@ const ProfileScreen = () => {
       });
       if (!response.ok) return;
       const data: any = await response.json();
+      if (requestId !== unreadCountRequestRef.current) return;
       setUnreadCount(Number(data.unreadCount ?? 0));
     } catch (err) {
-      console.error('Failed to load notification count:', err);
+      if (requestId === unreadCountRequestRef.current) {
+        console.error('Failed to load notification count:', err);
+      }
     }
   }, [user?.id, token]);
 
@@ -150,12 +155,16 @@ const ProfileScreen = () => {
       auth: { token },
     });
 
+    socket.on('connect', () => loadUnreadCount());
     socket.on('notifications:unread-count', (payload: any) => {
       setUnreadCount(Number(payload?.unreadCount ?? 0));
     });
     socket.on('notification:new', () => loadUnreadCount());
 
-    return () => socket.disconnect();
+    return () => {
+      unreadCountRequestRef.current += 1;
+      socket.disconnect();
+    };
   }, [loadProfile, loadUnreadCount, token]));
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={COLORS.accent} size="large" /></View>;

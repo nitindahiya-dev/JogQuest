@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '../../config/api';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -28,8 +28,12 @@ const NotificationsScreen = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const notificationsRequestRef = useRef(0);
+  const notificationStateRevisionRef = useRef(0);
 
   const loadNotifications = useCallback(async () => {
+    const requestId = ++notificationsRequestRef.current;
+    const stateRevisionAtRequest = notificationStateRevisionRef.current;
     if (!userId) {
       setNotifications([]);
       setUnreadCount(0);
@@ -53,14 +57,33 @@ const NotificationsScreen = () => {
       }
 
       const data: any = await response.json();
+      if (requestId !== notificationsRequestRef.current) return;
 
-      setNotifications(data.notifications || []);
-      setUnreadCount(data.unreadCount || 0);
+      if (stateRevisionAtRequest === notificationStateRevisionRef.current) {
+        setNotifications(data.notifications || []);
+        setUnreadCount(Number(data.unreadCount ?? 0));
+      } else {
+        // Keep newer local read states while accepting newly fetched notifications.
+        setNotifications(current => {
+          const currentById = new Map(current.map(item => [item.id, item]));
+          return (data.notifications || []).map((item: any) => {
+            const existing = currentById.get(item.id);
+            return existing?.read_at && !item.read_at
+              ? { ...item, read_at: existing.read_at }
+              : item;
+          });
+        });
+        // A newer socket/read action owns the unread count.
+      }
     } catch (e) {
-      console.error('Failed to load notifications:', e);
+      if (requestId === notificationsRequestRef.current) {
+        console.error('Failed to load notifications:', e);
+      }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestId === notificationsRequestRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [userId, token]);
 
@@ -74,12 +97,20 @@ const NotificationsScreen = () => {
         auth: { token },
       });
 
-      socket.on('notification:new', () => loadNotifications());
+      socket.on('connect', () => loadNotifications());
+      socket.on('notification:new', () => {
+        notificationStateRevisionRef.current += 1;
+        loadNotifications();
+      });
       socket.on('notifications:unread-count', (payload: any) => {
+        notificationStateRevisionRef.current += 1;
         setUnreadCount(Number(payload?.unreadCount ?? 0));
       });
 
-      return () => socket.disconnect();
+      return () => {
+        notificationsRequestRef.current += 1;
+        socket.disconnect();
+      };
     }, [loadNotifications, token]),
   );
 
@@ -103,6 +134,7 @@ const NotificationsScreen = () => {
         throw new Error(`Failed to mark notifications as read: ${response.status}`);
       }
 
+      notificationStateRevisionRef.current += 1;
       setNotifications(prev =>
         prev.map(notification => ({
           ...notification,
@@ -130,6 +162,7 @@ const NotificationsScreen = () => {
         );
 
         if (response.ok) {
+          notificationStateRevisionRef.current += 1;
           setNotifications(prev =>
             prev.map(notification =>
               notification.id === item.id
